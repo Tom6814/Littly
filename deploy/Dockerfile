@@ -9,9 +9,10 @@ FROM node:24-bookworm-slim AS build
 WORKDIR /app
 # pnpm 版本由根 package.json packageManager 锁定
 RUN corepack enable
-# 清单先行，命中层缓存
+# 清单先行，命中层缓存（scripts/ 也是 install 前置：根 postinstall 引用）
 COPY harness/package.json harness/pnpm-lock.yaml harness/pnpm-workspace.yaml ./
 COPY harness/patches ./patches
+COPY harness/scripts ./scripts
 RUN pnpm install --frozen-lockfile
 # 源码与产物构建
 COPY harness ./harness

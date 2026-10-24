@@ -11888,6 +11888,9 @@ importers:
       '@littly/tools':
         specifier: workspace:*
         version: link:../tools
+      '@littly/voice':
+        specifier: workspace:*
+        version: link:../voice
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
@@ -12037,6 +12040,21 @@ importers:
       '@littly/memory':
         specifier: workspace:*
         version: link:../memory
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
+
+  packages/littly/voice:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/llm':
+        specifier: workspace:*
+        version: link:../llm
       '@littly/storage':
         specifier: workspace:*
         version: link:../storage
