@@ -565,9 +565,8 @@
     { "path": "./packages/lsp/lsp" },
     { "path": "./packages/lsp/lsp-stdio" },
     { "path": "./packages/lsp/tool-lsp" },
-    { "path": "./apps/cli" },
-    { "path": "./apps/plugin-market-generator" },
-    { "path": "./apps/desktop-host" },
-    { "path": "./apps/desktop/tsconfig.host.json" }
+    { "path": "./packages/client/shortcuts/tsconfig.host.json" },
+    { "path": "./packages/littly/storage" },
+    { "path": "./apps/cli" }
   ]
 }

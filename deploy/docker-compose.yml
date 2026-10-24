@@ -1,0 +1,60 @@
+# Littly 单机编排：harness 核心 + SnowLuma（QQ 账号协议端）+ bilibili sidecar。
+# 说明：
+# - littly：dsh-base 内核 chat profile，SQLite 落持久卷；先单独可跑。
+# - snowluma：需 SYS_PTRACE 注入 NTQQ，官方 Docker 镜像内含 QQ+Xvfb+noVNC（见 docs/SNOWLUMA-CONTRACT.md §1）。
+#   镜像名/版本以 SnowLuma Releases 为准（早期项目迭代快，锁 tag），首次启用需 noVNC(6081) 扫码。
+# - bili：bili-cli fork（Python）以 MCP 模式挂进 harness（M3 接入）。
+services:
+  littly:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: littly-harness
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      TZ: Asia/Shanghai
+      DSH_HOME: /app/data/dsh-home
+      # 密钥经 env 注入（勿写进镜像）；模型配置也可后续在 DB KV 里配
+      # OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_CHAT_MODEL ...
+    volumes:
+      - littly-data:/app/data
+
+  snowluma:
+    image: ghcr.io/snowluma/snowluma:latest  # TODO(M2): 锁定具体 tag
+    container_name: littly-snowluma
+    restart: unless-stopped
+    profiles: ["qq"]
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp=unconfined
+    shm_size: "2gb"
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "3001:3001"   # OneBot 正向 WS（littly 连这里）
+      - "5099:5099"   # WebUI（初始密码仅首启日志打印一次）
+      - "6081:6081"   # noVNC 扫码登录（勿暴露公网）
+    volumes:
+      - snowluma-data:/app/data
+
+  bili:
+    build:
+      context: ../sidecars/bili
+      dockerfile: Dockerfile
+    container_name: littly-bili
+    restart: unless-stopped
+    profiles: ["bili"]
+    environment:
+      TZ: Asia/Shanghai
+      BILI_CLI_HOME: /app/data/bili-cli   # AI 自己的 bilibili 账号（独立 home）
+    volumes:
+      - bili-data:/app/data
+
+volumes:
+  littly-data:
+  snowluma-data:
+  bili-data:

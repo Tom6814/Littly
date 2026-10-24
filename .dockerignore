@@ -1,0 +1,13 @@
+# Docker 构建上下文只取 harness/（deploy/Dockerfile 的 COPY 路径），其余全忽略
+*
+!harness
+harness/node_modules
+harness/**/node_modules
+harness/.dsh-home
+harness/**/dist
+harness/**/lib
+harness/**/*.tsbuildinfo
+harness/website
+harness/snapshots
+harness/python
+harness/docs
