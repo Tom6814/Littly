@@ -571,7 +571,7 @@
     { "path": "./packages/littly/llm" },
     { "path": "./packages/littly/memory" },
     { "path": "./packages/littly/tools" },
-    { "path": "./packages/littly/agents" },
+    { "path": "./packages/littly/agents" },{ "path": "./packages/littly/console-api" },{ "path": "./packages/littly/channel-telegram" },{ "path": "./packages/littly/channel-snowluma" },{ "path": "./packages/littly/scheduler" },
     { "path": "./packages/littly/bundle" },
     { "path": "./apps/cli" }
   ]

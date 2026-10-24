@@ -1,0 +1,29 @@
+{
+  "name": "@littly/console-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@littly/agents": "workspace:*",
+    "@littly/llm": "workspace:*",
+    "@littly/memory": "workspace:*",
+    "@littly/persona": "workspace:*",
+    "@littly/storage": "workspace:*",
+    "@littly/tools": "workspace:*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/schemastery": "workspace:~"
+  }
+}

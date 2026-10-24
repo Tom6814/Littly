@@ -25,7 +25,11 @@
     "@littly/memory": "workspace:*",
     "@littly/persona": "workspace:*",
     "@littly/storage": "workspace:*",
-    "@littly/tools": "workspace:*"
+    "@littly/tools": "workspace:*",
+    "@littly/console-api": "workspace:*",
+    "@littly/channel-telegram": "workspace:*",
+    "@littly/channel-snowluma": "workspace:*",
+    "@littly/scheduler": "workspace:*"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:~"
