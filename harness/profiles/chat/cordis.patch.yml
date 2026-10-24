@@ -1,0 +1,74 @@
+# Littly chat profile 用户层：裁掉 coding-agent 专属行与 DeepSeek 专属行。
+# 依据 docs/PORTING-GUIDE.md §10 剥离清单；按 id 寻址、last-write-wins。
+
+# --- 编码工具链 ---
+- id: working-directory
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: subprocess
+  disabled: true
+- id: sandbox
+  disabled: true
+- id: sandbox-policy
+  disabled: true
+- id: bash-sandbox
+  disabled: true
+- id: pwsh-sandbox
+  disabled: true
+- id: shell-env
+  disabled: true
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: fs-observation-policy
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: fs-sandbox
+  disabled: true
+
+# --- 编码流程（plan/todo/goal/workflow） ---
+- id: goal
+  disabled: true
+- id: goal-round-driver
+  disabled: true
+- id: command-goal
+  disabled: true
+- id: plan-mode
+  disabled: true
+- id: tool-todo
+  disabled: true
+- id: tool-goal
+  disabled: true
+- id: workflow-ptc
+  disabled: true
+- id: tool-workflow
+  disabled: true
+
+# --- DeepSeek 平台专属 ---
+- id: deepseek-llm-api-extensions
+  disabled: true
+- id: session-log-deepseek
+  disabled: true
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: deepseek-account
+  disabled: true
+- id: web-search-deepseek
+  disabled: true
+- id: web-deepseek-api
+  disabled: true
+- id: llm-deepseek
+  disabled: true
+- id: llm-deepseek-account
+  disabled: true
+
+# --- 遥测 ---
+- id: otel
+  disabled: true
+- id: session-telemetry-otel
+  disabled: true

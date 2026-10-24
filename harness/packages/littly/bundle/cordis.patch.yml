@@ -1,0 +1,5 @@
+# @littly/bundle — Littly 业务插件装配层。
+# 后续 persona/memory/agents/scheduler/console-api/channels 的行都加在这里。
+- insert:
+    - id: littly-storage
+      name: '@littly/storage'

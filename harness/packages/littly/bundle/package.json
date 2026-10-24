@@ -1,0 +1,15 @@
+{
+  "name": "@littly/bundle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@littly/storage": "file:../storage"
+  }
+}

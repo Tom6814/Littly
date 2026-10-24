@@ -11,6 +11,7 @@ lib/
 
 # runtime data
 data/
+.dsh-home/
 *.db
 *.db-journal
 *.db-wal
