@@ -54,7 +54,7 @@ function SettingsObjectView({
   nestedTitles?: Record<string, string>;
 }) {
   const primitives = Object.entries(value).filter(([, v]) => typeof v !== 'object' || v === null);
-  const nested = Object.entries(value).filter(([, v]) => isRecord(v));
+  const nested = Object.entries(value).filter((e): e is [string, Record<string, unknown>] => isRecord(e[1]));
   return (
     <Stack spacing={2.5}>
       {primitives.length > 0 && (

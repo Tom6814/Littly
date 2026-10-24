@@ -8,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { LittlyStorage, MemoryRow } from '@littly/storage'
 import { chatComplete, embedTexts, encodeEmbedding, getAIConfig } from '@littly/llm'
-import { lexicalRelevance, parseEmbedding, scoreMemory } from './score.ts'
+import { lexicalRelevance, parseEmbedding, scoreMemory, cosineSimilarity } from './score.ts'
 
 export const name = 'littly-memory'
 
@@ -56,8 +56,11 @@ export class LittlyMemory {
       const vectors = await embedTexts(this.storage, pending.map((r) => r.content))
       const stmt = this.storage.prepare('UPDATE memories SET embedding = ? WHERE id = ?')
       for (let i = 0; i < pending.length; i++) {
+        const row = pending[i]
+        const vec = vectors[i]
+        if (!row || !vec) continue
         try {
-          stmt.run(encodeEmbedding(cfg.embeddingModel, vectors[i]), pending[i].id)
+          stmt.run(encodeEmbedding(cfg.embeddingModel, vec), row.id)
         } catch {
           // 单行失败吞掉，检索侧该行回退词法
         }
@@ -101,7 +104,7 @@ export class LittlyMemory {
         if (queryVec) {
           const env = parseEmbedding(m.embedding, cfg!.embeddingModel)
           if (env) {
-            relevance = (Math.max(-1, Math.min(1, cosine(queryVec!, env.v))) + 1) / 2
+            relevance = (Math.max(-1, Math.min(1, cosineSimilarity(queryVec, env.v))) + 1) / 2
           }
         }
         return scoreMemory(relevance, m.importance, m.event_time || m.recorded_at, m.category, m.volatility)
@@ -198,7 +201,7 @@ export class LittlyMemory {
   }
 
   /** 翻旧账：淡忘池（时间窗）+ 历史原文（无窗）。 */
-  recall(botId: string, sender: string, query: string, daysBack = 90): {
+  recall(botId: string, sender: string, query: string, daysBack: number = 90): {
     faded: MemoryRow[]
     messages: Array<{ id: string; role: string; content: string; createdAt: string }>
   } {
@@ -285,7 +288,7 @@ export class LittlyMemory {
     return { before, deleted, compressed, kept: before - deleted - compressed * Math.max(0, 1), recentProtected: hardIds.size }
   }
 
-  maybeAutoConsolidate = async (botId: string, sender: string): Promise<void> => {
+  async maybeAutoConsolidate(botId: string, sender: string): Promise<void> {
     try {
       const bot = this.storage.prepare('SELECT ai_memory_consolidate_threshold FROM bots WHERE id = ?').get(botId) as { ai_memory_consolidate_threshold: number } | undefined
       const threshold = bot?.ai_memory_consolidate_threshold ?? 40
@@ -314,10 +317,8 @@ export class LittlyMemory {
       )
       // 可见窗口起点：倒数 visibleWindow 条的第一条
       const boundaryIdx = Math.max(0, candidates.length - visibleWindow)
-      const boundaryId = candidates[boundaryIdx]?.id
       const boundaryTime = candidates[boundaryIdx]?.created_at
-      const eligible = candidates.filter((c) => !existing?.lastMsgId || c.id !== existing.lastMsgId)
-      const newOnes = eligible.filter((c) => {
+      const newOnes = candidates.filter((c) => {
         if (existing?.lastMsgId) {
           const lastIdx = candidates.findIndex((x) => x.id === existing.lastMsgId)
           return lastIdx >= 0 ? candidates.indexOf(c) > lastIdx : true
@@ -325,6 +326,8 @@ export class LittlyMemory {
         return true
       }).filter((c) => boundaryTime && c.created_at < boundaryTime).slice(0, MAX_CHUNK_PER_TURN)
       if (newOnes.length < SUMMARIZE_THRESHOLD) return existing ? { summary: existing.summary } : null
+      const last = newOnes[newOnes.length - 1]
+      if (!last) return existing ? { summary: existing.summary } : null
       const chunk = newOnes.map((c) => `[${c.role === 'user' ? '对方' : '我'}] ${c.content}`).join('\n')
       let summary: string | null = null
       try {
@@ -337,7 +340,6 @@ export class LittlyMemory {
         summary = null
       }
       if (!summary) return existing ? { summary: existing.summary } : null
-      const last = newOnes[newOnes.length - 1]
       this.storage.prepare(
         'INSERT INTO history_summaries (id, bot_id, sender, summary, last_msg_id, last_msg_at, msg_count, updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(bot_id, sender) DO UPDATE SET summary=excluded.summary, last_msg_id=excluded.last_msg_id, last_msg_at=excluded.last_msg_at, msg_count=excluded.msg_count, updated_at=excluded.updated_at',
       ).run(randomUUID(), botId, sender, summary, last.id, last.created_at, newOnes.length, new Date().toISOString())
@@ -349,17 +351,9 @@ export class LittlyMemory {
 }
 
 function cosine(a: number[], b: number[]): number {
-  let dot = 0
-  let na = 0
-  let nb = 0
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    na += a[i] * a[i]
-    nb += b[i] * b[i]
-  }
-  if (na === 0 || nb === 0) return 0
-  return dot / (Math.sqrt(na) * Math.sqrt(nb))
+  return cosineSimilarity(a, b)
 }
+void cosine
 
 export function apply(ctx: Context, _config: Config): void {
   const memory = new LittlyMemory(ctx, ctx.littlyStorage as LittlyStorage)

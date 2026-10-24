@@ -12,6 +12,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { MIGRATIONS } from './schema.ts'
 
+export * from './rows.ts'
+export { MIGRATIONS }
+
 export const name = 'littly-storage'
 
 declare module '@deepseek-ai/cordis' {
@@ -67,8 +70,14 @@ export class LittlyStorage {
     }
   }
 
-  prepare(sql: string): Statement {
-    return this.db.prepare(sql)
+  prepare(sql: string, ...params: unknown[]): Statement {
+    const stmt = this.db.prepare(sql)
+    const bound = params.length > 0 ? params : null
+    return {
+      run: (...more: unknown[]) => stmt.run(...([...(bound ?? []), ...more] as never[])) as { changes: number | bigint },
+      get: (...more: unknown[]) => stmt.get(...([...(bound ?? []), ...more] as never[])),
+      all: (...more: unknown[]) => stmt.all(...([...(bound ?? []), ...more] as never[])),
+    }
   }
 
   /** 单条 JSON 取值便捷读（global_settings 等键值面）。 */

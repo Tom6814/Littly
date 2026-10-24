@@ -27,6 +27,7 @@ export function trimHistoryByBudget<T extends { content: string }>(messages: T[]
   let used = 0
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]
+    if (!m) continue
     if (kept.length > 0 && used + m.content.length > maxChars) break
     kept.unshift(m)
     used += m.content.length

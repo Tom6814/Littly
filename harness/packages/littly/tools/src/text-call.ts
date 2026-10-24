@@ -87,7 +87,9 @@ export function extractTextToolCall(text: string): TextToolParseResult | null {
   ANY_TAG_RE.lastIndex = 0
   let m: RegExpExecArray | null
   while ((m = ANY_TAG_RE.exec(text)) !== null) {
-    const [full, closing, tag] = m
+    const closing = m[1] ?? ''
+    const tag = m[2]
+    if (!tag) continue
     const tagStart = m.index
     const gt = text.indexOf('>', tagStart)
     const tagEnd = gt < 0 ? text.length : gt + 1

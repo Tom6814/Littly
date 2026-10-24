@@ -515,7 +515,7 @@ export default function ChatPage() {
 
   const toolChips =
     toolCalls.length > 0 ? (
-      <Stack direction="row" spacing={0.75} sx={{ px: { xs: 1.5, sm: 3 }, pb: 0.5, flexWrap: 'wrap', useFlexGap: true }}>
+      <Stack direction="row" spacing={0.75} sx={{ px: { xs: 1.5, sm: 3 }, pb: 0.5, flexWrap: 'wrap' }} useFlexGap>
         {toolCalls.map((t) => (
           <Chip
             key={t.id}

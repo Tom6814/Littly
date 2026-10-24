@@ -162,7 +162,8 @@ export const SCENE_LINES: Record<string, string> = {
 }
 
 export function sceneFor(channel?: string): string {
-  return SCENE_LINES[channel === 'qqp' ? 'qq' : (channel ?? 'web')] ?? SCENE_LINES.web
+  const fallback = SCENE_LINES.web ?? ''
+  return SCENE_LINES[channel === 'qqp' ? 'qq' : (channel ?? 'web')] ?? fallback
 }
 
 export const CHANNEL_TAG_RULE =

@@ -3,7 +3,7 @@
  * 非流式单响应；工具调用、thinking 抽取（reasoning/reasoning_content/thinking +
  * <think> 标签兜底）、GLM extra-body、tool_choice。
  */
-import { getAIConfig, resolveModel, withRetry, type LittlyAIConfig } from './config.ts'
+import { getAIConfig, resolveModel, withRetry } from './config.ts'
 import type { LittlyStorage } from '@littly/storage'
 
 export interface ToolCall {
@@ -26,13 +26,13 @@ export interface ToolDef {
 }
 
 export interface ChatCompleteOptions {
-  model?: string
-  temperature?: number
-  tools?: ToolDef[]
-  toolChoice?: 'auto' | 'none' | 'required'
-  enableThinking?: boolean
-  maxTokens?: number
-  retries?: number
+  model?: string | undefined
+  temperature?: number | undefined
+  tools?: ToolDef[] | undefined
+  toolChoice?: 'auto' | 'none' | 'required' | undefined
+  enableThinking?: boolean | undefined
+  maxTokens?: number | undefined
+  retries?: number | undefined
 }
 
 export interface ChatResult {
@@ -47,8 +47,7 @@ export function extractThinking(message: Record<string, unknown>, content: strin
   const direct = (message.reasoning ?? message.reasoning_content ?? message.thinking) as string | undefined
   if (direct && typeof direct === 'string' && direct.trim()) return direct.trim()
   const m = /<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/i.exec(content)
-  if (m) return m[1].trim()
-  return ''
+  return m?.[1]?.trim() ?? ''
 }
 
 /** 旧 client.ts — safeParseArgs：坏 JSON 回退 {_raw}。 */
@@ -103,7 +102,7 @@ export async function chatComplete(
     }
     const message = json.choices?.[0]?.message ?? {}
     const content = typeof message.content === 'string' ? message.content : ''
-    const thinking = extractThinking(message, content)
+    const thinking = extractThinking(message as Record<string, unknown>, content)
     const rawCalls = (message.tool_calls ?? []) as Array<{
       id?: string
       function?: { name?: string; arguments?: string }

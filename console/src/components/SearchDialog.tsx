@@ -10,6 +10,22 @@ import TextField from '@mui/material/TextField';
 import InputAdornment from '@mui/material/InputAdornment';
 import SearchIcon from '@mui/icons-material/Search';
 import Typography from '@mui/material/Typography';
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import ForumIcon from '@mui/icons-material/Forum';
+import FaceIcon from '@mui/icons-material/Face';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import GavelIcon from '@mui/icons-material/Gavel';
+import PeopleIcon from '@mui/icons-material/People';
+import PsychologyIcon from '@mui/icons-material/Psychology';
+import EditNoteIcon from '@mui/icons-material/EditNote';
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import TuneIcon from '@mui/icons-material/Tune';
+import SettingsIcon from '@mui/icons-material/Settings';
+import ExtensionIcon from '@mui/icons-material/Extension';
+import OndemandVideoIcon from '@mui/icons-material/OndemandVideo';
+import BugReportIcon from '@mui/icons-material/BugReport';
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { contacts } from '../api/endpoints';
@@ -24,22 +40,22 @@ interface NavItem {
 }
 
 export const SEARCHABLE_PAGES: NavItem[] = [
-  { label: '聊天', path: '/chat', keywords: '对话 会话 消息 chat' },
-  { label: '总览', path: '/console/dashboard', keywords: '仪表 活动 统计 dashboard' },
-  { label: '角色', path: '/console/characters', keywords: '角色卡 人格 character' },
-  { label: '世界书', path: '/console/worldbook', keywords: '词条 关键词 worldbook' },
-  { label: '成长', path: '/console/growth', keywords: '成长档案 提议 审批 growth' },
-  { label: '联系人', path: '/console/contacts', keywords: '关系 通讯录 contacts' },
-  { label: '记忆', path: '/console/memories', keywords: '记忆 淡忘 整理 memories' },
-  { label: '日记', path: '/console/diary', keywords: '日记 diary' },
-  { label: '相册', path: '/console/album', keywords: '照片 相册 album' },
-  { label: '定时消息', path: '/console/scheduled', keywords: '计划 定时 scheduled' },
-  { label: '铁律', path: '/console/rules', keywords: '规则 persona rules' },
-  { label: '机器人设置', path: '/console/settings-bot', keywords: '参数 渠道 settings bot' },
-  { label: '全局设置', path: '/console/settings-global', keywords: 'AI 服务 平台 settings' },
-  { label: '插件', path: '/console/plugins', keywords: 'MCP 技能 工具 plugins' },
-  { label: 'Bilibili', path: '/console/bili', keywords: 'B站 扫码 bilibili' },
-  { label: '调试', path: '/console/debug', keywords: '提示词 审计 debug' },
+  { label: '聊天', path: '/chat', icon: <ForumIcon fontSize="small" />, keywords: '对话 会话 消息 chat' },
+  { label: '总览', path: '/console/dashboard', icon: <DashboardIcon fontSize="small" />, keywords: '仪表 活动 统计 dashboard' },
+  { label: '角色', path: '/console/characters', icon: <FaceIcon fontSize="small" />, keywords: '角色卡 人格 character' },
+  { label: '世界书', path: '/console/worldbook', icon: <MenuBookIcon fontSize="small" />, keywords: '词条 关键词 worldbook' },
+  { label: '成长', path: '/console/growth', icon: <TrendingUpIcon fontSize="small" />, keywords: '成长档案 提议 审批 growth' },
+  { label: '联系人', path: '/console/contacts', icon: <PeopleIcon fontSize="small" />, keywords: '关系 通讯录 contacts' },
+  { label: '记忆', path: '/console/memories', icon: <PsychologyIcon fontSize="small" />, keywords: '记忆 淡忘 整理 memories' },
+  { label: '日记', path: '/console/diary', icon: <EditNoteIcon fontSize="small" />, keywords: '日记 diary' },
+  { label: '相册', path: '/console/album', icon: <PhotoLibraryIcon fontSize="small" />, keywords: '照片 相册 album' },
+  { label: '定时消息', path: '/console/scheduled', icon: <ScheduleIcon fontSize="small" />, keywords: '计划 定时 scheduled' },
+  { label: '铁律', path: '/console/rules', icon: <GavelIcon fontSize="small" />, keywords: '规则 persona rules' },
+  { label: '机器人设置', path: '/console/settings-bot', icon: <TuneIcon fontSize="small" />, keywords: '参数 渠道 settings bot' },
+  { label: '全局设置', path: '/console/settings-global', icon: <SettingsIcon fontSize="small" />, keywords: 'AI 服务 平台 settings' },
+  { label: '插件', path: '/console/plugins', icon: <ExtensionIcon fontSize="small" />, keywords: 'MCP 技能 工具 plugins' },
+  { label: 'Bilibili', path: '/console/bili', icon: <OndemandVideoIcon fontSize="small" />, keywords: 'B站 扫码 bilibili' },
+  { label: '调试', path: '/console/debug', icon: <BugReportIcon fontSize="small" />, keywords: '提示词 审计 debug' },
 ];
 
 interface Props {

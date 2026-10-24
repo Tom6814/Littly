@@ -5,36 +5,35 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { LlmAdapter, type GenerateOptions, type StreamChunk, type ToolSchema } from '@deepseek-ai/dsh-llm'
+import { LlmAdapter, type FinishReason, type GenerateOptions, type StreamChunk, type ToolCallId, type ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { LittlyStorage } from '@littly/storage'
-import { chatComplete, type ChatMessage } from './chat.ts'
+import { chatComplete, type ChatMessage, type ToolDef } from './chat.ts'
 
 export const name = 'littly-llm'
 
-export const inject = ['littlyStorage']
+export const inject = ['littlyStorage', 'llm']
 
 export interface Config {}
 
 export const Config: z<Config> = z.object({})
 
-class LittlyAdapter extends LlmAdapter {
+export class LittlyAdapter extends LlmAdapter {
   constructor(private readonly storage: LittlyStorage) {
     super()
   }
 
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const messages = mapMessages(options)
-    const tools: import('./chat.ts').ToolDef[] | undefined = options.tools?.map((t: ToolSchema) => ({
+    const tools: ToolDef[] | undefined = options.tools?.map((t: ToolSchema) => ({
       type: 'function' as const,
       function: { name: t.name, description: t.description, parameters: t.parameters },
     }))
     const res = await chatComplete(this.storage, messages, {
       model: options.model,
-      temperature: options.temperature,
-      tools,
-      toolChoice: tools ? 'auto' : undefined,
+      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      ...(tools ? { tools, toolChoice: 'auto' as const } : {}),
       enableThinking: false,
-      maxTokens: options.maxTokens,
+      ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
       retries: 0,
     })
     let index = 0
@@ -52,12 +51,13 @@ class LittlyAdapter extends LlmAdapter {
     }
     for (const tc of res.toolCalls) {
       const args = JSON.stringify(tc.arguments)
+      const id = tc.id as ToolCallId
       yield { type: 'block-start', index, blockType: 'tool-call' }
-      yield { type: 'tool-call-delta', index, id: tc.id, name: tc.name, argumentsDelta: args }
-      yield { type: 'block-end', index, block: { type: 'tool-call', id: tc.id, name: tc.name, arguments: args } }
+      yield { type: 'tool-call-delta', index, id, name: tc.name, argumentsDelta: args }
+      yield { type: 'block-end', index, block: { type: 'tool-call', id, name: tc.name, arguments: args } }
       index++
     }
-    yield { type: 'finish', reason: 'stop' }
+    yield { type: 'finish', reason: 'stop' as unknown as FinishReason }
   }
 }
 

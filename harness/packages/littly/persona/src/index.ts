@@ -28,19 +28,19 @@ export const Config: z<Config> = z.object({})
 export interface BuildPromptOptions {
   botId: string
   sender: string
-  channel?: string
+  channel?: string | undefined
   /** 世界书匹配语料：近期对话 + 当前消息 */
   haystack: string
   /** 最新一条用户消息（追问必达跳过概率骰） */
-  focusText?: string
-  currentMemories?: MemoryRow[]
-  historyDigest?: string
-  growthText?: string
-  crossChannelHint?: string
+  focusText?: string | undefined
+  currentMemories?: MemoryRow[] | undefined
+  historyDigest?: string | undefined
+  growthText?: string | undefined
+  crossChannelHint?: string | undefined
 }
 
 export class LittlyPersona {
-  constructor(private readonly ctx: Context, private readonly storage: LittlyStorage) {}
+  constructor(private readonly storage: LittlyStorage) {}
 
   private all<T>(sql: string, ...params: unknown[]): T[] {
     return this.storage.prepare(sql).all(...params) as T[]
@@ -118,15 +118,14 @@ export class LittlyPersona {
     return { system: assembleSystemPrompt(layers), phi: getPostHistoryMessage(layers), layers }
   }
 
-  editableLayers(opts: BuildPromptOptions) {
+  editableLayers(opts: BuildPromptOptions): Array<{ id: string; name: string; content: string; source: string }> {
     const ctx = this.buildContext(opts)
     return ctx ? buildEditableLayers(ctx) : []
   }
 }
 
 export function apply(ctx: Context, _config: Config): void {
-  const storage = ctx.littlyStorage as LittlyStorage
-  const persona = new LittlyPersona(ctx, storage)
+  const persona = new LittlyPersona(ctx.littlyStorage as LittlyStorage)
   ctx.provide('littlyPersona', persona)
   ctx.logger.info('littly persona ready')
 }

@@ -28,6 +28,18 @@
     // not declaration path aliases, keep each package/vendor source compiled
     // under its own tsconfig boundary.
     "paths": {
+      "@littly/storage": ["./packages/littly/storage/src/index.ts"],
+      "@littly/storage/src/*": ["./packages/littly/storage/src/*"],
+      "@littly/persona": ["./packages/littly/persona/src/index.ts"],
+      "@littly/persona/src/*": ["./packages/littly/persona/src/*"],
+      "@littly/llm": ["./packages/littly/llm/src/index.ts"],
+      "@littly/llm/src/*": ["./packages/littly/llm/src/*"],
+      "@littly/memory": ["./packages/littly/memory/src/index.ts"],
+      "@littly/memory/src/*": ["./packages/littly/memory/src/*"],
+      "@littly/tools": ["./packages/littly/tools/src/index.ts"],
+      "@littly/tools/src/*": ["./packages/littly/tools/src/*"],
+      "@littly/agents": ["./packages/littly/agents/src/index.ts"],
+      "@littly/agents/src/*": ["./packages/littly/agents/src/*"],
       "@deepseek-ai/dsh-client-ui-entry-customization": ["./packages/client/ui-entry-customization/src/index.ts"],
       "@deepseek-ai/dsh-client-ui-entry-customization/client": ["./packages/client/ui-entry-customization/src/client/index.ts"],
       "@deepseek-ai/dsh-client-ui-entry-customization/src/*": ["./packages/client/ui-entry-customization/src/*"],

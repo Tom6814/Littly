@@ -40,7 +40,7 @@ export default function Composer({ disabled, sending, onSend }: Props) {
 
   return (
     <Box sx={{ px: { xs: 1.5, sm: 3 }, pb: 1.5, pt: 0.5 }}>
-      <Stack direction="row" spacing={0.75} sx={{ mb: 1, flexWrap: 'wrap', useFlexGap: true }}>
+      <Stack direction="row" spacing={0.75} sx={{ mb: 1, flexWrap: 'wrap' }} useFlexGap>
         {QUICK_COMMANDS.map((q) => (
           <Chip key={q} label={q} size="small" variant="outlined" onClick={() => applyQuick(q)} disabled={disabled} />
         ))}

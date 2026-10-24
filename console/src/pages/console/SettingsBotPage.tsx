@@ -18,6 +18,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import Typography from '@mui/material/Typography';
 import { bots } from '../../api/endpoints';
 import { isRecord } from '../../api/client';
+import type { BotChannels } from '../../api/types';
 import { errMsg, useUiStore } from '../../stores/uiStore';
 import { useBotId, useCurrentBot } from '../../hooks';
 import PageHeader from '../../components/PageHeader';
@@ -136,12 +137,12 @@ export default function SettingsBotPage() {
   });
 
   // 渠道
-  const originalChannels = channelsQuery.data ?? {};
-  const [editedChannels, setEditedChannels] = useState<Record<string, Record<string, unknown>> | null>(null);
+  const originalChannels: BotChannels = channelsQuery.data ?? {};
+  const [editedChannels, setEditedChannels] = useState<BotChannels | null>(null);
   useEffect(() => {
     setEditedChannels(null);
   }, [botId, channelsQuery.data]);
-  const channelsObj: Record<string, Record<string, unknown>> = editedChannels ?? originalChannels;
+  const channelsObj: BotChannels = editedChannels ?? originalChannels;
   const dirtyChannels = editedChannels !== null && prettyJson(editedChannels) !== prettyJson(originalChannels);
 
   const saveChannelsMutation = useMutation({
@@ -167,8 +168,9 @@ export default function SettingsBotPage() {
 
   const patchChannel = (channel: string, key: string, value: unknown) => {
     setEditedChannels((prev) => {
-      const base: Record<string, Record<string, unknown>> = prev ? structuredClone(prev) : structuredClone(originalChannels);
-      const c = isRecord(base[channel]) ? { ...(base[channel] as Record<string, unknown>) } : {};
+      const base: BotChannels = prev ? structuredClone(prev) : structuredClone(originalChannels);
+      const existing = base[channel];
+      const c: Record<string, unknown> = isRecord(existing) ? { ...existing } : {};
       c[key] = value;
       base[channel] = c;
       return base;

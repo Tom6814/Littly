@@ -26,9 +26,9 @@ function parseKeywordList(raw: string): string[] {
 
 function compileKeyPattern(key: string): RegExp | null {
   const m = /^\/(.+)\/([gimsuy]*)$/.exec(key)
-  if (!m) return null
+  if (!m || m[1] === undefined) return null
   try {
-    return new RegExp(m[1], m[2].replace(/[gy]/g, ''))
+    return new RegExp(m[1], (m[2] ?? '').replace(/[gy]/g, ''))
   } catch {
     return null
   }

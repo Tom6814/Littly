@@ -12,7 +12,7 @@ import type { LittlyStorage, MessageRow } from '@littly/storage'
 import type { LittlyPersona } from '@littly/persona'
 import type { LittlyMemory } from '@littly/memory'
 import { chatComplete, type ChatMessage } from '@littly/llm'
-import { createToolRegistry, extractTextToolCall, type ChannelBridge, type ToolDef, type ToolExecResult } from '@littly/tools'
+import { createToolRegistry, extractTextToolCall, type ChannelBridge, type ToolExecResult } from '@littly/tools'
 import { HUMANIZE_CHAT_STYLE, pieceDelays, sleep, splitHumanized, type HumanizeConfig } from './humanize.ts'
 import { fixParenPerson, looksCrisis, looksGarbled, stripThinkingText } from './postprocess.ts'
 import { historyCharBudget, resolveHistoryTake, trimHistoryByBudget } from './history.ts'
@@ -59,14 +59,14 @@ export interface ChatResponse {
   toolCalls: Array<{ name: string; ok: boolean }>
   thinkingLength: number
   rawThinking: string
-  voiceUrl?: string
-  voiceText?: string
-  messageId?: string
+  voiceUrl?: string | undefined
+  voiceText?: string | undefined
+  messageId?: string | undefined
 }
 
 export interface ChannelSender {
-  sendText(botId: string, sender: string, text: string): Promise<{ ok: boolean; sent?: number; error?: string }>
-  sendPhoto?(botId: string, sender: string, photoUrl: string, caption?: string): Promise<{ ok: boolean; error?: string }>
+  sendText(botId: string, sender: string, text: string): Promise<{ ok: boolean; sent?: number | undefined; error?: string | undefined }>
+  sendPhoto?(botId: string, sender: string, photoUrl: string, caption?: string): Promise<{ ok: boolean; error?: string | undefined }>
   callAction?(action: string, params: Record<string, unknown>): Promise<Record<string, unknown> | null>
   photoPublicUrl?(url: string): string
   startCall?(botId: string, sender: string, reason: string, topic?: string): Promise<{ ok: boolean }>
@@ -98,13 +98,13 @@ export class LittlyHub {
     this.senders.set(channelId, sender)
   }
 
-  private async sendText(channel: string, botId: string, sender: string, text: string): Promise<{ ok: boolean; sent?: number; error?: string }> {
+  private async sendText(channel: string, botId: string, sender: string, text: string): Promise<{ ok: boolean; sent?: number | undefined; error?: string | undefined }> {
     const s = this.senders.get(channel)
     if (!s) return { ok: false, error: `渠道 ${channel} 未接入` }
     return s.sendText(botId, sender, text)
   }
 
-  private async sendPhoto(channel: string, botId: string, sender: string, url: string, caption?: string): Promise<{ ok: boolean; error?: string }> {
+  private async sendPhoto(channel: string, botId: string, sender: string, url: string, caption?: string): Promise<{ ok: boolean; error?: string | undefined }> {
     const s = this.senders.get(channel)
     if (!s?.sendPhoto) return { ok: false, error: `渠道 ${channel} 不支持图片` }
     return s.sendPhoto(botId, sender, url, caption)
@@ -146,7 +146,8 @@ export class LittlyHub {
       "SELECT buffer_fire_at, COUNT(*) AS c FROM messages WHERE bot_id = ? AND sender = ? AND buffer_status = 'pending' GROUP BY buffer_fire_at",
     ).all(botId, sender) as Array<{ buffer_fire_at: string | null; c: number }>
     if (rows.length === 0) return { buffered: false, fireAt: null, count: 0 }
-    return { buffered: true, fireAt: rows[0].buffer_fire_at, count: rows.reduce((a, b) => a + b.c, 0) }
+    const first = rows[0]
+    return { buffered: true, fireAt: first?.buffer_fire_at ?? null, count: rows.reduce((a, b) => a + b.c, 0) }
   }
 
   /** 到期 → 原子认领 → 二次验证 → 一次模型调用 → 标记已刷新（失败也标记）。 */
@@ -194,7 +195,7 @@ export class LittlyHub {
     const r = this.storage.prepare(
       "UPDATE messages SET buffer_status = 'flushed' WHERE buffer_status = 'flushing' AND buffer_fire_at < ?",
     ).run(cutoff)
-    return r.changes
+    return Number(r.changes)
   }
 
   // ---- 对话主链路（runChat 移植）----
@@ -203,9 +204,10 @@ export class LittlyHub {
     const isBuffered = !!req.bufferedBatchIds?.length
     const bot = this.storage.prepare('SELECT * FROM bots WHERE id = ?').get(req.botId) as never as { [k: string]: unknown } | undefined
     if (!bot) throw new Error('bot not found')
-    const botRow = bot as unknown as Parameters<LittlyPersona['buildPrompt']>[0] extends never ? never : {
+    const botRow = bot as unknown as {
+      name: unknown
       ai_max_history: number; ai_temperature: number; ai_model: string; ai_humanize_enabled: number; ai_humanize_wechat: number;
-      sleep_until: string | null; character_id: string | null; system_prompt: string
+      sleep_until: string | null
     }
     // §回响睡眠 — 用户来消息即唤醒
     if (botRow.sleep_until) {
@@ -276,13 +278,15 @@ export class LittlyHub {
     if (isBuffered) {
       const batchSet = new Set(req.bufferedBatchIds!)
       for (let i = historyMsgs.length - 1; i >= 0; i--) {
-        if (batchSet.has(historyMsgs[i].id)) {
+        const m = historyMsgs[i]
+        if (m && batchSet.has(m.id)) {
           lastBatchIdx = i
           break
         }
       }
     }
-    if (lastBatchIdx >= 0) historyMsgs[lastBatchIdx].content += TOOL_HINT
+    const lastBatch = lastBatchIdx >= 0 ? historyMsgs[lastBatchIdx] : undefined
+    if (lastBatch) lastBatch.content += TOOL_HINT
     const finalUser: ChatMessage | null = lastBatchIdx >= 0 ? null : { role: 'user', content: `${req.text}${TOOL_HINT}` }
     let postHistoryMsg = built.phi
     if (botRow.ai_humanize_enabled) {
@@ -410,8 +414,10 @@ export class LittlyHub {
           const delays = pieceDelays(pieces.length, humanizeCfg)
           let sent = 0
           for (let i = 0; i < pieces.length; i++) {
-            if (i > 0) await sleep(delays[i - 1])
-            const r = await sender0.sendText(req.botId, req.sender, pieces[i])
+            const piece = pieces[i]
+            if (!piece) continue
+            if (i > 0) await sleep(delays[i - 1] ?? 0)
+            const r = await sender0.sendText(req.botId, req.sender, piece)
             if (r.ok) sent++
             else break
           }

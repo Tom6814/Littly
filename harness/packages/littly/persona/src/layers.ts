@@ -287,21 +287,21 @@ export function nowTimeLine(): string {
 // ---- 组装 ----
 
 export interface PersonaLayers {
-  ironRules?: string
+  ironRules?: string | undefined
   worldBefore: string[]
-  character?: string
-  baseInfo?: string
-  growth?: string
-  sceneLine?: string
+  character?: string | undefined
+  baseInfo?: string | undefined
+  growth?: string | undefined
+  sceneLine?: string | undefined
   worldbook: string[]
-  contextStreamHeader?: string
-  relationSkeleton?: string
-  currentContact?: string
-  historyDigest?: string
-  mesExample?: string
-  authorNote?: string
-  postHistoryInstructions?: string
-  baseSystemPrompt?: string
+  contextStreamHeader?: string | undefined
+  relationSkeleton?: string | undefined
+  currentContact?: string | undefined
+  historyDigest?: string | undefined
+  mesExample?: string | undefined
+  authorNote?: string | undefined
+  postHistoryInstructions?: string | undefined
+  baseSystemPrompt?: string | undefined
 }
 
 function formatMesExample(raw: string): string {
@@ -350,12 +350,12 @@ export interface PersonaContext {
   relations: ContactRelationRow[]
   currentContact: ContactRow | null
   currentMemories: MemoryRow[]
-  historyDigest?: string
-  growthText?: string
+  historyDigest?: string | undefined
+  growthText?: string | undefined
   haystack: string
-  focusText?: string
-  channel?: string
-  crossChannelHint?: string
+  focusText?: string | undefined
+  channel?: string | undefined
+  crossChannelHint?: string | undefined
 }
 
 export function buildPersonaLayers(ctx: PersonaContext): PersonaLayers {

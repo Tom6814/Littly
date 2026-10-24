@@ -17,7 +17,7 @@ export interface ToolExecCtx {
   botId: string
   sender: string
   botName: string
-  channelId?: string
+  channelId?: string | undefined
 }
 
 export interface ToolArtifact {
@@ -32,13 +32,13 @@ export interface ToolExecResult {
   name: string
   ok: boolean
   result: string
-  artifact?: ToolArtifact
+  artifact?: ToolArtifact | undefined
 }
 
 /** 渠道桥：渠道插件注册发送能力；未注册的渠道工具返回明确错误。 */
 export interface ChannelBridge {
-  sendText(channel: string, botId: string, sender: string, text: string): Promise<{ ok: boolean; sent: number; error?: string }>
-  sendPhoto(channel: string, botId: string, sender: string, photoUrl: string, caption?: string): Promise<{ ok: boolean; error?: string }>
+  sendText(channel: string, botId: string, sender: string, text: string): Promise<{ ok: boolean; sent?: number | undefined; error?: string | undefined }>
+  sendPhoto(channel: string, botId: string, sender: string, photoUrl: string, caption?: string): Promise<{ ok: boolean; error?: string | undefined }>
   callAction(channel: string, botId: string, action: string, params: Record<string, unknown>): Promise<Record<string, unknown> | null>
   photoPublicUrl(url: string): string
   startCall(botId: string, sender: string, reason: string, topic?: string): Promise<{ ok: boolean }>
@@ -60,7 +60,10 @@ class Registry implements LittlyToolRegistry {
   ) {}
 
   collectTools(): ToolDef[] {
-    return [...ALL_TOOLS.filter((t) => !['send_qq_face', 'set_qq_profile', 'set_qq_avatar', 'post_qzone'].includes(t.function.name)), ...this.extra.values().map((e) => e.def)]
+    const builtin = ALL_TOOLS.filter((t) => !['send_qq_face', 'set_qq_profile', 'set_qq_avatar', 'post_qzone'].includes(t.function.name))
+    const extras: ToolDef[] = []
+    for (const e of this.extra.values()) extras.push(e.def)
+    return [...builtin, ...extras]
   }
 
   registerChannelTool(def: ToolDef, exec: (args: Record<string, unknown>, ctx: ToolExecCtx) => Promise<{ result: string; artifact?: ToolArtifact }>): void {
@@ -87,7 +90,7 @@ class Registry implements LittlyToolRegistry {
     try {
       const r = await this.execute(name, args, ctx)
       this.audit(ctx, name, true, args)
-      return { name, ok: true, result: JSON.stringify(r.result ?? r), artifact: r.artifact }
+      return { name, ok: true, result: JSON.stringify(r.result ?? r), ...(r.artifact ? { artifact: r.artifact } : {}) }
     } catch (err) {
       this.audit(ctx, name, false, String(err))
       return { name, ok: false, result: JSON.stringify({ error: String(err) }) }
