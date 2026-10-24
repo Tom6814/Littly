@@ -146,6 +146,7 @@ CREATE TABLE contacts (
   blocked INTEGER NOT NULL DEFAULT 0,
   user_id TEXT,
   channel TEXT NOT NULL DEFAULT '',
+  tg_username TEXT NOT NULL DEFAULT '',
   metadata TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

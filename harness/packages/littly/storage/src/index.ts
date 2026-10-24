@@ -14,6 +14,12 @@ import { MIGRATIONS } from './schema.ts'
 
 export const name = 'littly-storage'
 
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    littlyStorage: LittlyStorage
+  }
+}
+
 export interface Config {
   /** SQLite 文件路径（相对 cwd）。 */
   file: string

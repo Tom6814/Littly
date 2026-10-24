@@ -6,6 +6,22 @@
     - id: littly-storage
       name: '@littly/storage'
 
+    # 分层提示词组装（人格核心）
+    - id: littly-persona
+      name: '@littly/persona'
+
+    # OpenAI 兼容 LLM 通道（配置链 DB KV→env→默认）
+    - id: littly-llm
+      name: '@littly/llm'
+
+    # 记忆引擎
+    - id: littly-memory
+      name: '@littly/memory'
+
+    # 对话主链路 + 缓冲窗口 + 渠道投递
+    - id: littly-agents
+      name: '@littly/agents'
+
     # HTTP 载体：dsh 拒绝 0.0.0.0 通配（容器语义由编排层解析本机 IP 注入，
     # 见 deploy/entrypoint.sh 的 hostname -i）；本地开发回落 127.0.0.1
     - id: webserver

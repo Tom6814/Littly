@@ -1,0 +1,34 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../../../vendor/cosmokit"
+    },
+    {
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../storage"
+    },
+    {
+      "path": "../persona"
+    },
+    {
+      "path": "../llm"
+    },
+    {
+      "path": "../memory"
+    },
+    {
+      "path": "../tools"
+    }
+  ]
+}

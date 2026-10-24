@@ -11832,15 +11832,93 @@ importers:
         specifier: workspace:*
         version: link:../../core/tools
 
-  packages/littly/bundle:
+  packages/littly/agents:
     dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@littly/memory':
+        specifier: workspace:*
+        version: link:../memory
+      '@littly/persona':
+        specifier: workspace:*
+        version: link:../persona
       '@littly/storage':
         specifier: workspace:*
         version: link:../storage
+      '@littly/tools':
+        specifier: workspace:*
+        version: link:../tools
+
+  packages/littly/bundle:
+    dependencies:
+      '@littly/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@littly/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@littly/memory':
+        specifier: workspace:*
+        version: link:../memory
+      '@littly/persona':
+        specifier: workspace:*
+        version: link:../persona
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
+      '@littly/tools':
+        specifier: workspace:*
+        version: link:../tools
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
         version: link:../../../vendor/cordis
+
+  packages/littly/llm:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:*
+        version: link:../../llm/llm
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
+
+  packages/littly/memory:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
+
+  packages/littly/persona:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
 
   packages/littly/storage:
     dependencies:
@@ -11850,6 +11928,24 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+
+  packages/littly/tools:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@littly/memory':
+        specifier: workspace:*
+        version: link:../memory
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
 
   packages/llm/deepseek-llm-api-extensions:
     devDependencies:

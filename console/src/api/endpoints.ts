@@ -40,12 +40,21 @@ function toBot(v: unknown): Bot | undefined {
   const id = asStr(firstOf(v, 'id', 'botId'));
   const name = asStr(firstOf(v, 'name', 'botName'));
   if (!id && !name) return undefined;
+  // settings 可以在 settings 键下，也可以把各配置组平铺在顶层
+  const explicit = pickRecord(v, 'settings');
+  const settings = explicit ?? (() => {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v)) {
+      if (isRecord(val) && !['card', 'data', 'user'].includes(k)) out[k] = val;
+    }
+    return out;
+  })();
   return {
     id: id ?? name ?? '',
     name: name ?? id ?? '',
     avatarUrl: asStr(firstOf(v, 'avatarUrl', 'avatar')),
     createdAt: asStr(v.createdAt),
-    settings: pickRecord(v, 'settings'),
+    settings,
   };
 }
 
@@ -583,6 +592,9 @@ export const chat = {
   },
   async regenerate(botId: string, sender: string): Promise<unknown> {
     return http.post('/api/chat/regenerate', { botId, sender });
+  },
+  async remove(id: string): Promise<unknown> {
+    return http.del(`/api/messages/${encodeURIComponent(id)}`);
   },
 };
 
