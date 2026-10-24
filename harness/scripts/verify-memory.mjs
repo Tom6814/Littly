@@ -37,8 +37,8 @@ ok(resolveHistoryTake(0) === 0, 'aiMaxHistory=0 → 不带历史（不许 ||20 �
 ok(resolveHistoryTake(undefined) === 20, '空值回落 20')
 const msgs = Array.from({ length: 30 }, (_, i) => ({ content: 'x'.repeat(200) }))
 ok(trimHistoryByBudget(msgs, 1000).length === 5, '预算裁剪按字符累计（1000/200=5 条）')
-const huge = [{ content: 'y'.repeat(9999) }, ...Array.from({ length: 10 }, () => ({ content: 'x'.repeat(50) }))]
-ok(trimHistoryByBudget(huge, 1000).length === 2, '最新一条单独超预算也保住（+1 条）')
+const huge = [...Array.from({ length: 10 }, () => ({ content: 'x'.repeat(50) })), { content: 'y'.repeat(9999) }]
+ok(trimHistoryByBudget(huge, 1000).length === 1, '最新一条超预算吞满额度时仍保住（不丢最新）')
 ok(trimHistoryByBudget(msgs, 100000).length === 30, '预算充足全保留')
 ok(historyCharBudget(20) === 6000 && historyCharBudget(0) === 2000, '预算联动 [2000,12000]')
 
