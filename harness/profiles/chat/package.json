@@ -9,9 +9,5 @@
         "@littly/bundle"
       ]
     }
-  },
-  "dependencies": {
-    "@deepseek-ai/dsh-base": "file:../../packages/bundle/base",
-    "@littly/bundle": "file:../../packages/littly/bundle"
   }
 }

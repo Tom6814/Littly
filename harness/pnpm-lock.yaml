@@ -524,6 +524,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../vendor/schemastery
         version: link:../../vendor/schemastery
+      '@littly/bundle':
+        specifier: workspace:*
+        version: link:../../packages/littly/bundle
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -11828,6 +11831,21 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: workspace:*
         version: link:../../core/tools
+
+  packages/littly/bundle:
+    dependencies:
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
+
+  packages/littly/storage:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
 
   packages/llm/deepseek-llm-api-extensions:
     devDependencies:

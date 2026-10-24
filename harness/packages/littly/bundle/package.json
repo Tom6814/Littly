@@ -10,6 +10,6 @@
     }
   },
   "dependencies": {
-    "@littly/storage": "file:../storage"
+    "@littly/storage": "workspace:*"
   }
 }
