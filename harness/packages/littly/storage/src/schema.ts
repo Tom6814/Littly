@@ -347,12 +347,6 @@ CREATE TABLE memory_write_receipts (
   result TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
-
--- schema 版本
-CREATE TABLE schema_migrations (
-  version INTEGER PRIMARY KEY,
-  applied_at TEXT NOT NULL
-);
 `,
   },
 ]

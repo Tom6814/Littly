@@ -1,5 +1,36 @@
 # @littly/bundle — Littly 业务插件装配层。
-# 后续 persona/memory/agents/scheduler/console-api/channels 的行都加在这里。
+# 服务器面（无 GUI）：webserver + connection + Typert Remote 控制器 + 定时任务，
+# 从 web-app bundle 提取但去掉 webStartup / web 前端依赖；业务插件的行加在下面。
 - insert:
+    # 业务存储（SQLite，业务 schema）
     - id: littly-storage
       name: '@littly/storage'
+
+    # HTTP 载体：dsh 拒绝 0.0.0.0 通配（容器语义由编排层解析本机 IP 注入，
+    # 见 deploy/entrypoint.sh 的 hostname -i）；本地开发回落 127.0.0.1
+    - id: webserver
+      name: '@deepseek-ai/dsh-host-webserver'
+      config:
+        host: !!js process.env.DSH_WEB_HOST || '127.0.0.1'
+        port: !!js Number(process.env.PORT) || 3000
+        compression: gzip
+        compressionLevel: 1
+        compressionThresholdBytes: 1024
+
+    # 浏览器会话认证 + /api RPC 桥（无 webStartup，信任主机走默认回环/监听绑定策略）
+    - id: connection
+      name: '@deepseek-ai/dsh-client-connection'
+      config:
+        trustedHosts: []
+
+    # Typert Remote 控制器：会话读写 / 后台任务 / 配置面
+    - id: session-controller
+      name: '@deepseek-ai/dsh-api-session-controller'
+    - id: job-controller
+      name: '@deepseek-ai/dsh-api-job-controller'
+    - id: settings-controller
+      name: '@deepseek-ai/dsh-api-settings-controller'
+
+    # 定时任务服务（dsh 原生：cron → agent.followup），Littly 调度器底座
+    - id: schedule
+      name: '@deepseek-ai/dsh-schedule'

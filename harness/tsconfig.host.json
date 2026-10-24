@@ -567,6 +567,7 @@
     { "path": "./packages/lsp/tool-lsp" },
     { "path": "./packages/client/shortcuts/tsconfig.host.json" },
     { "path": "./packages/littly/storage" },
+    { "path": "./packages/littly/bundle" },
     { "path": "./apps/cli" }
   ]
 }

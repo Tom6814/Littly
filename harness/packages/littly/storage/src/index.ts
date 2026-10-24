@@ -41,21 +41,23 @@ export class LittlyStorage {
 
   private migrate(ctx: Context): void {
     this.db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)')
-    const applied = new Set(
-      this.db.prepare('SELECT version FROM schema_migrations').all().map((r) => (r as { version: number }).version),
-    )
-    for (const m of MIGRATIONS) {
-      if (applied.has(m.version)) continue
-      this.db.exec('BEGIN')
-      try {
+    // BEGIN IMMEDIATE 串行化：HMR/双实例同时打开同一文件时，后到者阻塞至先到者
+    // 提交，再重读 applied —— 竞态下 v1 DDL 不会重复执行。
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      const applied = new Set(
+        this.db.prepare('SELECT version FROM schema_migrations').all().map((r) => (r as { version: number }).version),
+      )
+      for (const m of MIGRATIONS) {
+        if (applied.has(m.version)) continue
         this.db.exec(m.sql)
         this.db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(m.version, new Date().toISOString())
-        this.db.exec('COMMIT')
         ctx.logger.info('migration applied: v%d', m.version)
-      } catch (err) {
-        this.db.exec('ROLLBACK')
-        throw err
       }
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
     }
   }
 
