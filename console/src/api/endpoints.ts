@@ -15,6 +15,8 @@ import type {
   GrowthData,
   Memory,
   MemoryExplain,
+  BindIdentity,
+  BindCode,
   PersonaRules,
   Photo,
   PluginsData,
@@ -905,3 +907,38 @@ export function normalizeToolCall(raw: unknown, idx = 0): ToolCallEvent | undefi
         : 'running';
   return { id: asStr(firstOf(raw, 'id', 'callId')) ?? `tool-${idx}`, name, status };
 }
+
+/* ---------------- 账号绑定 ---------------- */
+
+export const bind = {
+  async status(): Promise<{ identities: BindIdentity[] }> {
+    const data = await http.get<unknown>('/api/bind/status');
+    const rec = isRecord(data) ? data : {};
+    return {
+      identities: pickArray<unknown>(rec, 'identities')
+        .filter(isRecord)
+        .map((i) => ({
+          channel: asStr(i.channel) ?? '',
+          externalId: asStr(firstOf(i, 'externalId', 'external_id')) ?? '',
+          createdAt: asStr(firstOf(i, 'createdAt', 'created_at')),
+        }))
+        .filter((i) => i.channel !== ''),
+    };
+  },
+  async createCode(channel: string): Promise<BindCode | undefined> {
+    const data = await http.post<unknown>(`/api/bind/${encodeURIComponent(channel)}/code`);
+    const rec = isRecord(data) ? data : {};
+    const code = asStr(rec.code);
+    if (!code) return undefined;
+    return {
+      channel: asStr(rec.channel) ?? channel,
+      kind: asStr(rec.kind) ?? '',
+      code,
+      expiresAt: asStr(rec.expiresAt) ?? '',
+      instruction: asStr(rec.instruction),
+    };
+  },
+  async unbind(channel: string, externalId: string): Promise<unknown> {
+    return http.post('/api/bind/unbind', { channel, externalId });
+  },
+};

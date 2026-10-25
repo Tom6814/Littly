@@ -18,6 +18,7 @@ import SettingsBotPage from './pages/console/SettingsBotPage';
 import SettingsGlobalPage from './pages/console/SettingsGlobalPage';
 import PluginsPage from './pages/console/PluginsPage';
 import BiliPage from './pages/console/BiliPage';
+import BindPage from './pages/console/BindPage';
 import DebugPage from './pages/console/DebugPage';
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="/console/settings-bot" element={<SettingsBotPage />} />
           <Route path="/console/settings-global" element={<SettingsGlobalPage />} />
           <Route path="/console/plugins" element={<PluginsPage />} />
+          <Route path="/console/bind" element={<BindPage />} />
           <Route path="/console/bili" element={<BiliPage />} />
           <Route path="/console/debug" element={<DebugPage />} />
         </Route>

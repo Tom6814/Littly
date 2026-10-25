@@ -31,6 +31,7 @@ import { registerContentRoutes } from './routes-content.ts'
 import { registerChatRoutes } from './routes-chat.ts'
 import { registerDataRoutes } from './routes-data.ts'
 import { registerAdminRoutes } from './routes-admin.ts'
+import { registerBindRoutes } from './routes-bind.ts'
 
 export const name = 'littly-console-api'
 
@@ -73,6 +74,7 @@ export function apply(ctx: Context, _config: Config): void {
   registerChatRoutes(router, deps)
   registerDataRoutes(router, deps)
   registerAdminRoutes(router, deps)
+  registerBindRoutes(router, deps)
   router.get('/api', 'public', (a) => {
     jsonHealth(a)
   })

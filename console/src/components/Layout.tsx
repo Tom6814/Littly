@@ -34,6 +34,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import SettingsIcon from '@mui/icons-material/Settings';
 import ExtensionIcon from '@mui/icons-material/Extension';
 import OndemandVideoIcon from '@mui/icons-material/OndemandVideo';
+import LinkIcon from '@mui/icons-material/Link';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
@@ -83,6 +84,7 @@ const NAV_GROUPS: { group: string; items: NavEntry[] }[] = [
       { label: '机器人设置', path: '/console/settings-bot', icon: <TuneIcon fontSize="small" /> },
       { label: '全局设置', path: '/console/settings-global', icon: <SettingsIcon fontSize="small" /> },
       { label: '插件', path: '/console/plugins', icon: <ExtensionIcon fontSize="small" /> },
+      { label: '账号绑定', path: '/console/bind', icon: <LinkIcon fontSize="small" /> },
       { label: 'Bilibili', path: '/console/bili', icon: <OndemandVideoIcon fontSize="small" /> },
       { label: '调试', path: '/console/debug', icon: <BugReportIcon fontSize="small" /> },
     ],

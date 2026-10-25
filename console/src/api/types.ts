@@ -319,3 +319,17 @@ export interface AuditEntry {
   summary?: string;
   detail?: string;
 }
+
+export interface BindIdentity {
+  channel: string;
+  externalId: string;
+  createdAt?: string;
+}
+
+export interface BindCode {
+  channel: string;
+  kind: string;
+  code: string;
+  expiresAt: string;
+  instruction?: string;
+}
