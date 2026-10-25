@@ -6,8 +6,12 @@
     "profile": {
       "bundles": [
         "@deepseek-ai/dsh-base",
-        "@littly/bundle"
+        "@littly/bundle",
+        "dsh-case"
       ]
     }
+  },
+  "dependencies": {
+    "dsh-case": "github:ZhijiangTang/dsh-case"
   }
 }
