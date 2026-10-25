@@ -6,6 +6,7 @@
 import type { MessageRow } from '@littly/storage'
 import { json, err, bodyRecord, reqStr, reqNum, type ApiRequest } from './http.ts'
 import { messageView, parseJsonObject } from './mapping.ts'
+import { ensureSeed } from './seed.ts'
 import { isAdmin, resolveSender, senderAllowed, ownSender, queryStr, nowIso } from './deps.ts'
 import { listPendingCalls, consumePendingCall } from '@littly/voice-call'
 import { handleWechatWebhook } from '@littly/channel-wechat-ilink'
@@ -66,7 +67,11 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
 
   r.post('/api/chat', 'required', async (ctx) => {
     const body = bodyRecord(ctx.body)
-    const botId = reqStr(body, 'botId') ?? ''
+    // 首启播种（照旧仓 ensureSeed）：空库时先给一个可用的 bot，
+    // 免得新装好的人第一句话就撞「机器人不存在」。
+    const seed = ensureSeed(d)
+    const requestedBotId = reqStr(body, 'botId') ?? ''
+    const botId = requestedBotId === '' ? (seed.botId ?? '') : requestedBotId
     const text = reqStr(body, 'text', 'content', 'message') ?? ''
     const requested = reqStr(body, 'sender', 'senderId')
     const bot = d.persona.loadBot(botId)
@@ -90,7 +95,9 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
 
   r.post('/api/chat/buffer', 'required', (ctx) => {
     const body = bodyRecord(ctx.body)
-    const botId = reqStr(body, 'botId') ?? ''
+    const seed = ensureSeed(d)
+    const requestedBotId = reqStr(body, 'botId') ?? ''
+    const botId = requestedBotId === '' ? (seed.botId ?? '') : requestedBotId
     const text = reqStr(body, 'text', 'content') ?? ''
     const requested = reqStr(body, 'sender', 'senderId')
     const bot = d.persona.loadBot(botId)
@@ -109,9 +116,11 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
   })
 
   r.get('/api/chat/buffer', 'required', (ctx) => {
-    const botId = queryStr(ctx, 'botId')
+    const seed = ensureSeed(d)
+    const requestedBotId = queryStr(ctx, 'botId') ?? ''
+    const botId = requestedBotId === '' ? (seed.botId ?? '') : requestedBotId
     const requested = queryStr(ctx, 'sender')
-    if (botId === undefined) {
+    if (botId === '') {
       err(ctx.res, 400, 'bad_request', '缺少 botId 参数')
       return
     }
@@ -126,7 +135,9 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
 
   r.post('/api/chat/buffer/flush', 'required', async (ctx) => {
     const body = bodyRecord(ctx.body)
-    const botId = reqStr(body, 'botId') ?? ''
+    const seed = ensureSeed(d)
+    const requestedBotId = reqStr(body, 'botId') ?? ''
+    const botId = requestedBotId === '' ? (seed.botId ?? '') : requestedBotId
     const requested = reqStr(body, 'sender', 'senderId')
     const bot = d.persona.loadBot(botId)
     if (bot === null) {

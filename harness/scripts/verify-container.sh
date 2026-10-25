@@ -77,10 +77,27 @@ plugin=$(docker exec "$NAME" sh -c 'ls "$DSH_HOME/profiles/chat/node_modules/dsh
 ok "$([ "$plugin" = "yes" ] && echo 1 || echo 0)" "dsh-case 已安装进 profile"
 
 echo "== 端到端断言（对着容器跑）=="
-if node "$HERE/scripts/verify-e2e.mjs" "$PORT"; then
-  ok 1 "verify-e2e 全过"
+# 容器里的业务库在容器自己的卷上，测试脚本没法直接提权。
+# 所以这里先在容器里注册一个**首个用户**（首个用户即管理员 —— 见 auth.ts createUser），
+# 再让 e2e 用这个账号登录，管理类断言才是真的在测管理路径。
+E2E_USER="e2e_admin_$$"
+E2E_PASS="e2e-pass-123"
+reg_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${PORT}/api/auth/register" \
+  -H 'content-type: application/json' \
+  -d "{\"username\":\"${E2E_USER}\",\"password\":\"${E2E_PASS}\"}")
+if [ "$reg_code" = "200" ]; then
+  if LITTLY_E2E_USER="$E2E_USER" LITTLY_E2E_PASS="$E2E_PASS" node "$HERE/scripts/verify-e2e.mjs" "$PORT"; then
+    ok 1 "verify-e2e 全过"
+  else
+    ok 0 "verify-e2e 全过"
+  fi
 else
-  ok 0 "verify-e2e 全过"
+  echo "  （预注册管理员失败：${reg_code}，改用容器内的默认账号路径）"
+  if node "$HERE/scripts/verify-e2e.mjs" "$PORT"; then
+    ok 1 "verify-e2e 全过"
+  else
+    ok 0 "verify-e2e 全过"
+  fi
 fi
 
 echo "== 容器日志无致命错误 =="

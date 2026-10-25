@@ -10,6 +10,7 @@ import {
   botSummaryView, botSettingsView, applyBotSettingsPatch,
   botChannelsView, applyBotChannelsPatch,
 } from './mapping.ts'
+import { ensureSeed } from './seed.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
 function botById(d: Deps, id: string): BotRow | undefined {
@@ -25,6 +26,9 @@ function applyPatch(d: Deps, id: string, columns: string[], values: unknown[]): 
 export const registerBotRoutes: RegisterFn = (r, d) => {
   // 列表：白名单字段
   r.get('/api/bots', 'required', (ctx) => {
+    // 首启播种（照旧仓 ensureSeed）：空库时先给一个可用的 bot + 铁律 + 角色卡。
+    // 否则全新部署打开控制台是一片空白，聊天页没有对象。
+    ensureSeed(d)
     const rows = d.storage.prepare('SELECT * FROM bots ORDER BY created_at ASC').all() as unknown as BotRow[]
     json(ctx.res, 200, {
       data: {

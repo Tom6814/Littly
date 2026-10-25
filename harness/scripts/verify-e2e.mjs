@@ -54,10 +54,14 @@ const health = await api('/api')
 ok(health.status === 200, `/api 200（实际 ${health.status}）`)
 
 console.log('== 注册 + 登录 ==')
-const username = `e2e_${Date.now()}`
-let reg = await api('/api/auth/register', { method: 'POST', body: { username, password: 'e2e-pass-123' } })
+// 容器验收时会用 LITTLY_E2E_USER 指向一个**预先建好的管理员**账号
+// （容器里的库在别的进程/别的卷上，测试脚本没法直接提权 ——
+//  「首个注册用户即 admin」那条只在库里没用户时成立）。
+const username = process.env.LITTLY_E2E_USER ?? `e2e_${Date.now()}`
+const password = process.env.LITTLY_E2E_PASS ?? 'e2e-pass-123'
+let reg = await api('/api/auth/register', { method: 'POST', body: { username, password } })
 if (reg.status !== 200) {
-  reg = await api('/api/auth/login', { method: 'POST', body: { username, password: 'e2e-pass-123' } })
+  reg = await api('/api/auth/login', { method: 'POST', body: { username, password } })
 }
 ok(reg.status === 200, `注册/登录成功（${reg.status}）`)
 ok(jar.size > 0, '拿到会话 cookie')
@@ -68,9 +72,15 @@ ok(sess.status === 200 && sess.json?.data?.user?.username === username, '会话�
 // （会话里的角色是每次请求实时读库的 —— 见 auth.ts userFromRequest）
 {
   const { LittlyStorage } = await import('../packages/littly/storage/src/index.ts')
-  const store = new LittlyStorage({ logger: { info: () => {} } }, { file: process.env.LITTLY_DB_FILE ?? 'data/littly.db' })
-  store.prepare("UPDATE users SET role = 'admin' WHERE username = ?").run(username)
-  store.close()
+  const dbFile = process.env.LITTLY_DB_FILE ?? 'data/littly.db'
+  try {
+    const store = new LittlyStorage({ logger: { info: () => {} } }, { file: dbFile })
+    store.prepare("UPDATE users SET role = 'admin' WHERE username = ?").run(username)
+    store.close()
+  } catch (e) {
+    // 提不了权不算失败 —— 管理类断言会自己给出可读的错误
+    console.log(`  （跳过本地提权：${dbFile} 不可直接访问，${e instanceof Error ? e.message : String(e)}）`)
+  }
 }
 
 console.log('== 插件清单（真实数据）==')
@@ -100,9 +110,21 @@ ok(emptySpec.status === 400, `空安装源 → 400（实际 ${emptySpec.status}�
 const dashSpec = await api('/api/plugins/install', { method: 'POST', body: { spec: '--dangerous' } })
 ok(dashSpec.status === 400, `以 - 开头的安装源 → 400（实际 ${dashSpec.status}）`)
 
-console.log('== 渠道配置（QQ 个人号 / SnowLuma）==')
+console.log('== 首启播种（开箱可用）==')
+// 空库时第一次访问控制台就该拿到 bot + 角色卡 + 铁律 —— 旧仓 ensureSeed 的行为。
+// 全新 Docker 部署如果这里是空的，聊天页就没有对象。
 const botsQ = await api('/api/bots')
 const botListQ = botsQ.json?.data?.bots ?? botsQ.json?.data ?? []
+ok(Array.isArray(botListQ) && botListQ.length > 0, `至少有 1 个 bot（实际 ${botListQ.length ?? 0}）`)
+const charsQ = await api('/api/characters')
+const charList = charsQ.json?.data?.characters ?? []
+ok(Array.isArray(charList) && charList.length > 0, `至少有 1 张角色卡（实际 ${charList.length ?? 0}）`)
+const rulesQ = await api('/api/persona-rules')
+const rulesText = rulesQ.json?.data?.content ?? rulesQ.json?.data?.rulesText ?? ''
+ok(typeof rulesText === 'string' && rulesText.includes('严格反 NTR'), '铁律是完整版（含「严格反 NTR」，不是概括版）')
+ok(typeof rulesText === 'string' && rulesText.includes('记忆静默铁律'), '铁律含「记忆静默铁律」核心条')
+
+console.log('== 渠道配置（QQ 个人号 / SnowLuma）==')
 const botIdQ = Array.isArray(botListQ) ? botListQ[0]?.id : undefined
 if (botIdQ) {
   const putCh = await api(`/api/bots/${botIdQ}/channels`, {

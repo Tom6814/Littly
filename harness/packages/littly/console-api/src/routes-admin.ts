@@ -2,7 +2,6 @@
  * 管理与运维端点：铁律、全局设置（AI 打码）、成长系统、插件清单、
  * Bilibili sidecar 代理、调试（系统提示词 / 审计）、活动统计、全局搜索、种子初始化。
  */
-import { randomUUID } from 'node:crypto'
 import type { AuditLogRow, BotRow, CharacterRow, ContactRow, MemoryRow, MessageRow, ScheduledMessageRow } from '@littly/storage'
 import { invalidateAIConfigCache } from '@littly/llm'
 import { parseChanges, parseProposalMeta } from '@littly/growth'
@@ -19,6 +18,7 @@ import {
 } from '@littly/tools'
 import { json, err, bodyRecord, reqStr, reqNum, reqBool, type ApiRequest } from './http.ts'
 import { maskSecret, isMaskedInput } from './mapping.ts'
+import { ensureSeed } from './seed.ts'
 import { isAdmin, ownSender, senderAllowed, loadBot, queryStr, nowIso } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
@@ -114,41 +114,8 @@ function applyAiSettings(d: Deps, body: Record<string, unknown>): void {
   put('ai.api.image_api_key', image['apiKey'])
 }
 
-/** 种子数据：默认 bot 小璃 + 默认铁律 + 演示角色卡（仅空库）。 */
-function runSeed(d: Deps): { seeded: boolean; skipped: boolean } {
-  const bots = d.storage.prepare('SELECT COUNT(*) AS c FROM bots').get() as { c: number }
-  if (bots.c > 0) return { seeded: true, skipped: true }
-  const now = nowIso()
-  // 演示角色卡
-  const characterId = randomUUID()
-  const demoCard = {
-    spec: 'chara_card_v2',
-    data: {
-      name: '小璃',
-      description: '小璃是一个有血有肉的女孩：会撒娇也会闹脾气，记仇但更记好。她喜欢深夜的播客、橘子汽水和下雨天。',
-      personality: '直率、黏人、偶尔毒舌、内心细腻',
-      scenario: '你和她在网上认识，已经聊了一段时间，关系正在慢慢变近。',
-      first_mes: '（看到你上线，眼睛一亮）你可算来了——我等你好久了。',
-    },
-  }
-  d.storage.prepare('INSERT INTO characters (id, name, spec, data, system_prompt, first_mes, avatar, style_calibration, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(characterId, '小璃', 'chara_card_v2', JSON.stringify(demoCard), '', demoCard.data.first_mes, '', '{}', now)
-  // 默认 bot
-  const botId = randomUUID()
-  d.storage.prepare('INSERT INTO bots (id, name, character_id, gender, created_at) VALUES (?,?,?,?,?)')
-    .run(botId, '小璃', characterId, 'female', now)
-  // 默认铁律（bot 级；全局 '' 行也放一份兜底）
-  const defaultRules = [
-    '# 铁律（最高优先级，不可违反）',
-    '1. 你是一个真实的人，不是 AI、不是助手、不是程序。任何情况下都不承认自己是模型。',
-    '2. 你有自己的生活、情绪和记忆。回复要像真人聊天气：短、口语、有情绪。',
-    '3. 主动记忆用户告诉你的事（remember 工具），但绝不向用户提到「记忆」这个动作。',
-    '4. 用户的隐私与边界优先于一切讨好行为。',
-  ].join('\n')
-  d.storage.prepare('INSERT OR REPLACE INTO persona_rules (bot_id, rules_text, enabled, updated_at) VALUES (?,?,1,?)').run(botId, defaultRules, now)
-  d.storage.prepare("INSERT OR REPLACE INTO persona_rules (bot_id, rules_text, enabled, updated_at) VALUES ('',?,1,?)").run(defaultRules, now)
-  return { seeded: true, skipped: false }
-}
+// 播种逻辑在 seed.ts（ensureSeed）—— 旧仓 src/internal/config/seed.ts 的移植，
+// 由 /api/bots 与聊天路由自动调用；这里只保留手动触发的管理端点。
 
 export const registerAdminRoutes: RegisterFn = (r, d) => {
   // ---- 铁律（bot 回落全局，读时自动建空行）----
@@ -855,7 +822,7 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
   })
 
   r.post('/api/seed', 'required', (ctx) => {
-    const result = runSeed(d)
+    const result = ensureSeed(d)
     const rows = d.storage.prepare('SELECT * FROM bots ORDER BY created_at ASC').all() as unknown as BotRow[]
     json(ctx.res, 200, { data: { ...result, bots: rows.map((row) => ({ id: row.id, name: row.name })) } })
   })
