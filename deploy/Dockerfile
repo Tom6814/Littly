@@ -6,8 +6,11 @@
 # 运行：见 deploy/docker-compose.yml
 
 FROM node:24-bookworm-slim AS build
-# 构建管线 shell 出 git（typert/build 步骤）；ca-certs 供网络请求
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+# 构建管线需要：
+#   git/ca-certificates —— typert/build 步骤要读 git 版本戳、还要联网取包
+#   build-essential    —— native/system 的 Node-API 插件（flock）要现场编译（cc + libc 头）；
+#                         Node 自带的 /usr/local/include/node/node_api.h 已在镜像里
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates build-essential && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 WORKDIR /app/harness
 
@@ -22,6 +25,17 @@ COPY harness/ ./
 RUN git init -q && git config user.email build@littly.local && git config user.name build && git add -A && git commit -qm "container build"
 RUN pnpm run build:artifacts
 
+# --- 控制台前端（MUI + Vite，独立 workspace）---
+FROM node:24-bookworm-slim AS console
+RUN corepack enable
+WORKDIR /app/console
+COPY console/package.json console/pnpm-lock.yaml console/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY console/ ./
+# 同源部署：控制台与 API 同一个端口，API 基址留空（走相对路径）
+ENV VITE_API_BASE=
+RUN pnpm run build
+
 FROM node:24-bookworm-slim AS runtime
 # python3/pip：给 MCP 面提供 `bili mcp serve`（stdio）；ca-certificates 供网络请求
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip && rm -rf /var/lib/apt/lists/*
@@ -34,6 +48,7 @@ ENV NODE_ENV=production \
     TZ=Asia/Shanghai \
     DSH_HOME=/app/data/dsh-home \
     LITTLY_DB_FILE=/app/data/littly.db \
+    LITTLY_CONSOLE_DIR=/app/harness/console/dist \
     BILI_CLI_HOME=/app/bili-data/bili-cli \
     BILI_BIN=bili
 # 运行时仅需：依赖树 + 构建产物 + 插件源码（dsh 插件以 .ts 源码直接加载）
@@ -45,6 +60,8 @@ COPY --from=build /app/harness/packages ./packages
 COPY --from=build /app/harness/vendor ./vendor
 COPY --from=build /app/harness/profiles ./profiles
 COPY --from=build /app/harness/native ./native
+# 控制台静态资源（由 console-api 的 fallback 托管，SPA 路由回 index.html）
+COPY --from=console /app/console/dist ./console/dist
 COPY deploy/entrypoint.sh ./deploy-entrypoint.sh
 RUN chmod +x ./deploy-entrypoint.sh
 # SQLite 业务库与 dsh home 落持久卷

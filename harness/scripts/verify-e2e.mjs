@@ -116,12 +116,28 @@ const list2 = await api('/api/plugins')
 ok(!(list2.json?.data?.mcp ?? []).some((s) => s.name === 'e2e-demo'), '删除后不再出现在清单里')
 
 console.log('== 工具按角色启停 ==')
-// 先建一个角色（管理员才能建），这样启停断言不会因库里没角色而跳过
-const created = await api('/api/bots', { method: 'POST', body: { name: `e2e_bot_${Date.now()}` } })
-const createdBot = created.json?.data?.bot?.id ?? created.json?.data?.bot?.botId
-const bots = await api('/api/bots')
-const botList = bots.json?.data?.bots ?? bots.json?.data ?? []
-const botId = createdBot ?? (Array.isArray(botList) ? botList[0]?.id : undefined)
+// 建一个角色用于启停断言：先走 API（管理员），不行就直接写库
+// （测试库里第一个注册的用户才是管理员，这里注册的是第 N 个）
+const { LittlyStorage } = await import('../packages/littly/storage/src/index.ts')
+const dbFile = process.env.LITTLY_DB_FILE ?? 'data/littly.db'
+const store = new LittlyStorage({ logger: { info: () => {} } }, { file: dbFile })
+let botId = undefined
+try {
+  const created = await api('/api/bots', { method: 'POST', body: { name: `e2e_bot_${Date.now()}` } })
+  botId = created.json?.data?.bot?.id ?? created.json?.data?.bot?.botId
+} catch {
+  botId = undefined
+}
+if (!botId) {
+  const existing = store.prepare('SELECT id FROM bots LIMIT 1').get()
+  botId = existing?.id
+  if (!botId) {
+    const id = `e2e-bot-${Date.now()}`
+    store.prepare('INSERT INTO bots (id, name, created_at) VALUES (?,?,?)').run(id, 'e2e-bot', new Date().toISOString())
+    botId = id
+  }
+}
+store.close()
 if (!botId) {
   console.log('  （跳过：库里还没有 bot，停用断言需要先建角色）')
 } else {
@@ -140,6 +156,22 @@ const bili = await api('/api/bili/status')
 ok(bili.status === 502 || bili.status === 200, `bili 端点不崩（${bili.status}）`)
 if (bili.status === 502) {
   ok(bili.json?.error?.code === 'bili_unavailable' || bili.json?.error?.code === 'unavailable', '错误信封统一')
+}
+
+console.log('== 控制台静态托管 ==')
+const home = await fetch(`${base}/`, { headers: { cookie: cookieHeader() } })
+const homeType = home.headers.get('content-type') ?? ''
+const homeBody = await home.text()
+if (home.status === 200 && homeType.includes('text/html')) {
+  ok(true, 'GET / 返回控制台首页')
+  ok(homeBody.includes('<!doctype html>'), '首页是 HTML')
+  const spa = await fetch(`${base}/console/bili`, { headers: { cookie: cookieHeader() } })
+  ok(spa.status === 200, 'SPA 路由回 index.html')
+  const trav = await fetch(`${base}/%2e%2e/package.json`, { headers: { cookie: cookieHeader() } })
+  const travBody = await trav.text()
+  ok(!travBody.includes('"dependencies"'), '越界请求不会泄漏真实文件')
+} else {
+  console.log('  （跳过：本次启动未提供 console/dist）')
 }
 
 console.log('== 未登录访问受保护端点 ==')

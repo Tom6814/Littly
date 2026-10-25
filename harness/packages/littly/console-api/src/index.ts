@@ -11,6 +11,7 @@
  * - 错误信封统一 {error:{code,message(中文)}}（§19.4）。
  */
 import type { Context } from '@deepseek-ai/cordis'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import z from '@deepseek-ai/schemastery'
 import type { LittlyStorage } from '@littly/storage'
 import type { LittlyPersona } from '@littly/persona'
@@ -21,6 +22,7 @@ import type { LittlyMcpManager } from '@littly/mcp'
 import type { PluginManager as LittlyPluginManager } from '@deepseek-ai/dsh-plugin-manager'
 import type { SkillRegistry as LittlySkillRegistry } from '@deepseek-ai/dsh-skill'
 import { Router, type ApiRequest, type WebServerLike } from './http.ts'
+import { registerConsoleStatic } from './static.ts'
 import { SessionManager } from './auth.ts'
 import type { Deps } from './deps.ts'
 import { registerAuthRoutes } from './routes-auth.ts'
@@ -76,6 +78,18 @@ export function apply(ctx: Context, _config: Config): void {
   })
 
   ctx.effect(() => router.mount(web), 'littly-console-api: /api routes')
+
+  // 控制台静态资源（SPA）：/api 之外的请求落到控制台前端
+  const webWithFallback = web as unknown as {
+    registerFallback?: (fallback: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>) => () => void
+  }
+  const registerFallback = webWithFallback.registerFallback
+  if (typeof registerFallback === 'function') {
+    ctx.effect(
+      () => registerConsoleStatic(registerFallback.bind(web) as never),
+      'littly-console-api: console static',
+    )
+  }
   ctx.logger.info('littly console api ready')
 }
 

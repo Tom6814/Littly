@@ -1,6 +1,7 @@
-# Docker 构建上下文只取 harness/（deploy/Dockerfile 的 COPY 路径），其余全忽略
+# Docker 构建上下文：harness/（运行时）+ console/（控制台前端）+ sidecars/（可选 sidecar 单独构建）
 *
 !harness
+!console
 harness/node_modules
 harness/**/node_modules
 harness/.dsh-home
@@ -11,3 +12,5 @@ harness/website
 harness/snapshots
 harness/python
 harness/docs
+console/node_modules
+console/dist
