@@ -62,6 +62,8 @@ services:
     container_name: littly-bili
     restart: unless-stopped
     profiles: ["bili"]
+    ports:
+      - "3010:3010"   # sidecar HTTP 面（本地开发直连；生产走 compose 网络内的 http://bili:3010）
     environment:
       TZ: Asia/Shanghai
       # 与 harness 侧同路径同卷 → 同一个账号状态

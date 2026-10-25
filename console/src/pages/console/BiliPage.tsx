@@ -17,6 +17,12 @@ import type { BiliQrState } from '../../api/types';
 import { errMsg, useUiStore } from '../../stores/uiStore';
 import PageHeader from '../../components/PageHeader';
 
+/** sidecar 给的是裸 base64（PNG）；浏览器要 data URL 才能渲染。 */
+function qrDataUrl(value: string): string {
+  if (value.startsWith('data:')) return value;
+  return `data:image/png;base64,${value}`;
+}
+
 export default function BiliPage() {
   const queryClient = useQueryClient();
   const showSnack = useUiStore((s) => s.showSnack);
@@ -131,7 +137,7 @@ export default function BiliPage() {
             {qr.qrImage ? (
               <Box
                 component="img"
-                src={qr.qrImage}
+                src={qrDataUrl(qr.qrImage)}
                 alt="B 站登录二维码"
                 sx={{ width: 220, height: 220, borderRadius: 2, bgcolor: '#fff', p: 1 }}
               />
