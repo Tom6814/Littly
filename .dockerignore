@@ -1,7 +1,8 @@
-# Docker 构建上下文：harness/（运行时）+ console/（控制台前端）+ sidecars/（可选 sidecar 单独构建）
+# Docker 构建上下文：harness/（运行时）+ console/（控制台前端）+ deploy/（入口脚本）
 *
 !harness
 !console
+!deploy
 harness/node_modules
 harness/**/node_modules
 harness/.dsh-home
