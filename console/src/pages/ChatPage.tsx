@@ -39,6 +39,7 @@ import { useBotId, useCurrentBot } from '../hooks';
 import { useAppStore } from '../stores/appStore';
 import { errMsg, useUiStore } from '../stores/uiStore';
 import Composer from './chat/Composer';
+import CallOverlay from '../components/CallOverlay';
 import MessageBubble from './chat/MessageBubble';
 import { NoBotHint } from '../components/BotSwitcher';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -601,6 +602,13 @@ export default function ChatPage() {
         {messageList}
         {toolChips}
         {bufferBar}
+        <Box sx={{ px: 1.5, pb: 0.5 }}>
+          <CallOverlay
+            botId={botId ?? ''}
+            sender={sender}
+            onCallEnd={() => void messagesQuery.refetch()}
+          />
+        </Box>
         <Composer disabled={!sender} sending={sending} onSend={(t) => void handleSend(t)} />
         {isMobile && (
           <Button size="small" sx={{ mx: 1.5, mb: 1 }} onClick={() => setContactsDrawer(true)}>
