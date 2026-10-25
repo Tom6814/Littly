@@ -5,6 +5,7 @@ import type { LittlyStorage, BotRow } from '@littly/storage'
 import type { LittlyPersona } from '@littly/persona'
 import type { LittlyMemory } from '@littly/memory'
 import type { LittlyHub } from '@littly/agents'
+import type { LittlyGrowth } from '@littly/growth'
 import type { SessionManager } from './auth.ts'
 import type { Router, ApiRequest } from './http.ts'
 
@@ -13,6 +14,7 @@ export interface Deps {
   persona: LittlyPersona
   memory: LittlyMemory
   hub: LittlyHub
+  growth: LittlyGrowth
   sessions: SessionManager
   cwd: string
   log: (msg: string, ...args: unknown[]) => void

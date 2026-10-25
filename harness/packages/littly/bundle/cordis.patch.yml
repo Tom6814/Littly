@@ -18,6 +18,10 @@
     - id: littly-memory
       name: '@littly/memory'
 
+    # 人格成长系统（潜意识评审 / 事实审计 / 对抗质询 / 提议-审批）
+    - id: littly-growth
+      name: '@littly/growth'
+
     # 对话主链路 + 缓冲窗口 + 渠道投递
     - id: littly-agents
       name: '@littly/agents'

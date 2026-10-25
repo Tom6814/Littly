@@ -14,6 +14,7 @@
     { "path": "../llm" },
     { "path": "../memory" },
     { "path": "../tools" },
-    { "path": "../agents" }
+    { "path": "../agents" },
+    { "path": "../growth" }
   ]
 }

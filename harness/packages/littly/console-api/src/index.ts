@@ -16,6 +16,7 @@ import type { LittlyStorage } from '@littly/storage'
 import type { LittlyPersona } from '@littly/persona'
 import type { LittlyMemory } from '@littly/memory'
 import type { LittlyHub } from '@littly/agents'
+import type { LittlyGrowth } from '@littly/growth'
 import { Router, type ApiRequest, type WebServerLike } from './http.ts'
 import { SessionManager } from './auth.ts'
 import type { Deps } from './deps.ts'
@@ -29,7 +30,7 @@ import { registerAdminRoutes } from './routes-admin.ts'
 export const name = 'littly-console-api'
 
 /** 依赖的服务：业务存储 / 人格 / 记忆 / 对话枢纽 / webServer（named route 注册）。 */
-export const inject = ['littlyStorage', 'littlyPersona', 'littlyMemory', 'littlyHub', 'webServer']
+export const inject = ['littlyStorage', 'littlyPersona', 'littlyMemory', 'littlyHub', 'littlyGrowth', 'webServer']
 
 export interface Config {}
 
@@ -48,6 +49,7 @@ export function apply(ctx: Context, _config: Config): void {
     persona: ctx.littlyPersona as LittlyPersona,
     memory: ctx.littlyMemory as LittlyMemory,
     hub: ctx.littlyHub as LittlyHub,
+    growth: ctx.littlyGrowth as LittlyGrowth,
     sessions,
     cwd: process.cwd(),
     log: (msg, ...args) => ctx.logger.info(msg, ...args),

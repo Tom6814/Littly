@@ -1,12 +1,13 @@
 /**
- * 管理与运维端点：铁律、全局设置（AI 打码）、成长（501 占位）、插件清单、
+ * 管理与运维端点：铁律、全局设置（AI 打码）、成长系统、插件清单、
  * Bilibili sidecar 代理、调试（系统提示词 / 审计）、活动统计、全局搜索、种子初始化。
  */
 import { randomUUID } from 'node:crypto'
 import type { AuditLogRow, BotRow, CharacterRow, ContactRow, MemoryRow, MessageRow, ScheduledMessageRow } from '@littly/storage'
 import { invalidateAIConfigCache } from '@littly/llm'
-import { json, err, bodyRecord, reqStr, reqBool, type ApiRequest } from './http.ts'
-import { parseJsonObject, maskSecret, isMaskedInput } from './mapping.ts'
+import { parseChanges, parseProposalMeta } from '@littly/growth'
+import { json, err, bodyRecord, reqStr, reqNum, reqBool, type ApiRequest } from './http.ts'
+import { maskSecret, isMaskedInput } from './mapping.ts'
 import { isAdmin, ownSender, senderAllowed, loadBot, queryStr, nowIso } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
@@ -187,71 +188,129 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
     json(ctx.res, 200, { data: { registrationEnabled: registerOpen !== 'false', registerOpen: registerOpen !== 'false' } })
   })
 
-  // ---- 成长（后续版本提供）----
+  // ---- 成长系统（§12）----
 
   r.get('/api/growth', 'required', (ctx) => {
     const botId = queryStr(ctx, 'botId') ?? ''
-    const profile = d.storage.prepare(
-      "SELECT * FROM growth_profiles WHERE bot_id = ? AND status = 'active' ORDER BY version DESC LIMIT 1",
-    ).get(botId) as { version: number; dimensions: string; life_stage: string; created_at: string } | undefined
-    const proposals = d.storage.prepare(
-      "SELECT * FROM growth_proposals WHERE bot_id = ? AND status = 'pending' ORDER BY created_at DESC",
-    ).all(botId) as unknown as Array<{ id: string; changes: string; evidence: string; report: string; created_at: string }>
-    let dimensions: Array<Record<string, unknown>> = []
-    if (profile !== undefined) {
-      try {
-        const parsed = JSON.parse(profile.dimensions) as unknown
-        if (Array.isArray(parsed)) {
-          dimensions = parsed
-            .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
-            .map((x) => ({
-              name: String(x['name'] ?? '未知维度'),
-              level: typeof x['level'] === 'number' ? x['level'] : 0,
-              max: typeof x['max'] === 'number' ? x['max'] : undefined,
-              description: typeof x['description'] === 'string' ? x['description'] : undefined,
-            }))
-        }
-      } catch {
-        dimensions = []
+    if (botId === '') {
+      err(ctx.res, 400, 'bad_request', '缺少 botId')
+      return
+    }
+    const snap = d.growth.snapshot(botId)
+    // 提案视图：同时给出控制台要的扁平字段与旧接口兼容字段
+    const decorate = (p: (typeof snap.pendingProposals)[number]): Record<string, unknown> => {
+      const meta = parseProposalMeta(p.evidence)
+      const changes = parseChanges(p.changes)
+      return {
+        id: p.id,
+        kind: 'growth',
+        title: '成长提议',
+        summary: meta.majorEvents ?? '',
+        evidence: [...new Set(changes.flatMap((c) => c.evidenceIds))],
+        payload: { changes },
+        status: p.status,
+        createdAt: p.created_at,
+        // 兼容旧接口：结构化视图
+        changesParsed: changes,
+        adversarialParsed: meta.adversarial ?? null,
+        majorEvents: meta.majorEvents ?? '',
+        lifeStageNext: meta.lifeStageNext ?? '',
+        trigger: meta.trigger ?? '',
+        basedVersion: p.based_version,
+        report: p.report,
+        expiresAt: p.expires_at,
+        decidedAt: p.decided_at,
       }
     }
     json(ctx.res, 200, {
       data: {
-        profile: {
-          dimensions,
-          summary: profile !== undefined ? `当前版本 v${String(profile.version)}` : '成长系统尚未生成档案',
-          report: profile !== undefined ? `生命阶段：${profile.life_stage || '未知'}` : undefined,
-          version: profile?.version,
-        },
-        versions: profile !== undefined
-          ? [{ version: profile.version, createdAt: profile.created_at, summary: `生命阶段：${profile.life_stage || '未知'}`, author: 'system' }]
-          : [],
-        proposals: proposals.map((p) => ({
-          id: p.id,
-          kind: 'growth',
-          title: '成长提议',
-          summary: p.report || '',
-          evidence: (() => {
-            try {
-              const parsed = JSON.parse(p.evidence) as unknown
-              return Array.isArray(parsed) ? parsed.map((x) => String(x)) : []
-            } catch {
-              return []
+        profile: snap.profile
+          ? {
+              version: snap.profile.version,
+              lifeStage: snap.profile.life_stage,
+              createdAt: snap.profile.created_at,
+              dimensions: snap.dimensionsParsed,
+              summary: `当前版本 v${snap.profile.version}`,
+              report: snap.profile.life_stage ? `生命阶段：${snap.profile.life_stage}` : '',
             }
-          })(),
-          payload: parseJsonObject(p.changes),
-          status: 'pending',
-          createdAt: p.created_at,
+          : null,
+        dimensions: snap.dimensionsParsed,
+        versions: snap.versions.map((v) => ({
+          version: v.version,
+          createdAt: v.created_at,
+          summary: v.life_stage ? `生命阶段：${v.life_stage}` : '',
+          author: v.derived_from ?? 'system',
         })),
+        proposals: snap.pendingProposals.map(decorate),
+        pendingProposals: snap.pendingProposals.map(decorate),
+        history: snap.history.map(decorate),
+        reviewWindowOpen: snap.reviewWindowOpen,
+        nextReviewAt: snap.nextReviewAt,
+        nextReviewText: snap.nextReviewText,
+        // 控制台读的窗口视图
+        window: { nextAt: snap.nextReviewAt, reason: snap.nextReviewText },
       },
     })
   })
 
-  const growthNotImplemented = (ctx: ApiRequest): void => {
-    err(ctx.res, 501, 'not_implemented', '成长系统将在后续版本提供')
-  }
-  r.post('/api/growth', 'required', growthNotImplemented)
-  r.post('/api/growth/proposals/:id', 'required', growthNotImplemented)
+  r.post('/api/growth', 'required', (ctx) => {
+    void (async (): Promise<void> => {
+      const body = bodyRecord(ctx.body)
+      const action = reqStr(body, 'action') ?? ''
+      const botId = reqStr(body, 'botId') ?? ''
+      if (botId === '') {
+        err(ctx.res, 400, 'bad_request', '缺少 botId')
+        return
+      }
+      if (action === 'seed') {
+        const profile = await d.growth.ensureProfile(botId)
+        if (!profile) {
+          err(ctx.res, 400, 'seed_failed', '生成失败：需要先绑定内容非空的角色卡')
+          return
+        }
+        json(ctx.res, 200, { data: { profile } })
+        return
+      }
+      if (action === 'evaluate') {
+        const outcome = await d.growth.evaluate(botId, 'manual')
+        json(ctx.res, 200, { data: { outcome } })
+        return
+      }
+      if (action === 'repropose') {
+        const { outcome, discarded } = await d.growth.repropose(botId)
+        json(ctx.res, 200, { data: { outcome, discarded } })
+        return
+      }
+      if (action === 'rollback') {
+        const version = reqNum(body, 'version')
+        if (version === undefined) {
+          err(ctx.res, 400, 'bad_request', 'version 无效')
+          return
+        }
+        const result = d.growth.rollback(botId, version)
+        if (!result.ok) {
+          err(ctx.res, 400, 'rollback_failed', result.error ?? '回滚失败')
+          return
+        }
+        json(ctx.res, 200, { data: { profile: result.profile } })
+        return
+      }
+      err(ctx.res, 400, 'bad_request', 'unknown action')
+    })()
+  })
+
+  r.post('/api/growth/proposals/:id', 'required', (ctx) => {
+    void (async (): Promise<void> => {
+      const body = bodyRecord(ctx.body)
+      const decision = reqStr(body, 'decision') ?? ''
+      const result = await d.growth.decide(ctx.params['id'] ?? '', decision as never, body['changes'])
+      if (!result.ok) {
+        err(ctx.res, 400, 'growth_decide_failed', result.error ?? '处理失败')
+        return
+      }
+      json(ctx.res, 200, { data: result })
+    })()
+  })
 
   // ---- 插件 ----
 

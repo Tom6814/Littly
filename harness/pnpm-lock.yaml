@@ -11840,6 +11840,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+      '@littly/growth':
+        specifier: workspace:*
+        version: link:../growth
       '@littly/llm':
         specifier: workspace:*
         version: link:../llm
@@ -11873,6 +11876,9 @@ importers:
       '@littly/console-api':
         specifier: workspace:*
         version: link:../console-api
+      '@littly/growth':
+        specifier: workspace:*
+        version: link:../growth
       '@littly/llm':
         specifier: workspace:*
         version: link:../llm
@@ -11936,6 +11942,9 @@ importers:
       '@littly/agents':
         specifier: workspace:*
         version: link:../agents
+      '@littly/growth':
+        specifier: workspace:*
+        version: link:../growth
       '@littly/llm':
         specifier: workspace:*
         version: link:../llm
@@ -11958,6 +11967,21 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+
+  packages/littly/growth:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
 
   packages/littly/llm:
     dependencies:

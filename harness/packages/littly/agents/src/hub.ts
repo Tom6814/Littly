@@ -13,6 +13,7 @@ import type { LittlyPersona } from '@littly/persona'
 import type { LittlyMemory } from '@littly/memory'
 import { chatComplete, type ChatMessage } from '@littly/llm'
 import { runVoicePipeline } from '@littly/voice'
+import { getActiveGrowthText } from '@littly/growth'
 import { createToolRegistry, extractTextToolCall, type ChannelBridge, type ToolExecResult } from '@littly/tools'
 import { HUMANIZE_CHAT_STYLE, pieceDelays, sleep, splitHumanized, type HumanizeConfig } from './humanize.ts'
 import { fixParenPerson, looksCrisis, looksGarbled, stripThinkingText } from './postprocess.ts'
@@ -265,6 +266,8 @@ export class LittlyHub {
       currentMemories,
       historyDigest: digest?.summary || undefined,
       crossChannelHint,
+      // §[2.4] 成长档案注入（无档案时 undefined，fail-open）
+      growthText: getActiveGrowthText(this.storage, req.botId),
     })
     if (!built) throw new Error('bot not found')
     const character = this.persona.loadCharacter(req.botId)

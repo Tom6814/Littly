@@ -22,6 +22,7 @@
     "@littly/persona": "workspace:*",
     "@littly/storage": "workspace:*",
     "@littly/tools": "workspace:*",
+    "@littly/growth": "workspace:*",
     "@littly/voice": "workspace:*"
   }
 }
