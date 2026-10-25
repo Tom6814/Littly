@@ -21,6 +21,31 @@ import { maskSecret, isMaskedInput } from './mapping.ts'
 import { isAdmin, ownSender, senderAllowed, loadBot, queryStr, nowIso } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
+/** 安装失败时给出「为什么 + 怎么办」，不要只丢一个 failed。 */
+function installFailureMessage(spec: string, result: {
+  stage: string
+  application: string
+  error?: { code?: string; incompatible?: Array<{ name?: string; version?: string; runtimeVersion?: string }> }
+}): string {
+  const code = result.error?.code ?? 'unknown'
+  const base = `安装 ${spec} 未完成（阶段 ${result.stage}）：`
+  if (code === 'already-installed') {
+    return `${base} 这个插件已经装过了。换版本请先卸载再装，或用 CLI 更新：dsh plugin --profile chat update ${spec}`
+  }
+  if (code === 'incompatible-version') {
+    const cmds = (result.error?.incompatible ?? [])
+      .map((i) => `dsh plugin --profile chat allow-version ${i.name}@${i.version} --dsh-version ${i.runtimeVersion} --accept-risk`)
+    return `${base} 它要求的 dsh 版本与当前运行时不兼容。确认风险后可执行：${cmds.join('；')}`
+  }
+  if (code === 'invalid-spec') {
+    return `${base} 安装源不合法。用 npm 包名（如 dsh-case）或 github:owner/repo。`
+  }
+  if (code === 'not-bundle') {
+    return `${base} 装上了，但它没有声明 dsh.bundle.patch —— 不会成为插件层，只是普通依赖。`
+  }
+  return `${base} ${code}`
+}
+
 /** dsh 本地化文案 → 纯文本（string 或 {en, ...} 记录，取中文优先）。 */
 function localizeText(text: string | { readonly en: string; readonly [locale: string]: string } | undefined): string | undefined {
   if (text === undefined) return undefined
@@ -458,11 +483,12 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
             restartRequired: true,
             message: result.application === 'applied'
               ? `已安装 ${spec}，重启 harness 后生效`
-              : `安装未完成（${result.stage}：${result.application}）`,
+              : installFailureMessage(spec, result),
           },
         })
       } catch (e) {
-        err(ctx.res, 400, 'install_failed', e instanceof Error ? e.message : String(e))
+        const message = e instanceof Error ? e.message : String(e)
+        err(ctx.res, 400, 'install_failed', message)
       }
     })()
   })
