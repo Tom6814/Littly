@@ -12037,6 +12037,9 @@ importers:
       '@littly/agents':
         specifier: workspace:*
         version: link:../agents
+      '@littly/channel-wechat-ilink':
+        specifier: workspace:*
+        version: link:../channel-wechat-ilink
       '@littly/growth':
         specifier: workspace:*
         version: link:../growth
