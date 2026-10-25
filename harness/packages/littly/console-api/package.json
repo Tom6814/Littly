@@ -15,13 +15,16 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-plugin-manager": "workspace:~",
+    "@deepseek-ai/dsh-skill": "workspace:~",
     "@littly/agents": "workspace:*",
+    "@littly/growth": "workspace:*",
     "@littly/llm": "workspace:*",
+    "@littly/mcp": "workspace:*",
     "@littly/memory": "workspace:*",
     "@littly/persona": "workspace:*",
     "@littly/storage": "workspace:*",
-    "@littly/tools": "workspace:*",
-    "@littly/growth": "workspace:*"
+    "@littly/tools": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:~",

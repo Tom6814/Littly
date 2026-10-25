@@ -101,7 +101,7 @@ export class LittlyGrowth {
   }
 
   /** 月度 tick（scheduler 调用）。 */
-  tick(now = new Date()): Promise<{ evaluated: number; created: number }> {
+  tick(now: Date = new Date()): Promise<{ evaluated: number; created: number }> {
     return growthTick(this.storage, now)
   }
 

@@ -15,6 +15,9 @@
     { "path": "../memory" },
     { "path": "../tools" },
     { "path": "../agents" },
-    { "path": "../growth" }
+    { "path": "../growth" },
+    { "path": "../mcp" },
+    { "path": "../../boot/plugin-manager" },
+    { "path": "../../skill/skill" }
   ]
 }

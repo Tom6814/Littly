@@ -12,14 +12,23 @@ import {
   biliQrStart,
   biliQrStatus,
   biliRunCommand,
+  getDisabledTools,
+  toggleDisabledTool,
 } from '@littly/tools'
 import { json, err, bodyRecord, reqStr, reqNum, reqBool, type ApiRequest } from './http.ts'
 import { maskSecret, isMaskedInput } from './mapping.ts'
 import { isAdmin, ownSender, senderAllowed, loadBot, queryStr, nowIso } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
-/** Bilibili sidecar 错误 → 统一信封（sidecar 不可达 = 502；业务错误码原样透传）。 */
-function biliFail(ctx: ApiRequest, error: unknown): void {
+/** dsh 本地化文案 → 纯文本（string 或 {en, ...} 记录，取中文优先）。 */
+function localizeText(text: string | { readonly en: string; readonly [locale: string]: string } | undefined): string | undefined {
+  if (text === undefined) return undefined
+  if (typeof text === 'string') return text
+  const zh = text['zh-CN'] ?? text['zh'] ?? text['en']
+  return typeof zh === 'string' ? zh : undefined
+}
+
+/** Bilibili sidecar 错误 → 统一信封（sidecar 不可达 = 502；业务错误码原样透传）。 */function biliFail(ctx: ApiRequest, error: unknown): void {
   if (error instanceof BiliSidecarError) {
     const status = error.status === 502 || error.status === 504 ? 502 : error.status >= 400 && error.status < 600 ? error.status : 502
     err(ctx.res, status, error.code, error.message)
@@ -298,27 +307,140 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
     })()
   })
 
-  // ---- 插件 ----
+  // ---- 插件 / 技能 / MCP / 工具 ----
 
   r.get('/api/plugins', 'required', (ctx) => {
-    const tools = d.hub.tools.collectTools().map((t) => ({
-      name: t.function.name,
-      namespace: 'builtin',
-      source: 'builtin',
-      description: t.function.description,
-      enabledBots: [],
-    }))
-    json(ctx.res, 200, { data: { mcp: [], skills: [], tools, dsh: [] } })
+    void (async (): Promise<void> => {
+      // dsh 插件：委托 dsh 原生 plugin-manager（不自造插件清单）
+      let dsh: Array<Record<string, unknown>> = []
+      try {
+        const plugins = await d.pluginManager?.listPlugins() ?? []
+        dsh = plugins.map((p) => ({
+          name: p.moduleName,
+          version: '',
+          description: localizeText(p.meta?.description) ?? '',
+          title: localizeText(p.meta?.title) ?? '',
+          enabled: p.enabled,
+        }))
+      } catch (e) {
+        dsh = []
+        d.log('[plugins] dsh 插件清单读取失败: %s', e instanceof Error ? e.message : e)
+      }
+
+      // skills：dsh 原生 skill 注册表
+      let skills: Array<Record<string, unknown>> = []
+      try {
+        const list = await d.skills?.list() ?? []
+        skills = list.map((s) => ({
+          name: s.name,
+          description: s.description,
+          source: s.provider,
+        }))
+      } catch (e) {
+        skills = []
+        d.log('[plugins] skills 清单读取失败: %s', e instanceof Error ? e.message : e)
+      }
+
+      // MCP：运行时管理器（DB 清单 + 连接态）
+      const mcp = d.mcp.status().map((s) => ({
+        name: s.config.name,
+        transport: s.config.transport,
+        command: s.config.command ?? '',
+        args: s.config.args ?? [],
+        url: s.config.url ?? '',
+        status: s.state,
+        tools: s.tools.length,
+        enabled: s.config.enabled,
+        error: s.error,
+      }))
+
+      // 工具：注册表全量 + 每个角色的启停状态
+      const toolNames = d.hub.tools.collectTools().map((t) => t.function.name)
+      const botIds = d.storage
+        .prepare('SELECT id FROM bots')
+        .all() as unknown as Array<{ id: string }>
+      const enabledByBot = new Map<string, Set<string>>()
+      for (const bot of botIds) {
+        const disabled = getDisabledTools(d.storage, bot.id)
+        enabledByBot.set(
+          bot.id,
+          new Set(toolNames.filter((n) => !disabled.has(n))),
+        )
+      }
+      const tools = d.hub.tools.collectTools().map((t) => ({
+        name: t.function.name,
+        namespace: t.function.name.startsWith('mcp__') ? 'mcp' : 'builtin',
+        source: t.function.name.startsWith('mcp__') ? 'mcp' : 'builtin',
+        description: t.function.description,
+        enabledBots: botIds.map((b) => b.id).filter((id) => enabledByBot.get(id)?.has(t.function.name)),
+      }))
+
+      json(ctx.res, 200, { data: { mcp, skills, tools, dsh } })
+    })()
   })
 
   r.post('/api/plugins/mcp', 'required', (ctx) => {
-    err(ctx.res, 501, 'not_implemented', 'MCP 接入将在后续版本提供')
+    void (async (): Promise<void> => {
+      const body = bodyRecord(ctx.body)
+      const name = reqStr(body, 'name', 'serverName') ?? ''
+      if (name === '') {
+        err(ctx.res, 400, 'bad_request', '缺少服务器名')
+        return
+      }
+      const transport = reqStr(body, 'transport', 'type') === 'streamable-http' ? 'streamable-http' : 'stdio'
+      const args = Array.isArray(body['args']) ? (body['args'] as unknown[]).map((a) => String(a)) : []
+      const result = await d.mcp.upsertServer({
+        name,
+        transport,
+        ...(reqStr(body, 'command') ? { command: reqStr(body, 'command') as string } : {}),
+        ...(args.length > 0 ? { args } : {}),
+        ...(reqStr(body, 'url') ? { url: reqStr(body, 'url') as string } : {}),
+        enabled: body['enabled'] !== false,
+      })
+      if (!result.ok) {
+        err(ctx.res, 400, 'bad_request', result.error ?? '添加失败')
+        return
+      }
+      json(ctx.res, 200, { data: { ok: true } })
+    })()
   })
+
   r.del('/api/plugins/mcp/:name', 'required', (ctx) => {
-    err(ctx.res, 501, 'not_implemented', 'MCP 接入将在后续版本提供')
+    void (async (): Promise<void> => {
+      const result = await d.mcp.removeServer(ctx.params['name'] ?? '')
+      if (!result.ok) {
+        err(ctx.res, 404, 'not_found', result.error ?? '服务器不存在')
+        return
+      }
+      json(ctx.res, 200, { data: { ok: true } })
+    })()
   })
+
   r.patch('/api/plugins/tools', 'required', (ctx) => {
-    err(ctx.res, 501, 'not_implemented', '工具启停将在后续版本提供')
+    const body = bodyRecord(ctx.body)
+    const toolName = reqStr(body, 'name', 'tool') ?? ''
+    const botId = reqStr(body, 'botId') ?? ''
+    const enabled = reqBool(body, 'enabled')
+    if (toolName === '' || botId === '') {
+      err(ctx.res, 400, 'bad_request', '缺少工具名或 botId')
+      return
+    }
+    if (enabled === undefined) {
+      err(ctx.res, 400, 'bad_request', '缺少 enabled')
+      return
+    }
+    const bot = loadBot(d, botId)
+    if (bot === null) {
+      err(ctx.res, 400, 'bad_request', '机器人不存在')
+      return
+    }
+    const known = d.hub.tools.collectTools().some((t) => t.function.name === toolName)
+    if (!known) {
+      err(ctx.res, 400, 'bad_request', '工具不存在')
+      return
+    }
+    toggleDisabledTool(d.storage, botId, toolName, enabled)
+    json(ctx.res, 200, { data: { ok: true, name: toolName, botId, enabled } })
   })
 
   // ---- Bilibili sidecar 代理 ----

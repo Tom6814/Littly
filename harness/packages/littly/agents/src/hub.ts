@@ -14,7 +14,7 @@ import type { LittlyMemory } from '@littly/memory'
 import { chatComplete, type ChatMessage } from '@littly/llm'
 import { runVoicePipeline } from '@littly/voice'
 import { getActiveGrowthText } from '@littly/growth'
-import { createToolRegistry, extractTextToolCall, type ChannelBridge, type ToolExecResult } from '@littly/tools'
+import { createToolRegistry, extractTextToolCall, getDisabledTools, type ChannelBridge, type ToolExecResult } from '@littly/tools'
 import { HUMANIZE_CHAT_STYLE, pieceDelays, sleep, splitHumanized, type HumanizeConfig } from './humanize.ts'
 import { fixParenPerson, looksCrisis, looksGarbled, stripThinkingText } from './postprocess.ts'
 import { historyCharBudget, resolveHistoryTake, trimHistoryByBudget } from './history.ts'
@@ -306,7 +306,9 @@ export class LittlyHub {
       ...(postHistoryMsg ? [{ role: 'system' as const, content: postHistoryMsg }] : []),
     ]
 
-    const tools = this.tools.collectTools()
+    // 工具按角色启停（控制台插件管理面板）：被停用的工具这一轮不下发给模型
+    const disabledTools = getDisabledTools(this.storage, req.botId)
+    const tools = this.tools.collectTools().filter((t) => !disabledTools.has(t.function.name))
     const execCtx = { botId: req.botId, sender: req.sender, botName: String(bot.name ?? ''), channelId: req.channelId }
     const artifacts: ToolExecResult['artifact'][] = []
     const toolCallLog: Array<{ name: string; ok: boolean }> = []

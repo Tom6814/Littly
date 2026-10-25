@@ -184,7 +184,7 @@ async function maybeWakeOne(
   const userSilenceSec = lastUserMsg
     ? (now.getTime() - new Date(lastUserMsg.created_at).getTime()) / 1000
     : 0
-  const { backoffLevel, threshold } = computeBackoff({
+  const { backoffLevel, thresholdSec: threshold } = computeBackoff({
     proactiveSinceUser: proactiveSinceUser?.c ?? 0,
     userSilenceSec,
   })

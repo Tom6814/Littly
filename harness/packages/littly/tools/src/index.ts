@@ -297,3 +297,4 @@ export function createToolRegistry(
 }
 
 export * from './bili.ts'
+export * from './enabled.ts'

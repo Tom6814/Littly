@@ -17,6 +17,9 @@ import type { LittlyPersona } from '@littly/persona'
 import type { LittlyMemory } from '@littly/memory'
 import type { LittlyHub } from '@littly/agents'
 import type { LittlyGrowth } from '@littly/growth'
+import type { LittlyMcpManager } from '@littly/mcp'
+import type { PluginManager as LittlyPluginManager } from '@deepseek-ai/dsh-plugin-manager'
+import type { SkillRegistry as LittlySkillRegistry } from '@deepseek-ai/dsh-skill'
 import { Router, type ApiRequest, type WebServerLike } from './http.ts'
 import { SessionManager } from './auth.ts'
 import type { Deps } from './deps.ts'
@@ -30,7 +33,7 @@ import { registerAdminRoutes } from './routes-admin.ts'
 export const name = 'littly-console-api'
 
 /** 依赖的服务：业务存储 / 人格 / 记忆 / 对话枢纽 / webServer（named route 注册）。 */
-export const inject = ['littlyStorage', 'littlyPersona', 'littlyMemory', 'littlyHub', 'littlyGrowth', 'webServer']
+export const inject = ['littlyStorage', 'littlyPersona', 'littlyMemory', 'littlyHub', 'littlyGrowth', 'littlyMcp', 'webServer']
 
 export interface Config {}
 
@@ -50,6 +53,10 @@ export function apply(ctx: Context, _config: Config): void {
     memory: ctx.littlyMemory as LittlyMemory,
     hub: ctx.littlyHub as LittlyHub,
     growth: ctx.littlyGrowth as LittlyGrowth,
+    mcp: ctx.littlyMcp as LittlyMcpManager,
+    // dsh 原生服务：读得到就用，读不到就降级（不阻塞控制台启动）
+    pluginManager: (ctx as unknown as { pluginManager?: LittlyPluginManager }).pluginManager,
+    skills: (ctx as unknown as { skills?: LittlySkillRegistry }).skills,
     sessions,
     cwd: process.cwd(),
     log: (msg, ...args) => ctx.logger.info(msg, ...args),

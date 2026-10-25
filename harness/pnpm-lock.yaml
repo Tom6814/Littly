@@ -11862,6 +11862,21 @@ importers:
         specifier: workspace:*
         version: link:../voice
 
+  packages/littly/bili:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:~
+        version: link:../../core/tools
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/tools':
+        specifier: workspace:*
+        version: link:../tools
+
   packages/littly/bundle:
     dependencies:
       '@littly/agents':
@@ -11885,6 +11900,9 @@ importers:
       '@littly/llm':
         specifier: workspace:*
         version: link:../llm
+      '@littly/mcp':
+        specifier: workspace:*
+        version: link:../mcp
       '@littly/memory':
         specifier: workspace:*
         version: link:../memory
@@ -11908,17 +11926,39 @@ importers:
         specifier: workspace:~
         version: link:../../../vendor/cordis
 
-  packages/littly/bili:
+  packages/littly/channel-discord:
+    dependencies:
+      '@littly/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
+      '@littly/tools':
+        specifier: workspace:*
+        version: link:../tools
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+
+  packages/littly/channel-qq-official:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
         version: link:../../../vendor/cordis
-      '@deepseek-ai/dsh-tools':
-        specifier: workspace:~
-        version: link:../../core/tools
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+      '@littly/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
       '@littly/tools':
         specifier: workspace:*
         version: link:../tools
@@ -11955,8 +11995,33 @@ importers:
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
 
+  packages/littly/channel-wechat-ilink:
+    dependencies:
+      '@littly/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
+      '@littly/tools':
+        specifier: workspace:*
+        version: link:../tools
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+
   packages/littly/console-api:
     dependencies:
+      '@deepseek-ai/dsh-plugin-manager':
+        specifier: workspace:~
+        version: link:../../boot/plugin-manager
+      '@deepseek-ai/dsh-skill':
+        specifier: workspace:~
+        version: link:../../skill/skill
       '@littly/agents':
         specifier: workspace:*
         version: link:../agents
@@ -11966,6 +12031,9 @@ importers:
       '@littly/llm':
         specifier: workspace:*
         version: link:../llm
+      '@littly/mcp':
+        specifier: workspace:*
+        version: link:../mcp
       '@littly/memory':
         specifier: workspace:*
         version: link:../memory
@@ -12012,6 +12080,27 @@ importers:
       '@littly/storage':
         specifier: workspace:*
         version: link:../storage
+
+  packages/littly/mcp:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
+      '@littly/tools':
+        specifier: workspace:*
+        version: link:../tools
+      '@modelcontextprotocol/client':
+        specifier: 2.2.0
+        version: 2.2.0
 
   packages/littly/memory:
     dependencies:
@@ -12103,6 +12192,43 @@ importers:
       '@littly/storage':
         specifier: workspace:*
         version: link:../storage
+
+  packages/littly/voice-call:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@littly/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@littly/memory':
+        specifier: workspace:*
+        version: link:../memory
+      '@littly/persona':
+        specifier: workspace:*
+        version: link:../persona
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
+      '@littly/tools':
+        specifier: workspace:*
+        version: link:../tools
+      '@littly/voice':
+        specifier: workspace:*
+        version: link:../voice
+      ws:
+        specifier: 8.21.3
+        version: 8.21.3
+    devDependencies:
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
 
   packages/llm/deepseek-llm-api-extensions:
     devDependencies:

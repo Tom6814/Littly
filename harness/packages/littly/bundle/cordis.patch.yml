@@ -30,6 +30,10 @@
     - id: littly-bili
       name: '@littly/bili'
 
+    # 运行时 MCP 服务器管理（控制台可加/删 MCP 服务器）
+    - id: littly-mcp
+      name: '@littly/mcp'
+
     # 对话主链路 + 缓冲窗口 + 渠道投递
     - id: littly-agents
       name: '@littly/agents'

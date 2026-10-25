@@ -46,6 +46,8 @@
       "@littly/growth/src/*": ["./packages/littly/growth/src/*"],
       "@littly/bili": ["./packages/littly/bili/src/index.ts"],
       "@littly/bili/src/*": ["./packages/littly/bili/src/*"],
+      "@littly/mcp": ["./packages/littly/mcp/src/index.ts"],
+      "@littly/mcp/src/*": ["./packages/littly/mcp/src/*"],
       "@deepseek-ai/dsh-client-ui-entry-customization": ["./packages/client/ui-entry-customization/src/index.ts"],
       "@deepseek-ai/dsh-client-ui-entry-customization/client": ["./packages/client/ui-entry-customization/src/client/index.ts"],
       "@deepseek-ai/dsh-client-ui-entry-customization/src/*": ["./packages/client/ui-entry-customization/src/*"],

@@ -6,6 +6,9 @@ import type { LittlyPersona } from '@littly/persona'
 import type { LittlyMemory } from '@littly/memory'
 import type { LittlyHub } from '@littly/agents'
 import type { LittlyGrowth } from '@littly/growth'
+import type { LittlyMcpManager } from '@littly/mcp'
+import type { PluginManager } from '@deepseek-ai/dsh-plugin-manager'
+import type { SkillRegistry } from '@deepseek-ai/dsh-skill'
 import type { SessionManager } from './auth.ts'
 import type { Router, ApiRequest } from './http.ts'
 
@@ -15,6 +18,11 @@ export interface Deps {
   memory: LittlyMemory
   hub: LittlyHub
   growth: LittlyGrowth
+  mcp: LittlyMcpManager
+  /** dsh 原生插件管理器（插件清单/启停/安装）；profile 未装时为 undefined。 */
+  pluginManager: PluginManager | undefined
+  /** dsh 原生技能注册表；profile 未装时为 undefined。 */
+  skills: SkillRegistry | undefined
   sessions: SessionManager
   cwd: string
   log: (msg: string, ...args: unknown[]) => void
