@@ -28,6 +28,8 @@ import Typography from '@mui/material/Typography';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import ExtensionIcon from '@mui/icons-material/Extension';
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
+import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import { plugins } from '../../api/endpoints';
 import { errMsg, useUiStore } from '../../stores/uiStore';
 import { useBotId } from '../../hooks';
@@ -47,8 +49,40 @@ export default function PluginsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState({ name: '', transport: 'stdio', command: '', argsText: '', url: '' });
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
+  // dsh 插件：输入包名/来源一键安装
+  const [spec, setSpec] = useState('');
+  const [pluginRemoveTarget, setPluginRemoveTarget] = useState<string | null>(null);
 
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['plugins'] });
+
+  const installMutation = useMutation({
+    mutationFn: (value: string) => plugins.installPlugin(value),
+    onSuccess: (res) => {
+      setSpec('');
+      invalidate();
+      showSnack(res?.message ?? '插件已安装', res?.ok === false ? 'error' : 'success');
+    },
+    onError: (e) => showSnack(errMsg(e), 'error'),
+  });
+
+  const pluginRemoveMutation = useMutation({
+    mutationFn: (name: string) => plugins.removePlugin(name),
+    onSuccess: () => {
+      setPluginRemoveTarget(null);
+      invalidate();
+      showSnack('插件已卸载，重启 harness 后生效', 'success');
+    },
+    onError: (e) => showSnack(errMsg(e), 'error'),
+  });
+
+  const pluginToggleMutation = useMutation({
+    mutationFn: (input: { id?: string; name?: string; enabled: boolean }) => plugins.setPluginEnabled(input),
+    onSuccess: () => {
+      invalidate();
+      showSnack('插件启停已更新，重启 harness 后生效', 'success');
+    },
+    onError: (e) => showSnack(errMsg(e), 'error'),
+  });
 
   const addMutation = useMutation({
     mutationFn: () => {
@@ -95,12 +129,14 @@ export default function PluginsPage() {
   const skills = data?.skills ?? [];
   const tools = data?.tools ?? [];
   const dsh = data?.dsh ?? [];
+  const installed = data?.installed ?? [];
+  const bundles = data?.bundles ?? [];
 
   return (
     <Box>
       <PageHeader
         title="插件"
-        subtitle="给她的手脚：MCP 服务、技能与工具清单"
+        subtitle="给她的手脚：dsh 插件、MCP 服务、技能与工具清单"
         actions={
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>
             添加 MCP 服务
@@ -112,6 +148,99 @@ export default function PluginsPage() {
         <SkeletonList rows={4} />
       ) : (
         <>
+          {/* dsh 插件：像官方那样输入名字一键安装 */}
+          <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+            dsh 插件
+          </Typography>
+          <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+            <Stack direction="row" spacing={1}>
+              <TextField
+                size="small"
+                fullWidth
+                placeholder="插件包名或来源，如 dsh-case / github:owner/repo"
+                value={spec}
+                onChange={(e) => setSpec(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && spec.trim()) installMutation.mutate(spec.trim());
+                }}
+              />
+              <Button
+                variant="contained"
+                startIcon={<CloudDownloadIcon />}
+                disabled={!spec.trim() || installMutation.isPending}
+                onClick={() => installMutation.mutate(spec.trim())}
+              >
+                {installMutation.isPending ? '安装中…' : '安装'}
+              </Button>
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              走 dsh 原生插件管理器：npm 包名或 github:owner/repo 都可以。插件在启动期装配，装完需要重启 harness 才会加载。
+            </Typography>
+          </Paper>
+
+          {installed.length === 0 ? (
+            <EmptyState text="还没有装 dsh 插件" hint="装一个社区插件，给她多一双手" />
+          ) : (
+            <Stack spacing={1} sx={{ mb: 3 }}>
+              {installed.map((p) => (
+                <Paper key={p.id ?? p.name} variant="outlined" sx={{ p: 1.5 }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <PowerSettingsNewIcon fontSize="small" color={p.enabled ? 'success' : 'disabled'} />
+                    <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+                      <Typography variant="body2" fontWeight={600} noWrap>
+                        {p.title ?? p.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+                        {p.name}
+                        {p.description ? ` · ${p.description}` : ''}
+                      </Typography>
+                    </Box>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          size="small"
+                          checked={p.enabled !== false}
+                          disabled={pluginToggleMutation.isPending}
+                          onChange={(e) => pluginToggleMutation.mutate({ id: p.id, name: p.name, enabled: e.target.checked })}
+                        />
+                      }
+                      label=""
+                    />
+                    <Tooltip title="卸载">
+                      <IconButton size="small" color="error" onClick={() => setPluginRemoveTarget(p.name)}>
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          )}
+
+          {bundles.length > 0 && (
+            <>
+              <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+                可安装的 bundle（{bundles.length}）
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 3 }}>
+                {bundles.map((b) => (
+                  <Chip
+                    key={b.name}
+                    variant="outlined"
+                    label={b.name}
+                    onClick={() => {
+                      setSpec(b.installTarget || b.name);
+                      installMutation.mutate(b.installTarget || b.name);
+                    }}
+                    sx={{ cursor: 'pointer' }}
+                  />
+                ))}
+              </Stack>
+            </>
+          )}
+
+          <Divider sx={{ my: 2.5 }} />
+
           {/* MCP */}
           <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
             MCP 服务（{mcp.length}）
@@ -292,6 +421,17 @@ export default function PluginsPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ConfirmDialog
+        open={pluginRemoveTarget !== null}
+        title="卸载插件"
+        content={`确定卸载 ${pluginRemoveTarget ?? ''} 吗？卸载后需要重启 harness 生效。`}
+        danger
+        onClose={() => setPluginRemoveTarget(null)}
+        onConfirm={() => {
+          if (pluginRemoveTarget) pluginRemoveMutation.mutate(pluginRemoveTarget);
+        }}
+      />
 
       <ConfirmDialog
         open={!!removeTarget}

@@ -102,6 +102,8 @@ export default function BiliPage() {
           <Typography variant="subtitle2">账号状态</Typography>
           {statusQuery.isPending ? (
             <CircularProgress size={16} />
+          ) : status?.connected === false ? (
+            <Chip size="small" color="error" variant="outlined" label="sidecar 未连接" />
           ) : status?.logined ? (
             <Chip size="small" color="success" label={`已登录 · ${status.username ?? '未知用户'}`} />
           ) : (
@@ -112,6 +114,17 @@ export default function BiliPage() {
             {qr && !confirmed ? '重新生成二维码' : '扫码登录'}
           </Button>
         </Stack>
+
+        {status?.connected === false && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            <Typography variant="body2">{status.error ?? 'bilibili sidecar 没连上'}</Typography>
+            {status.hint && (
+              <Typography variant="caption" sx={{ display: 'block', mt: 0.5, opacity: 0.85 }}>
+                {status.hint}
+              </Typography>
+            )}
+          </Alert>
+        )}
 
         {qr && (
           <Stack alignItems="center" spacing={1.5} sx={{ py: 2 }}>

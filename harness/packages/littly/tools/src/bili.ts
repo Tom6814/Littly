@@ -49,6 +49,19 @@ interface RawResponse {
   body: unknown
 }
 
+/** sidecar 没起来时的处置建议（跟着错误一起给，别只丢一个 fetch failed）。 */
+export const BILI_SIDECAR_HINT =
+  '启动 sidecar：docker compose -f deploy/docker-compose.yml up -d --profile bili；' +
+  '或把 BILI_SIDECAR_URL 指向已运行的 sidecar（默认 http://127.0.0.1:3010）'
+
+/** 判断错误是不是「根本没连上」（连接被拒 / 域名解析失败）。 */
+function isUnreachable(err: unknown): boolean {
+  const code = (err as { code?: string } | undefined)?.code
+  if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EHOSTUNREACH') return true
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('fetch failed')
+}
+
 /** 对 sidecar 发一次请求（统一超时、token 头、错误信封解析）。 */
 export async function biliFetch(
   path: string,
@@ -78,7 +91,14 @@ export async function biliFetch(
     return { status: res.status, body }
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      throw new BiliSidecarError('timeout', `bilibili sidecar 超时（${timeoutMs}ms）`, 504)
+      throw new BiliSidecarError('timeout', `bilibili sidecar 超时（${timeoutMs}ms）：${env.baseUrl}`, 504)
+    }
+    if (isUnreachable(err)) {
+      throw new BiliSidecarError(
+        'sidecar_down',
+        `bilibili sidecar 没在跑（${env.baseUrl}）。${BILI_SIDECAR_HINT}`,
+        502,
+      )
     }
     throw new BiliSidecarError('unavailable', `bilibili sidecar 不可达：${err instanceof Error ? err.message : String(err)}`, 502)
   } finally {

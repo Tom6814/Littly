@@ -249,17 +249,44 @@ export interface DshPlugin {
   enabled?: boolean;
 }
 
+export interface InstalledPlugin {
+  id?: string;
+  name: string;
+  title?: string;
+  description?: string;
+  enabled?: boolean;
+  phase?: string;
+}
+
+export interface InstallableBundle {
+  name: string;
+  official?: boolean;
+  availability?: string;
+  installTarget?: string;
+  version?: string;
+}
+
 export interface PluginsData {
   mcp?: McpServer[];
   skills?: SkillItem[];
   tools?: ToolItem[];
   dsh?: DshPlugin[];
+  /** 已装的 dsh 插件（可启停/卸载） */
+  installed?: InstalledPlugin[];
+  /** 可安装的 bundle */
+  bundles?: InstallableBundle[];
 }
 
 export interface BiliStatus {
+  /** sidecar 是否连得上（false = 服务没起，不是账号问题） */
+  connected?: boolean;
   logined?: boolean;
   username?: string;
   mid?: string | number;
+  /** 连不上时的原因 */
+  error?: string;
+  /** 连不上时怎么办 */
+  hint?: string;
 }
 
 export interface BiliQrState {

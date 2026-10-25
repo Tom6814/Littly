@@ -7,6 +7,7 @@ import type { AuditLogRow, BotRow, CharacterRow, ContactRow, MemoryRow, MessageR
 import { invalidateAIConfigCache } from '@littly/llm'
 import { parseChanges, parseProposalMeta } from '@littly/growth'
 import {
+  BILI_SIDECAR_HINT,
   BiliSidecarError,
   biliAuthStatus,
   biliQrStart,
@@ -384,7 +385,133 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
         enabledBots: botIds.map((b) => b.id).filter((id) => enabledByBot.get(id)?.has(t.function.name)),
       }))
 
-      json(ctx.res, 200, { data: { mcp, skills, tools: [...tools, ...dshTools], dsh } })
+      // dsh 原生插件清单（已装、启停状态）与可安装 bundle
+      let installed: Array<Record<string, unknown>> = []
+      let bundles: Array<Record<string, unknown>> = []
+      try {
+        const plugins = await d.pluginManager?.listPlugins() ?? []
+        installed = plugins.map((p) => ({
+          id: p.entryId,
+          name: p.moduleName,
+          title: localizeText(p.meta?.title) ?? p.moduleName,
+          description: localizeText(p.meta?.description) ?? '',
+          enabled: p.enabled,
+          phase: p.fiberPhase,
+        }))
+      } catch (e) {
+        d.log('[plugins] 已装插件清单读取失败: %s', e instanceof Error ? e.message : e)
+      }
+      try {
+        const list = await d.pluginManager?.listBundles() ?? []
+        bundles = list.map((b) => ({
+          name: b.name,
+          official: b.official,
+          availability: b.availability,
+          installTarget: b.installTarget?.spec ?? '',
+          version: b.installTarget?.version ?? '',
+        }))
+      } catch (e) {
+        d.log('[plugins] bundle 清单读取失败: %s', e instanceof Error ? e.message : e)
+      }
+
+      json(ctx.res, 200, {
+        data: {
+          mcp,
+          skills,
+          tools: [...tools, ...dshTools],
+          dsh,
+          installed,
+          bundles,
+          // skill 是随插件来的：告诉面板每个技能属于哪个插件
+          skillSources: skills.map((s) => ({ name: s.name, provider: s.provider, description: s.description })),
+        },
+      })
+    })()
+  })
+
+  // ---- 插件安装 / 卸载 / 启停（走 dsh 原生 pluginManager，语义与官方面板一致）----
+
+  r.post('/api/plugins/install', 'admin', (ctx) => {
+    void (async (): Promise<void> => {
+      const body = bodyRecord(ctx.body)
+      const spec = reqStr(body, 'spec', 'name', 'package')?.trim() ?? ''
+      if (spec === '') {
+        err(ctx.res, 400, 'bad_request', '请填写插件包名或来源（如 dsh-case / github:owner/repo）')
+        return
+      }
+      if (spec.startsWith('-')) {
+        err(ctx.res, 400, 'bad_request', '安装源不能以 - 开头')
+        return
+      }
+      const manager = d.pluginManager
+      if (!manager) {
+        err(ctx.res, 501, 'plugin_manager_unavailable', '当前 profile 没有插件管理器（dsh plugin-manager 未启用）')
+        return
+      }
+      try {
+        const result = await manager.installBundle(spec, { enabled: true })
+        json(ctx.res, 200, {
+          data: {
+            ok: result.application === 'applied',
+            result,
+            // 插件是启动期装配的：新装的插件需要重启 harness 才会加载
+            restartRequired: true,
+            message: result.application === 'applied'
+              ? `已安装 ${spec}，重启 harness 后生效`
+              : `安装未完成（${result.stage}：${result.application}）`,
+          },
+        })
+      } catch (e) {
+        err(ctx.res, 400, 'install_failed', e instanceof Error ? e.message : String(e))
+      }
+    })()
+  })
+
+  r.post('/api/plugins/remove', 'admin', (ctx) => {
+    void (async (): Promise<void> => {
+      const body = bodyRecord(ctx.body)
+      const name = reqStr(body, 'name') ?? ''
+      if (name === '') {
+        err(ctx.res, 400, 'bad_request', '缺少插件名')
+        return
+      }
+      const manager = d.pluginManager
+      if (!manager) {
+        err(ctx.res, 501, 'plugin_manager_unavailable', '当前 profile 没有插件管理器')
+        return
+      }
+      try {
+        const result = await manager.removeBundle(name)
+        json(ctx.res, 200, { data: { ok: result.application === 'applied', result, restartRequired: true } })
+      } catch (e) {
+        err(ctx.res, 400, 'remove_failed', e instanceof Error ? e.message : String(e))
+      }
+    })()
+  })
+
+  r.post('/api/plugins/enable', 'admin', (ctx) => {
+    void (async (): Promise<void> => {
+      const body = bodyRecord(ctx.body)
+      const id = reqStr(body, 'id') ?? ''
+      const name = reqStr(body, 'name') ?? ''
+      const enabled = reqBool(body, 'enabled')
+      if (enabled === undefined) {
+        err(ctx.res, 400, 'bad_request', '缺少 enabled')
+        return
+      }
+      const manager = d.pluginManager
+      if (!manager) {
+        err(ctx.res, 501, 'plugin_manager_unavailable', '当前 profile 没有插件管理器')
+        return
+      }
+      try {
+        const result = id !== ''
+          ? await manager.setPluginEnabled(id as never, enabled)
+          : await manager.setBundleEnabled(name, enabled)
+        json(ctx.res, 200, { data: { ok: result.application === 'applied', result, restartRequired: true } })
+      } catch (e) {
+        err(ctx.res, 400, 'enable_failed', e instanceof Error ? e.message : String(e))
+      }
     })()
   })
 
@@ -462,12 +589,20 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
         const user = (typeof data['user'] === 'object' && data['user'] !== null ? data['user'] : {}) as Record<string, unknown>
         json(ctx.res, 200, {
           data: {
+            connected: true,
             logined: data['logged_in'] === true || data['logined'] === true,
             username: typeof user['uname'] === 'string' ? user['uname'] : typeof data['username'] === 'string' ? data['username'] : undefined,
             mid: user['mid'] !== undefined ? String(user['mid']) : undefined,
           },
         })
       } catch (e) {
+        // sidecar 没连上不是「接口坏了」：明确告诉前端它没连上、为什么、怎么起
+        if (e instanceof BiliSidecarError && e.code === 'sidecar_down') {
+          json(ctx.res, 200, {
+            data: { connected: false, logined: false, error: e.message, hint: BILI_SIDECAR_HINT },
+          })
+          return
+        }
         biliFail(ctx, e)
       }
     })()

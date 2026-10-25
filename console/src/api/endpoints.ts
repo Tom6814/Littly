@@ -759,6 +759,27 @@ export const plugins = {
           description: asStr(firstOf(p, 'description', 'desc')),
           enabled: asBool(p.enabled),
         })),
+      installed: pickArray<unknown>(rec, 'installed', 'installedPlugins')
+        .filter(isRecord)
+        .map((p) => ({
+          id: asStr(firstOf(p, 'id', 'entryId')),
+          name: asStr(firstOf(p, 'name', 'moduleName', 'packageName')) ?? '',
+          title: asStr(firstOf(p, 'title', 'displayName')),
+          description: asStr(firstOf(p, 'description', 'desc')),
+          enabled: asBool(p.enabled),
+          phase: asStr(p.phase),
+        }))
+        .filter((p) => p.name !== ''),
+      bundles: pickArray<unknown>(rec, 'bundles', 'installable')
+        .filter(isRecord)
+        .map((b) => ({
+          name: asStr(firstOf(b, 'name', 'bundle')) ?? '',
+          official: asBool(b.official),
+          availability: asStr(b.availability),
+          installTarget: asStr(firstOf(b, 'installTarget', 'spec')),
+          version: asStr(b.version),
+        }))
+        .filter((b) => b.name !== ''),
     };
   },
   async addMcp(body: Record<string, unknown>): Promise<unknown> {
@@ -770,6 +791,22 @@ export const plugins = {
   async setToolEnabled(name: string, botId: string, enabled: boolean): Promise<unknown> {
     return http.patch('/api/plugins/tools', { name, botId, enabled });
   },
+  /** 按包名/来源一键安装 dsh 插件（语义与 dsh 官方 plugin manager 一致） */
+  async installPlugin(spec: string): Promise<{ ok?: boolean; message?: string; restartRequired?: boolean }> {
+    const data = await http.post<unknown>('/api/plugins/install', { spec });
+    const rec = isRecord(data) ? data : {};
+    return {
+      ok: asBool(rec.ok),
+      message: asStr(rec.message),
+      restartRequired: asBool(rec.restartRequired),
+    };
+  },
+  async removePlugin(name: string): Promise<unknown> {
+    return http.post('/api/plugins/remove', { name });
+  },
+  async setPluginEnabled(input: { id?: string; name?: string; enabled: boolean }): Promise<unknown> {
+    return http.post('/api/plugins/enable', input);
+  },
 };
 
 /* ---------------- Bilibili ---------------- */
@@ -779,9 +816,12 @@ export const bili = {
     const data = await http.get<unknown>('/api/bili/status');
     const rec = isRecord(data) ? data : {};
     return {
+      connected: asBool(rec['connected']) ?? true,
       logined: asBool(firstOf(rec, 'logined', 'loggedIn', 'isLogin')) ?? false,
       username: asStr(firstOf(rec, 'username', 'uname', 'nickname')),
       mid: asStr(firstOf(rec, 'mid', 'uid')) ?? undefined,
+      error: asStr(rec['error']),
+      hint: asStr(rec['hint']),
     };
   },
   async qrStart(): Promise<BiliQrState> {

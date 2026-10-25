@@ -36,13 +36,15 @@ const GROUP_META: { key: string; title: string; subtitle?: string }[] = [
   { key: 'call', title: '通话' },
 ];
 
+// 渠道键必须与后端 BOT_CHANNEL_GROUPS 的 channel 完全一致 ——
+// 早先这里写过一个后端早已废弃的 'qqp'（QQ 个人号现已由 SnowLuma 承载），
+// 结果面板上出现一张永远没有数据的空卡片，而真正的 QQ 个人号入口被藏成了别的名字。
 const CHANNEL_META: Record<string, { title: string; help?: string }> = {
   telegram: { title: 'Telegram', help: 'Bot Token 在 @BotFather 创建' },
-  snowluma: { title: 'SnowLuma（QQ 账号）', help: '使用 QQ 账号协议接入' },
+  snowluma: { title: 'QQ 个人号（SnowLuma）', help: 'QQ 账号协议端：填 OneBot 正向 WebSocket 地址，如 ws://127.0.0.1:3001' },
   qq: { title: 'QQ 官方', help: 'QQ 开放平台的机器人凭证' },
-  qqp: { title: 'QQ 个人', help: '个人 QQ 协议接入' },
   discord: { title: 'Discord', help: 'Discord Bot Token' },
-  wechat: { title: '微信', help: '微信接入配置' },
+  wechat: { title: '微信', help: '微信 iLink 接入配置' },
 };
 
 const LABELS: Record<string, string> = {
@@ -74,6 +76,20 @@ const LABELS: Record<string, string> = {
   dailyLimit: '每日上限',
   quietStart: '静默开始',
   quietEnd: '静默结束',
+  wsUrl: 'OneBot 正向 WebSocket 地址',
+  account: '账号（多账号时区分）',
+  accessToken: 'Access Token',
+  clientId: 'Client ID',
+  webhookSecret: 'Webhook 密钥',
+  username: '用户名',
+  mode: '模式（polling / webhook）',
+  hubBotId: 'Hub Bot ID',
+  pushToken: 'Push Token',
+  pushEndpoint: 'Push 端点',
+  verifySecret: '验签密钥',
+  friendDisplayEnabled: '显示好友昵称',
+  friendAlias: '好友别名',
+  friendQrcode: '好友二维码',
   proactiveEnabled: '允许主动',
   typing: '打字机节奏',
   voiceEnabled: '启用语音',
