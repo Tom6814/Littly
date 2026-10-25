@@ -13,7 +13,7 @@
 | 控制台页面 | 15 + 聊天页 |
 | 内置工具 | 28 |
 | 控制台 API 路由 | 84 |
-| 行为断言 | 519（12 个脚本）+ 41（端到端） |
+| 行为断言 | 541（13 个脚本）+ 48（端到端） |
 | 容器验收 | 10 项 |
 
 ---
@@ -44,7 +44,7 @@
 |---|---|
 | SnowLuma 全功能 | `@littly/channel-snowluma`（880 行）：OneBot v11 正向 WS、多账号、能力探测、渠道工具（表情/资料/头像/Q 空间动态） |
 | Telegram | `@littly/channel-telegram`：轮询/Webhook、去重游标、绑定深链拦截 |
-| 绑定 / 身份归一 | 各渠道 `binding.ts`：6 位码 / deep-link nonce、限频、冲突检测、联系人晋升；一次绑定全渠道同一条会话线 |
+| 绑定 / 身份归一 | **闭环完整**：控制台发码（`POST /api/bind/:channel/code`，6 位码 / TG deep-link，10 分钟有效、同 kind 旧码作废）→ 渠道侧 `binding.ts` 消费（限频、一次性、冲突不抢占）→ 写 `channel_identities` + 联系人晋升 → 状态可见 → 可解绑（不删历史与记忆）。`verify-bind.mjs` 22 项 |
 | scheduler 挂 dsh 定时任务 | `@littly/scheduler`：60s tick（僵死批次恢复 / 到期缓冲兜底 / 预约门控 / 日记） |
 | 心跳（心声回响） | `@littly/scheduler/src/heartbeat.ts`：静默扫描 + 指数退避唤醒（10min→2h 封顶）、失败冷却 30min、决策落地为预约/记忆/日记。`verify-heartbeat.mjs` 42 项 |
 
@@ -76,7 +76,29 @@
 | 真实 dsh 插件兼容验收 | 实装 `dsh-case`（github:ZhijiangTang/dsh-case）：dsh 兼容性预检按设计拦下 → 精确豁免命令 → 安装 → 插件自检通过 → 其 `case_convert` 工具对 Littly 模型可见可调（`@littly/agents` 的 dsh-bridge）。另实测 npm 上真实社区插件 `dsh-context` 0.75.1 一键装成 bundle 并启用、可卸载 |
 | 迁移工具 | `scripts/migrate-legacy.mjs`：旧 Prisma 库 → 新 schema（20 表 + 记忆 v2 字段初值 + 全局配置）。**真库跑通**：818 消息 / 184 记忆 / 959 审计全部迁入。`verify-migrate.mjs` 21 项 |
 | deploy 编排 | `deploy/Dockerfile`（harness + 控制台同镜像）、`deploy/docker-compose.yml`（+ SnowLuma + bili sidecar）、`deploy/entrypoint.sh`（容器 IP 绑定 + profile 播种） |
-| 全量回归 | 519 行为断言 + 41 端到端 + 10 容器验收，全部通过 |
+| 全量回归 | 541 行为断言 + 48 端到端 + 10 容器验收，全部通过 |
+
+## 6.5 绑定闭环（计划 v2 的硬承诺之一）
+
+「绑定一次，全渠道同一条会话线」这条承诺需要发码侧存在。移植过程中发现新仓**只有消费侧没有发码侧**：
+渠道包都读 `binding_tokens`，但没有任何地方创建它 —— 用户在控制台永远拿不到码。
+
+补齐后实测（`scripts/verify-bind.mjs`，22 项）：
+
+| 环节 | 结果 |
+|---|---|
+| 发码形态 | 6 位码（字母表剔除 I/O/0/1）/ TG 128-bit nonce |
+| 有效期 | 10 分钟；同一人同 kind 只留一个有效码（新码作废旧码） |
+| 撞唯一键 | 自动换一个码重试 |
+| 渠道侧消费 | 非绑定消息不拦截；错码 → 失效提示；命中 → 成功文案 |
+| 一次性 | 码用后标记 used_at，重放无效 |
+| 冲突 | 别人抢同一渠道身份 → 冲突提示，绝不静默抢占 |
+| 身份归一 | 写 `channel_identities`（`UNIQUE(channel,external_id)` + `UNIQUE(user_id,channel)`） |
+| 联系人晋升 | 同名联系人认领为登录用户，历史与记忆保留 |
+| 解绑 | 身份删除，联系人/历史/记忆保留 |
+
+控制台新增「账号绑定」页（`/console/bind`）：五个渠道各一个「生成码」按钮，码可一键复制，
+Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑。
 
 ## 7. 部署级验证（真实容器）
 
@@ -91,7 +113,7 @@
 | profile 已播种到 `$DSH_HOME`（首启关键动作） | ✓ |
 | SQLite 落在持久卷路径（不是容器临时路径） | ✓ |
 | 社区插件装进 profile | ✓ |
-| 对着容器跑端到端 41 项 | ✓ |
+| 对着容器跑端到端 48 项 | ✓ |
 | 容器日志无 fatal / failed to import | ✓ |
 | bili sidecar 不可达时优雅降级 | ✓ |
 
