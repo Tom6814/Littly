@@ -10,6 +10,7 @@ import {
   BILI_SIDECAR_HINT,
   BiliSidecarError,
   biliAuthStatus,
+  biliQrImageDataUrl,
   biliQrStart,
   biliQrStatus,
   biliRunCommand,
@@ -641,7 +642,7 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
         json(ctx.res, 200, {
           data: {
             status: typeof body['state'] === 'string' ? body['state'] : 'pending',
-            qrImage: typeof body['qr_image_base64'] === 'string' ? body['qr_image_base64'] : undefined,
+            qrImage: biliQrImageDataUrl(body['qr_image_base64']),
             qrUrl: typeof body['qr_url'] === 'string' ? body['qr_url'] : undefined,
             sessionId: typeof body['session_id'] === 'string' ? body['session_id'] : undefined,
             message: typeof body['next'] === 'string' ? body['next'] : undefined,
@@ -665,7 +666,7 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
         json(ctx.res, 200, {
           data: {
             status: typeof body['state'] === 'string' ? body['state'] : 'unknown',
-            qrImage: typeof body['qr_image_base64'] === 'string' ? body['qr_image_base64'] : undefined,
+            qrImage: biliQrImageDataUrl(body['qr_image_base64']),
             message: typeof body['next'] === 'string' ? body['next'] : undefined,
           },
         })

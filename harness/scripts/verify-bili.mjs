@@ -20,6 +20,7 @@ import {
   BiliSidecarError,
   biliAuthStatus,
   biliEnv,
+  biliQrImageDataUrl,
   biliQrStart,
   biliQrStatus,
   biliRunCommand,
@@ -102,6 +103,16 @@ ok(seen.authHeader === TOKEN, 'X-Bili-Token 头已带上')
 const qr = await biliQrStart()
 ok(qr.session_id === 'sess-abcdef01', 'qr/start 返回 session_id')
 ok(qr.qr_image_base64 !== undefined, 'qr/start 返回二维码图')
+
+console.log('== 二维码图归一化（裸 base64 → data URL）==')
+// sidecar 给的是裸 base64，直接塞进 <img src> 会被浏览器当成相对 URL，图渲染不出来。
+const raw = 'iVBORw0KGgoAAAANSUhEUg=='
+ok(biliQrImageDataUrl(raw) === `data:image/png;base64,${raw}`, '裸 base64 → 补 data:image/png;base64, 前缀')
+ok(biliQrImageDataUrl('data:image/png;base64,xxx') === 'data:image/png;base64,xxx', '已是 data: 的原样用')
+ok(biliQrImageDataUrl('') === undefined, '空串 → undefined')
+ok(biliQrImageDataUrl(undefined) === undefined, 'undefined → undefined')
+ok(biliQrImageDataUrl(null) === undefined, 'null → undefined')
+ok(biliQrImageDataUrl(123) === undefined, '非字符串 → undefined')
 
 const qrStatus = await biliQrStatus('sess-abcdef01')
 ok(qrStatus.state === 'wait', 'qr/status 轮询状态')

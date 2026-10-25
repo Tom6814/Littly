@@ -147,6 +147,20 @@ export async function biliAuthStatus(): Promise<BiliEnvelope> {
   return (typeof rec['result'] === 'object' && rec['result'] !== null ? rec['result'] : {}) as BiliEnvelope
 }
 
+/**
+ * sidecar 给的二维码是**裸 base64**（PNG 字节）。
+ * 浏览器只认 data URL —— 裸 base64 塞进 <img src> 会被当成相对 URL，图渲染不出来（用户看到的是空白框）。
+ * 这里统一成可以直接塞进 <img src> 的形式；已经是 data: 的原样用。
+ *
+ * 放在 sidecar 客户端这一侧，是因为裸 base64 是 sidecar 的原始契约 ——
+ * 归一化放在离源数据最近的地方，前端就不必再各自兜一遍。
+ */
+export function biliQrImageDataUrl(raw: unknown): string | undefined {
+  if (typeof raw !== 'string' || raw === '') return undefined
+  if (raw.startsWith('data:')) return raw
+  return `data:image/png;base64,${raw}`
+}
+
 /** 生成登录二维码（第一步，人扫）。 */
 export async function biliQrStart(): Promise<Record<string, unknown>> {
   const { status, body } = await biliFetch('/auth/qr/start', { method: 'POST' })
