@@ -576,6 +576,10 @@
     { "path": "./packages/littly/growth" },
     { "path": "./packages/littly/bili" },
     { "path": "./packages/littly/mcp" },
+    { "path": "./packages/littly/voice-call" },
+    { "path": "./packages/littly/channel-wechat-ilink" },
+    { "path": "./packages/littly/channel-discord" },
+    { "path": "./packages/littly/channel-qq-official" },
     { "path": "./packages/littly/bundle" },
     { "path": "./apps/cli" }
   ]

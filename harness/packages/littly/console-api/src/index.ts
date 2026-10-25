@@ -54,9 +54,10 @@ export function apply(ctx: Context, _config: Config): void {
     hub: ctx.littlyHub as LittlyHub,
     growth: ctx.littlyGrowth as LittlyGrowth,
     mcp: ctx.littlyMcp as LittlyMcpManager,
-    // dsh 原生服务：读得到就用，读不到就降级（不阻塞控制台启动）
-    pluginManager: (ctx as unknown as { pluginManager?: LittlyPluginManager }).pluginManager,
-    skills: (ctx as unknown as { skills?: LittlySkillRegistry }).skills,
+    // dsh 原生服务：用 ctx.get 取（不写进 inject）——读得到就用，读不到就降级，
+    // 不阻塞控制台启动（ctx.pluginManager 直接取会触发 Cordis 的 inject 守卫）。
+    pluginManager: ctx.get('pluginManager') as LittlyPluginManager | undefined,
+    skills: ctx.get('skills') as LittlySkillRegistry | undefined,
     sessions,
     cwd: process.cwd(),
     log: (msg, ...args) => ctx.logger.info(msg, ...args),

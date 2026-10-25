@@ -7,6 +7,7 @@ import type { MessageRow } from '@littly/storage'
 import { json, err, bodyRecord, reqStr, reqNum, type ApiRequest } from './http.ts'
 import { messageView, parseJsonObject } from './mapping.ts'
 import { isAdmin, resolveSender, senderAllowed, ownSender, queryStr, nowIso } from './deps.ts'
+import { listPendingCalls, consumePendingCall } from '@littly/voice-call'
 import type { Deps, RegisterFn } from './deps.ts'
 
 function messageRowById(d: Deps, id: string): MessageRow | undefined {
@@ -299,6 +300,27 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
     json(ctx.res, 200, { data: { conversations } })
   })
 
+  // ---- 来电请求（AI 主动来电：控制台轮询取件）----
+
+  r.get('/api/call/requests', 'required', (ctx) => {
+    const botId = queryStr(ctx, 'botId') ?? ''
+    if (botId === '') {
+      err(ctx.res, 400, 'bad_request', '缺少 botId')
+      return
+    }
+    const calls = listPendingCalls(botId)
+    json(ctx.res, 200, { data: { calls: calls.map((c) => ({ id: c.id, botId: c.botId, sender: c.sender, reason: c.reason, topic: c.topic, createdAt: c.createdAt })) } })
+  })
+
+  r.post('/api/call/requests/:id/accept', 'required', (ctx) => {
+    const call = consumePendingCall(ctx.params['id'] ?? '')
+    if (!call) {
+      err(ctx.res, 404, 'not_found', '来电请求不存在或已过期')
+      return
+    }
+    json(ctx.res, 200, { data: { call } })
+  })
+
   // ---- SSE 流 ----
 
   r.get('/api/stream', 'required', (ctx) => {
@@ -355,8 +377,24 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
       closed = true
       clearInterval(pollTimer)
       clearInterval(heartbeatTimer)
+      offEvent()
       res.end()
     }
+    // 订阅 hub 的对话过程事件（工具阶段 / 思考态 / 沉默终止态）——真正推，不靠轮询
+    const offEvent = d.hub.onEvent((ev) => {
+      if (closed) return
+      if (ev.botId !== botId || ev.sender !== sender) return
+      if (ev.type === 'agent-status') {
+        sendEvent('agent-status', { status: ev.status ?? '' })
+        return
+      }
+      sendEvent('tool-call', {
+        id: ev.id ?? ev.name ?? '',
+        name: ev.name ?? '',
+        status: ev.status ?? 'running',
+      })
+    })
+
     const pollTimer = setInterval(poll, 2000)
     const heartbeatTimer = setInterval(() => {
       if (closed) return

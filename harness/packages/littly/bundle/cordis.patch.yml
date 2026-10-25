@@ -27,6 +27,18 @@
       name: '@littly/growth'
 
     # bilibili：收敛口（把原始 MCP 工具挡在带护栏的 bili 元工具后面）
+    - id: littly-channel-qq-official
+      name: '@littly/channel-qq-official'
+    - id: littly-channel-discord
+      name: '@littly/channel-discord'
+    - id: littly-channel-wechat-ilink
+      name: '@littly/channel-wechat-ilink'
+    - id: littly-voice-call
+      name: '@littly/voice-call'
+
+
+
+
     - id: littly-bili
       name: '@littly/bili'
 

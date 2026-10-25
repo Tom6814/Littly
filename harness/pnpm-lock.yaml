@@ -11885,12 +11885,21 @@ importers:
       '@littly/bili':
         specifier: workspace:*
         version: link:../bili
+      '@littly/channel-discord':
+        specifier: workspace:*
+        version: link:../channel-discord
+      '@littly/channel-qq-official':
+        specifier: workspace:*
+        version: link:../channel-qq-official
       '@littly/channel-snowluma':
         specifier: workspace:*
         version: link:../channel-snowluma
       '@littly/channel-telegram':
         specifier: workspace:*
         version: link:../channel-telegram
+      '@littly/channel-wechat-ilink':
+        specifier: workspace:*
+        version: link:../channel-wechat-ilink
       '@littly/console-api':
         specifier: workspace:*
         version: link:../console-api
@@ -11921,6 +11930,9 @@ importers:
       '@littly/voice':
         specifier: workspace:*
         version: link:../voice
+      '@littly/voice-call':
+        specifier: workspace:*
+        version: link:../voice-call
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
@@ -12046,6 +12058,9 @@ importers:
       '@littly/tools':
         specifier: workspace:*
         version: link:../tools
+      '@littly/voice-call':
+        specifier: workspace:*
+        version: link:../voice-call
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~

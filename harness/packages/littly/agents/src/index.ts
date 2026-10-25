@@ -8,6 +8,7 @@ import type { LittlyStorage } from '@littly/storage'
 import type { LittlyPersona } from '@littly/persona'
 import type { LittlyMemory } from '@littly/memory'
 import { LittlyHub } from './hub.ts'
+import { createDshToolBridge, type DshToolsLike } from './dsh-bridge.ts'
 
 export const name = 'littly-agents'
 
@@ -24,16 +25,22 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export function apply(ctx: Context, _config: Config): void {
+  // dsh 插件工具桥：社区插件/MCP 注册的工具对模型可见可调（ctx.tools 不在时为空桥）
+  // 用 ctx.get 取（不写进 inject）：取不到就当没有 dsh 工具（ctx.tools 直接取会触发 Cordis 的 inject 守卫）
+  const dshTools = createDshToolBridge(() => ctx.get('tools') as DshToolsLike | undefined)
   const hub = new LittlyHub(
     ctx.littlyStorage as LittlyStorage,
     ctx.littlyPersona as LittlyPersona,
     ctx.littlyMemory as LittlyMemory,
     process.cwd(),
     (msg, ...args) => ctx.logger.info(msg, ...args),
+    dshTools,
   )
   ctx.provide('littlyHub', hub)
   ctx.logger.info('littly hub ready')
 }
 
 export { LittlyHub } from './hub.ts'
+export { createDshToolBridge, renderDshResult } from './dsh-bridge.ts'
+export type { DshToolBridge, DshToolsLike } from './dsh-bridge.ts'
 export type { LittlyHub as LittlyHubType, ChatRequest, ChatResponse, ChannelSender } from './hub.ts'

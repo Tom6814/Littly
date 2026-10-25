@@ -17,6 +17,7 @@
     { "path": "../agents" },
     { "path": "../growth" },
     { "path": "../mcp" },
+    { "path": "../voice-call" },
     { "path": "../../boot/plugin-manager" },
     { "path": "../../skill/skill" }
   ]

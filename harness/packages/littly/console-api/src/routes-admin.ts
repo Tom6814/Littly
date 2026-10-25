@@ -375,7 +375,16 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
         enabledBots: botIds.map((b) => b.id).filter((id) => enabledByBot.get(id)?.has(t.function.name)),
       }))
 
-      json(ctx.res, 200, { data: { mcp, skills, tools, dsh } })
+      // dsh 插件工具（社区插件 / MCP 服务器注册的）：模型这一轮能看到它们
+      const dshTools = (d.hub.dshTools?.list() ?? []).map((t) => ({
+        name: t.function.name,
+        namespace: 'dsh',
+        source: 'dsh-plugin',
+        description: t.function.description,
+        enabledBots: botIds.map((b) => b.id).filter((id) => enabledByBot.get(id)?.has(t.function.name)),
+      }))
+
+      json(ctx.res, 200, { data: { mcp, skills, tools: [...tools, ...dshTools], dsh } })
     })()
   })
 

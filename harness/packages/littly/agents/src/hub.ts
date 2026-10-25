@@ -14,10 +14,11 @@ import type { LittlyMemory } from '@littly/memory'
 import { chatComplete, type ChatMessage } from '@littly/llm'
 import { runVoicePipeline } from '@littly/voice'
 import { getActiveGrowthText } from '@littly/growth'
-import { createToolRegistry, extractTextToolCall, getDisabledTools, type ChannelBridge, type ToolExecResult } from '@littly/tools'
+import { createToolRegistry, extractTextToolCall, getDisabledTools, type ChannelBridge, type ToolExecCtx, type ToolExecResult } from '@littly/tools'
 import { HUMANIZE_CHAT_STYLE, pieceDelays, sleep, splitHumanized, type HumanizeConfig } from './humanize.ts'
 import { fixParenPerson, looksCrisis, looksGarbled, stripThinkingText } from './postprocess.ts'
 import { historyCharBudget, resolveHistoryTake, trimHistoryByBudget } from './history.ts'
+import type { DshToolBridge } from './dsh-bridge.ts'
 
 const MAX_TOOL_ROUNDS = 5
 const BUFFER_MIN_MS = 15_000
@@ -74,18 +75,52 @@ export interface ChannelSender {
   startCall?(botId: string, sender: string, reason: string, topic?: string): Promise<{ ok: boolean }>
 }
 
+/**
+ * 对话过程事件（推给控制台 SSE/WS）。
+ * - agent-status：thinking / running / done / silent（沉默终止态）
+ * - tool-call：工具调用开始与结束（工具阶段可视化）
+ */
+export interface HubEvent {
+  type: 'agent-status' | 'tool-call'
+  botId: string
+  sender: string
+  /** agent-status：当前阶段；tool-call：running / done / failed */
+  status?: string
+  /** tool-call：工具名 */
+  name?: string
+  /** tool-call：调用 id（前端做稳定 key） */
+  id?: string
+  /** tool-call：是否成功 */
+  ok?: boolean
+}
+
 export class LittlyHub {
+  readonly storage: LittlyStorage
+  readonly persona: LittlyPersona
+  readonly memory: LittlyMemory
+  readonly cwd: string
+  private readonly log: (msg: string, ...args: unknown[]) => void
+  /** dsh 插件工具桥（社区插件/MCP 注册的工具对模型可见） */
+  readonly dshTools: DshToolBridge | undefined
   private readonly senders = new Map<string, ChannelSender>()
   private readonly timers = new Map<string, NodeJS.Timeout>()
+  private readonly listeners = new Set<(ev: HubEvent) => void>()
   readonly tools: ReturnType<typeof createToolRegistry>
 
   constructor(
-    readonly storage: LittlyStorage,
-    readonly persona: LittlyPersona,
-    readonly memory: LittlyMemory,
-    readonly cwd: string,
-    private readonly log: (msg: string, ...args: unknown[]) => void,
+    storage: LittlyStorage,
+    persona: LittlyPersona,
+    memory: LittlyMemory,
+    cwd: string,
+    log: (msg: string, ...args: unknown[]) => void,
+    dshTools?: DshToolBridge | undefined,
   ) {
+    this.storage = storage
+    this.persona = persona
+    this.memory = memory
+    this.cwd = cwd
+    this.log = log
+    this.dshTools = dshTools
     const bridge: ChannelBridge = {
       sendText: (channel, botId, sender, text) => this.sendText(channel, botId, sender, text),
       sendPhoto: (channel, botId, sender, url, caption) => this.sendPhoto(channel, botId, sender, url, caption),
@@ -96,8 +131,46 @@ export class LittlyHub {
     this.tools = createToolRegistry(storage, memory, bridge, cwd)
   }
 
+  /**
+   * 分发一次工具调用：Littly 自带工具走本地注册表；dsh 插件工具走 dsh 桥。
+   */
+  private async dispatchTool(
+    name: string,
+    args: Record<string, unknown>,
+    execCtx: ToolExecCtx,
+    dshToolNames: ReadonlySet<string>,
+  ): Promise<ToolExecResult> {
+    if (dshToolNames.has(name) && this.dshTools) {
+      const r = await this.dshTools.call(name, args)
+      return { name, ok: r.ok, result: r.result }
+    }
+    return this.tools.dispatch(name, args, execCtx)
+  }
+
   registerChannel(channelId: string, sender: ChannelSender): void {
     this.senders.set(channelId, sender)
+  }
+
+  /**
+   * 订阅对话过程事件（控制台 SSE/WS 推送用）。
+   * @returns 退订函数。
+   */
+  onEvent(listener: (ev: HubEvent) => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  /** 广播一个对话过程事件（监听器异常不阻断对话链路）。 */
+  emitEvent(ev: HubEvent): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(ev)
+      } catch {
+        // 监听器异常忽略
+      }
+    }
   }
 
   private async sendText(channel: string, botId: string, sender: string, text: string): Promise<{ ok: boolean; sent?: number | undefined; error?: string | undefined }> {
@@ -308,13 +381,20 @@ export class LittlyHub {
 
     // 工具按角色启停（控制台插件管理面板）：被停用的工具这一轮不下发给模型
     const disabledTools = getDisabledTools(this.storage, req.botId)
-    const tools = this.tools.collectTools().filter((t) => !disabledTools.has(t.function.name))
+    const builtinTools = this.tools.collectTools().filter((t) => !disabledTools.has(t.function.name))
+    // dsh 插件工具（社区插件/MCP）：同名以 Littly 自带为准，自带工具承载她的记忆/日程/边界语义
+    const builtinNames = new Set(builtinTools.map((t) => t.function.name))
+    const dshToolDefs = (this.dshTools?.list(builtinNames) ?? []).filter((t) => !disabledTools.has(t.function.name))
+    const dshToolNames = new Set(dshToolDefs.map((t) => t.function.name))
+    const tools = [...builtinTools, ...dshToolDefs]
     const execCtx = { botId: req.botId, sender: req.sender, botName: String(bot.name ?? ''), channelId: req.channelId }
     const artifacts: ToolExecResult['artifact'][] = []
     const toolCallLog: Array<{ name: string; ok: boolean }> = []
     let lastThinking = ''
     let lastNonEmpty = ''
     let finalReply = ''
+
+    this.emitEvent({ type: 'agent-status', botId: req.botId, sender: req.sender, status: 'thinking' })
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const res = await chatComplete(this.storage, messages, {
@@ -334,9 +414,11 @@ export class LittlyHub {
           tool_calls: res.toolCalls.map((tc) => ({ id: tc.id, type: 'function' as const, function: { name: tc.name, arguments: JSON.stringify(tc.arguments) } })),
         })
         for (const tc of res.toolCalls) {
-          const result = await this.tools.dispatch(tc.name, tc.arguments, execCtx)
+          this.emitEvent({ type: 'tool-call', botId: req.botId, sender: req.sender, id: tc.id, name: tc.name, status: 'running' })
+          const result = await this.dispatchTool(tc.name, tc.arguments, execCtx, dshToolNames)
           toolCallLog.push({ name: tc.name, ok: result.ok })
           if (result.artifact) artifacts.push(result.artifact)
+          this.emitEvent({ type: 'tool-call', botId: req.botId, sender: req.sender, id: tc.id, name: tc.name, status: result.ok ? 'done' : 'failed', ok: result.ok })
           messages.push({ role: 'tool', content: result.result, tool_call_id: tc.id })
         }
         continue
@@ -348,10 +430,13 @@ export class LittlyHub {
         if (textCalls && textCalls.calls.length > 0) {
           messages.push({ role: 'assistant', content: res.content })
           for (const tc of textCalls.calls) {
-            const result = await this.tools.dispatch(tc.name, tc.arguments, execCtx)
+            const toolCallId = `textcall-${tc.name}-${round}-${toolCallLog.length}`
+            this.emitEvent({ type: 'tool-call', botId: req.botId, sender: req.sender, id: toolCallId, name: tc.name, status: 'running' })
+            const result = await this.dispatchTool(tc.name, tc.arguments, execCtx, dshToolNames)
             toolCallLog.push({ name: tc.name, ok: result.ok })
             if (result.artifact) artifacts.push(result.artifact)
-            messages.push({ role: 'tool', content: result.result, tool_call_id: `textcall-${tc.name}-${round}-${toolCallLog.length}` })
+            this.emitEvent({ type: 'tool-call', botId: req.botId, sender: req.sender, id: toolCallId, name: tc.name, status: result.ok ? 'done' : 'failed', ok: result.ok })
+            messages.push({ role: 'tool', content: result.result, tool_call_id: toolCallId })
           }
           if (textCalls.cleaned.trim()) lastNonEmpty = textCalls.cleaned.trim()
           continue
@@ -427,6 +512,14 @@ export class LittlyHub {
         voiceText = voice.text
       }
     }
+
+    // 回合收尾：沉默（无回复）与正常完成，两种终止态都要推给控制台
+    this.emitEvent({
+      type: 'agent-status',
+      botId: req.botId,
+      sender: req.sender,
+      status: finalReply.trim() ? 'done' : 'silent',
+    })
 
     // --- 4. 落库（沉默不落库）---
     let savedMessageId: string | undefined
