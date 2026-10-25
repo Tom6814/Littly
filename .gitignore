@@ -16,6 +16,8 @@ data/
 *.db-journal
 *.db-wal
 *.db-shm
+# 控制台上传的图片（运行期写到 <cwd>/public/downloads）
+**/public/downloads/
 
 # logs & OS
 *.log

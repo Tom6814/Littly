@@ -2,7 +2,8 @@
  * 行 → 前端 JSON 形态的映射，以及 bot 设置组 / 渠道配置的字段表。
  * 安全约定（旧 PROJECT-DESIGN §18.1 #1/#12）：
  * - /api/bots 列表与详情只返回白名单字段，绝不回传渠道密钥明文；
- * - settings / channels 中的密钥字段以掩码回显，PUT 时掩码或空串 = 保持不变。
+ * - settings / channels 中的密钥字段以掩码回显；
+ * - PUT 时密钥三态：掩码串 = 保持原值，空串 = 显式清空，其它 = 写入新值。
  */
 import type {
   BotRow, CharacterRow, ContactRow, ContactRelationRow, DiaryRow, MemoryRow, MessageRow,
@@ -38,9 +39,9 @@ export function maskSecret(value: string): string {
   return `••••${tail}`
 }
 
-/** 掩码判定：PUT 侧遇到空串或含掩码点号 → 保持原值。 */
+/** 掩码判定：含掩码点号的输入 → 保持原值（前端回传的是打码串，不能回写）。 */
 export function isMaskedInput(value: string): boolean {
-  return value === '' || value.includes('•')
+  return value.includes('•')
 }
 
 // ---- 基础行映射 ----
@@ -326,7 +327,10 @@ export function botSettingsView(row: BotRow): Record<string, unknown> {
   return out
 }
 
-/** PATCH settings：把嵌套组写回列；密钥字段空串/掩码保持不变。 */
+/**
+ * PATCH settings：把嵌套组写回列。
+ * 密钥字段三态：掩码串（含 •）= 保持原值；空串 = 显式清空；其它 = 写入新值。
+ */
 export function applyBotSettingsPatch(row: BotRow, settings: Record<string, unknown>): { columns: string[]; values: unknown[] } {
   const columns: string[] = []
   const values: unknown[] = []
@@ -438,7 +442,10 @@ export function botChannelsView(row: BotRow): Record<string, unknown> {
   return out
 }
 
-/** PUT channels：写回列；密钥字段空串/掩码保持不变。 */
+/**
+ * PUT channels：写回列。
+ * 密钥字段三态：掩码串（含 •）= 保持原值；空串 = 显式清空；其它 = 写入新值。
+ */
 export function applyBotChannelsPatch(row: BotRow, channels: Record<string, unknown>): { columns: string[]; values: unknown[] } {
   const columns: string[] = []
   const values: unknown[] = []

@@ -98,16 +98,24 @@ if (!hadManifest) {
   }
 }
 
-// profile 依赖安装（社区 dsh 插件等）：缺 node_modules 时装一次
+// profile 依赖安装（社区 dsh 插件等）：
+//   镜像里已经装好的（profiles/<name>/node_modules）→ 直接复制，不用 pnpm
+//   运行时才改的依赖 → 退回 pnpm install
 const manifest = JSON.parse(readFileSync(targetManifestPath, 'utf8'))
 const deps = Object.keys(manifest.dependencies ?? {})
 if (deps.length > 0 && !existsSync(join(targetDir, 'node_modules'))) {
-  console.log(`[seed] 安装 profile 依赖：${deps.join(', ')}`)
-  try {
-    execFileSync('pnpm', ['install', '--prod=false'], { cwd: targetDir, stdio: 'inherit' })
-  } catch (err) {
-    console.error(`[seed] profile 依赖安装失败（不阻塞启动）：${err instanceof Error ? err.message : String(err)}`)
-    console.error('[seed] 该 profile 的外部插件将不可用（dsh 会把对应 bundle 标记为 skipped）')
+  const sourceModules = join(sourceDir, 'node_modules')
+  if (existsSync(sourceModules)) {
+    console.log(`[seed] 复制镜像里已装好的 profile 依赖：${deps.join(', ')}`)
+    cpSync(sourceModules, join(targetDir, 'node_modules'), { recursive: true })
+  } else {
+    console.log(`[seed] 安装 profile 依赖：${deps.join(', ')}`)
+    try {
+      execFileSync('pnpm', ['install', '--prod=false'], { cwd: targetDir, stdio: 'inherit' })
+    } catch (err) {
+      console.error(`[seed] profile 依赖安装失败（不阻塞启动）：${err instanceof Error ? err.message : String(err)}`)
+      console.error('[seed] 该 profile 的外部插件将不可用（dsh 会把对应 bundle 标记为 skipped）')
+    }
   }
 } else if (deps.length > 0) {
   console.log('[seed] profile 依赖已就位')

@@ -100,6 +100,33 @@ ok(emptySpec.status === 400, `空安装源 → 400（实际 ${emptySpec.status}�
 const dashSpec = await api('/api/plugins/install', { method: 'POST', body: { spec: '--dangerous' } })
 ok(dashSpec.status === 400, `以 - 开头的安装源 → 400（实际 ${dashSpec.status}）`)
 
+console.log('== 渠道配置（QQ 个人号 / SnowLuma）==')
+const botsQ = await api('/api/bots')
+const botListQ = botsQ.json?.data?.bots ?? botsQ.json?.data ?? []
+const botIdQ = Array.isArray(botListQ) ? botListQ[0]?.id : undefined
+if (botIdQ) {
+  const putCh = await api(`/api/bots/${botIdQ}/channels`, {
+    method: 'PUT',
+    body: { channels: { snowluma: { enabled: true, wsUrl: 'ws://127.0.0.1:3001', token: 'e2e-token', account: 'e2e-acct' } } },
+  })
+  ok(putCh.status === 200, `写 QQ 个人号配置 200（${putCh.status}）`)
+  const backCh = await api(`/api/bots/${botIdQ}/channels`)
+  const snow = backCh.json?.data?.channels?.snowluma ?? {}
+  ok(snow.enabled === true, 'enabled 存住')
+  ok(snow.wsUrl === 'ws://127.0.0.1:3001', 'wsUrl 存住')
+  ok(snow.account === 'e2e-acct', 'account 存住')
+  ok(snow.hasToken === true, 'token 存住（读回打码）')
+  ok(snow.token !== 'e2e-token', 'token 读回是打码的')
+  ok(!('qqp' in (backCh.json?.data?.channels ?? {})), '没有幽灵 qqp 分组')
+  // 复位，别污染配置
+  await api(`/api/bots/${botIdQ}/channels`, {
+    method: 'PUT',
+    body: { channels: { snowluma: { enabled: false, wsUrl: '', token: '', account: '' } } },
+  })
+} else {
+  console.log('  （跳过：库里没有 bot）')
+}
+
 console.log('== 账号绑定闭环 ==')
 const bindCode = await api('/api/bind/qqp/code', { method: 'POST', body: {} })
 ok(bindCode.status === 200, `QQ 个人号发码 200（${bindCode.status}）`)

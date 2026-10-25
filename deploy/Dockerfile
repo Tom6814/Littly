@@ -25,6 +25,10 @@ COPY harness/ ./
 RUN git init -q && git config user.email build@littly.local && git config user.name build && git add -A && git commit -qm "container build"
 RUN pnpm run build:artifacts
 
+# profile 的外部依赖（社区 dsh 插件）在构建期就装好 —— 运行期不联网、不需要 pnpm。
+# 播种脚本会把这份 node_modules 复制到 $DSH_HOME/profiles/chat。
+RUN cd profiles/chat && pnpm install --frozen-lockfile
+
 # --- 控制台前端（MUI + Vite，独立 workspace）---
 FROM node:24-bookworm-slim AS console
 RUN corepack enable
@@ -46,6 +50,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN timeout 300 pip3 install --no-cache-dir --break-system-packages --timeout 30 --retries 2 "bili-agent[mcp]==0.9.1" || \
     echo "[warn] bili-agent 安装失败（或超时）：MCP 面不可用，bili 元工具仍走 HTTP sidecar"
 WORKDIR /app/harness
+# corepack：运行期若改动了 profile 依赖，播种脚本可以退回 pnpm install
+RUN corepack enable
 ENV NODE_ENV=production \
     TZ=Asia/Shanghai \
     DSH_HOME=/app/data/dsh-home \
@@ -62,6 +68,8 @@ COPY --from=build /app/harness/packages ./packages
 COPY --from=build /app/harness/vendor ./vendor
 COPY --from=build /app/harness/profiles ./profiles
 COPY --from=build /app/harness/native ./native
+# profile 播种脚本（把镜像里的 profiles/chat 落到 $DSH_HOME/profiles/chat）
+COPY --from=build /app/harness/scripts/seed-profile.mjs ./scripts/seed-profile.mjs
 # 控制台静态资源（由 console-api 的 fallback 托管，SPA 路由回 index.html）
 COPY --from=console /app/console/dist ./console/dist
 COPY deploy/entrypoint.sh ./deploy-entrypoint.sh
