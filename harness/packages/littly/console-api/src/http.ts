@@ -142,12 +142,17 @@ function splitSegments(pathname: string): string[] {
 }
 
 function matchSegments(pattern: string[], actual: string[]): Record<string, string> | null {
-  if (pattern.length !== actual.length) return null
   const params: Record<string, string> = {}
   for (let i = 0; i < pattern.length; i++) {
     const p = pattern[i]
+    if (p === undefined) return null
+    // '*' 只作末段：吞掉其余全部段（可为空）
+    if (p === '*') {
+      params['*'] = actual.slice(i).join('/')
+      return params
+    }
     const a = actual[i]
-    if (p === undefined || a === undefined) return null
+    if (a === undefined) return null
     if (p.startsWith(':')) {
       if (a === '') return null
       params[p.slice(1)] = a
@@ -155,6 +160,7 @@ function matchSegments(pattern: string[], actual: string[]): Record<string, stri
       return null
     }
   }
+  if (pattern.length !== actual.length) return null
   return params
 }
 

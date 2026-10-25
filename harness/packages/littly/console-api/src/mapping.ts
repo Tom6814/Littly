@@ -135,7 +135,6 @@ export function contactView(row: ContactRow): Record<string, unknown> {
     sender: row.sender,
     name: row.name || row.sender,
     brief: row.brief,
-    avatarUrl: row.avatar !== undefined ? undefined : undefined,
     profile: row.profile === '' ? undefined : parseJsonObject(row.profile),
     isOwner: row.is_owner === 1,
     blocked: row.blocked === 1,

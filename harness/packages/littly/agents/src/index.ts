@@ -7,7 +7,7 @@ import z from '@deepseek-ai/schemastery'
 import type { LittlyStorage } from '@littly/storage'
 import type { LittlyPersona } from '@littly/persona'
 import type { LittlyMemory } from '@littly/memory'
-import { LittlyHub, type ChatRequest, type ChatResponse } from './hub.ts'
+import { LittlyHub } from './hub.ts'
 
 export const name = 'littly-agents'
 
@@ -35,4 +35,5 @@ export function apply(ctx: Context, _config: Config): void {
   ctx.logger.info('littly hub ready')
 }
 
-export type { ChatRequest, ChatResponse }
+export { LittlyHub } from './hub.ts'
+export type { LittlyHub as LittlyHubType, ChatRequest, ChatResponse, ChannelSender } from './hub.ts'

@@ -83,7 +83,7 @@ export async function runVoicePipeline(
     const buf = await fishTTS(ttsText, {
       apiKey,
       model: bot.ai_voice_model || 's2.1-pro-free',
-      referenceId: bot.ai_voice_reference_id || undefined,
+      ...(bot.ai_voice_reference_id ? { referenceId: bot.ai_voice_reference_id } : {}),
       temperature: bot.ai_voice_temperature ?? 0.7,
       speed: bot.ai_voice_speed ?? 1,
       latency: 'balanced' as FishLatency,
