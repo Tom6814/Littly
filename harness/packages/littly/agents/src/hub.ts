@@ -12,6 +12,7 @@ import type { LittlyStorage, MessageRow } from '@littly/storage'
 import type { LittlyPersona } from '@littly/persona'
 import type { LittlyMemory } from '@littly/memory'
 import { chatComplete, type ChatMessage } from '@littly/llm'
+import { runVoicePipeline } from '@littly/voice'
 import { createToolRegistry, extractTextToolCall, type ChannelBridge, type ToolExecResult } from '@littly/tools'
 import { HUMANIZE_CHAT_STYLE, pieceDelays, sleep, splitHumanized, type HumanizeConfig } from './humanize.ts'
 import { fixParenPerson, looksCrisis, looksGarbled, stripThinkingText } from './postprocess.ts'
@@ -208,6 +209,8 @@ export class LittlyHub {
       name: unknown
       ai_max_history: number; ai_temperature: number; ai_model: string; ai_humanize_enabled: number; ai_humanize_wechat: number;
       sleep_until: string | null
+      ai_voice_enabled: number; ai_voice_model: string; ai_voice_reference_id: string
+      ai_voice_api_key: string; ai_voice_temperature: number; ai_voice_speed: number
     }
     // §回响睡眠 — 用户来消息即唤醒
     if (botRow.sleep_until) {
@@ -395,18 +398,48 @@ export class LittlyHub {
       finalReply = recovered && !looksGarbled(recovered) ? recovered : '……我在，别做傻事。'
     }
 
+    // --- 3.5 §voice 三轮流水线（可选）---
+    // 角色AI产出完整文本 → 语气AI判定/改写（同一 key、无角色提示词、绝不喂工具数据）→ Fish TTS。
+    // 只在「纯文本回复」时考虑语音：有图/文件产物时跳过；任何失败静默回落文字（fail-open）。
+    let voiceUrl: string | undefined
+    let voiceText: string | undefined
+    if (botRow.ai_voice_enabled && finalReply && artifacts.length === 0) {
+      const voice = await runVoicePipeline(this.storage, {
+        bot: {
+          ai_voice_enabled: botRow.ai_voice_enabled,
+          ai_voice_model: botRow.ai_voice_model,
+          ai_voice_reference_id: botRow.ai_voice_reference_id,
+          ai_voice_api_key: botRow.ai_voice_api_key,
+          ai_voice_temperature: botRow.ai_voice_temperature,
+          ai_voice_speed: botRow.ai_voice_speed,
+        },
+        finalReply,
+        history: orderedHistory.map((m) => ({ role: m.role, content: m.content })),
+        currentText: req.text,
+      }, this.cwd)
+      if (voice.useVoice) {
+        voiceUrl = voice.audioUrl
+        voiceText = voice.text
+      }
+    }
+
     // --- 4. 落库（沉默不落库）---
     let savedMessageId: string | undefined
     if (finalReply) {
       savedMessageId = randomUUID()
-      const replyType = artifacts.some((a) => a?.type === 'image') ? 'image' : artifacts.some((a) => a?.type === 'file') ? 'file' : 'text'
-      this.storage.prepare("INSERT INTO messages (id, bot_id, sender, role, content, reply_type, reasoning, channel_id, delivery_status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
-        .run(savedMessageId, req.botId, req.sender, 'assistant', finalReply, replyType, lastThinking || null, req.channelId ?? '', 'sent', new Date().toISOString())
+      const replyType = voiceUrl
+        ? 'voice'
+        : artifacts.some((a) => a?.type === 'image') ? 'image' : artifacts.some((a) => a?.type === 'file') ? 'file' : 'text'
+      this.storage.prepare("INSERT INTO messages (id, bot_id, sender, role, content, reply_type, reasoning, channel_id, delivery_status, voice_url, voice_original_text, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+        .run(savedMessageId, req.botId, req.sender, 'assistant', finalReply, replyType, lastThinking || null, req.channelId ?? '', 'sent', voiceUrl ?? '', voiceText ?? '', new Date().toISOString())
     }
 
     // --- 5. 拟人化分片 + 渠道投递 ---
     const humanizeCfg: HumanizeConfig = { enabled: !!botRow.ai_humanize_wechat, maxSplits: 10, perPieceDelayMs: 1200, totalDelayCapMs: 6000 }
-    const pieces = finalReply ? splitHumanized(finalReply, humanizeCfg) : []
+    // §voice — 语音消息不拆分：整条就是一个完整句子/语音气泡（不要分行）。
+    const pieces = voiceUrl
+      ? (finalReply ? [finalReply] : [])
+      : finalReply ? splitHumanized(finalReply, humanizeCfg) : []
     if (finalReply && currentChannel !== 'web' && req.channelId) {
       try {
         const sender0 = this.senders.get(req.channelId)
@@ -437,6 +470,8 @@ export class LittlyHub {
       toolCalls: toolCallLog,
       thinkingLength: lastThinking.length,
       rawThinking: lastThinking,
+      voiceUrl,
+      voiceText,
       messageId: savedMessageId,
     }
   }

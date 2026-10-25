@@ -21,8 +21,7 @@
     # 对话主链路 + 缓冲窗口 + 渠道投递
     - id: littly-agents
       name: '@littly/agents'
-    - id: littly-voice
-      name: '@littly/voice'
+    # @littly/voice 是库模块（无 apply），由 @littly/agents 直接引用，不作为插件行装配
     - id: littly-console-api
       name: '@littly/console-api'
     - id: littly-scheduler

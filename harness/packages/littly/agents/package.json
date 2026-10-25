@@ -21,6 +21,7 @@
     "@littly/memory": "workspace:*",
     "@littly/persona": "workspace:*",
     "@littly/storage": "workspace:*",
-    "@littly/tools": "workspace:*"
+    "@littly/tools": "workspace:*",
+    "@littly/voice": "workspace:*"
   }
 }
