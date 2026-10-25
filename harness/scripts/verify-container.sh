@@ -50,10 +50,10 @@ fi
 
 echo "== 健康与静态资源 =="
 code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${PORT}/api")
-ok "$([ "$code" = "200" ] && echo 1 || echo 0)" "/api 200（实际 $code）"
+ok "$([ "$code" = "200" ] && echo 1 || echo 0)" "/api 200（实际 ${code}）"
 
 code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${PORT}/")
-ok "$([ "$code" = "200" ] && echo 1 || echo 0)" "控制台首页 200（实际 $code）"
+ok "$([ "$code" = "200" ] && echo 1 || echo 0)" "控制台首页 200（实际 ${code}）"
 
 body=$(curl -s "http://127.0.0.1:${PORT}/")
 case "$body" in
@@ -62,7 +62,7 @@ case "$body" in
 esac
 
 code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${PORT}/console/bili")
-ok "$([ "$code" = "200" ] && echo 1 || echo 0)" "SPA 路由回首页（实际 $code）"
+ok "$([ "$code" = "200" ] && echo 1 || echo 0)" "SPA 路由回首页（实际 ${code}）"
 
 echo "== profile 播种（首启必须发生）=="
 seeded=$(docker exec "$NAME" sh -c 'ls "$DSH_HOME/profiles/chat/package.json" > /dev/null 2>&1 && echo yes || echo no')
