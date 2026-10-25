@@ -6,8 +6,8 @@
  * b) 到期预约消息：gate（promise 永远放行；proactive 过三道闸）→ hub.runTurn 生成
  *    并按 scheduled.channel 投递 → 状态落库 + 审计（proactive_gate / scheduled_fire）。
  * c) 日记自动写作（diary 审计）。
- * d) TODO(M3) 心声回响（heartbeat）：旧 bot/heartbeat.ts 的静默扫描 + 指数退避唤醒，
- *    今晚不移植；用户来消息唤醒（hub.runTurn 清 sleep_until）语义已就位。
+ * d) 心声回响（heartbeat）：静默扫描 + 指数退避唤醒 → 决策 LLM → 落地为
+ *    预约消息 / 内心记忆 / 沉默审计（§monologue）。
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -15,6 +15,7 @@ import type { LittlyStorage } from '@littly/storage'
 import type { LittlyHub } from '@littly/agents'
 import type { LittlyMemory } from '@littly/memory'
 import { runDiaryTick } from './diary.ts'
+import { tickHeartbeat } from './heartbeat.ts'
 import { processScheduledMessages } from './scheduled.ts'
 import type { SchedulerDeps } from './types.ts'
 
@@ -60,7 +61,9 @@ export async function tick(deps: SchedulerDeps, now: Date, opts: { skipDiary: bo
     if (written > 0) deps.log('[scheduler] 日记写作 %d 篇', written)
   }
 
-  // d) TODO(M3) heartbeat（心声回响）
+  // d) 心声回响（heartbeat）：静默扫描 + 指数退避唤醒
+  const hb = await tickHeartbeat(deps, now)
+  if (hb.woken > 0) deps.log('[scheduler] 心声回响唤醒 %d/%d', hb.woken, hb.scanned)
 }
 
 export function apply(ctx: Context, config: Config): void {
