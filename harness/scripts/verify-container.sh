@@ -100,9 +100,56 @@ else
   fi
 fi
 
+echo "== 容器重建不丢数据（持久卷）=="
+# 「不丢数据」是硬承诺：容器删了重建（不是重启），卷还在，数据必须在。
+# 这里真删一次容器再起一个，验证卷里的库确实承载了业务数据。
+FATAL_BEFORE=$(docker logs "$NAME" 2>&1 | grep -icE "fatal|failed to import" || true)
+COOKIE_JAR="/tmp/littly-verify-cookie-$$.txt"
+rm -f "$COOKIE_JAR"
+curl -s -c "$COOKIE_JAR" -o /dev/null -X POST "http://127.0.0.1:${PORT}/api/auth/login" \
+  -H 'content-type: application/json' \
+  -d "{\"username\":\"${E2E_USER}\",\"password\":\"${E2E_PASS}\"}"
+marker="persist-$$-$(date +%s)"
+created=$(curl -s -b "$COOKIE_JAR" -X POST "http://127.0.0.1:${PORT}/api/bots" \
+  -H 'content-type: application/json' -d "{\"name\":\"${marker}\"}")
+bot_id=$(printf '%s' "$created" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+if [ -z "$bot_id" ]; then
+  ok 0 "写入标记 bot（响应：${created}）"
+else
+  ok 1 "写入标记 bot ${marker}"
+  # 删掉容器（保留卷）→ 重新起一个
+  docker rm -f "$NAME" > /dev/null 2>&1 || true
+  docker run -d --name "$NAME" \
+    -p "${PORT}:3000" \
+    -v "littly-verify-data-$$:/app/data" \
+    -e TZ=Asia/Shanghai \
+    "$IMAGE" > /dev/null
+  READY2=0
+  for i in $(seq 1 120); do
+    if curl -sf "http://127.0.0.1:${PORT}/api" > /dev/null 2>&1; then READY2=1; break; fi
+    sleep 2
+  done
+  ok "$READY2" "重建后的容器 240s 内就绪"
+  # 重新登录（会话 cookie 跟着容器一起没了，库还在）
+  curl -s -c "$COOKIE_JAR" -o /dev/null -X POST "http://127.0.0.1:${PORT}/api/auth/login" \
+    -H 'content-type: application/json' \
+    -d "{\"username\":\"${E2E_USER}\",\"password\":\"${E2E_PASS}\"}"
+  after=$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${PORT}/api/bots")
+  case "$after" in
+    *"${marker}"*) ok 1 "重建后标记 bot 还在（数据在卷里，没丢）" ;;
+    *) ok 0 "重建后标记 bot 还在（响应：${after}）" ;;
+  esac
+  # 顺带确认首启播种是幂等的：重建后不会多出第二个小璃
+  chars=$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${PORT}/api/characters")
+  count=$(printf '%s' "$chars" | grep -o '"name":"小璃"' | wc -l | tr -d ' ')
+  ok "$([ "$count" = "1" ] && echo 1 || echo 0)" "重建后角色卡仍只有 1 张（播种幂等，实际 ${count}）"
+fi
+rm -f "$COOKIE_JAR"
+
 echo "== 容器日志无致命错误 =="
 fatal=$(docker logs "$NAME" 2>&1 | grep -icE "fatal|failed to import" || true)
-ok "$([ "$fatal" = "0" ] && echo 1 || echo 0)" "无 fatal / failed to import（实际 $fatal 条）"
+total_fatal=$((FATAL_BEFORE + fatal))
+ok "$([ "$total_fatal" = "0" ] && echo 1 || echo 0)" "无 fatal / failed to import（重建前后合计 $total_fatal 条）"
 
 echo
 echo "结果: $PASS 通过, $FAIL 失败"
