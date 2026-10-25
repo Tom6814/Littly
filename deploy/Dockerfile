@@ -23,11 +23,19 @@ RUN git init -q && git config user.email build@littly.local && git config user.n
 RUN pnpm run build:artifacts
 
 FROM node:24-bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+# python3/pip：给 MCP 面提供 `bili mcp serve`（stdio）；ca-certificates 供网络请求
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip && rm -rf /var/lib/apt/lists/*
+# bili-agent：她自己的 B 站账号（与 sidecar 共用 BILI_CLI_HOME → 同一个账号）
+# 装不上也不阻塞镜像构建：MCP 行是 failOnStartupError=false，元工具走 HTTP sidecar
+RUN pip3 install --no-cache-dir --break-system-packages "bili-agent[mcp]==0.9.1" || \
+    echo "[warn] bili-agent 安装失败：MCP 面不可用，bili 元工具仍走 HTTP sidecar"
 WORKDIR /app/harness
 ENV NODE_ENV=production \
     TZ=Asia/Shanghai \
-    DSH_HOME=/app/data/dsh-home
+    DSH_HOME=/app/data/dsh-home \
+    LITTLY_DB_FILE=/app/data/littly.db \
+    BILI_CLI_HOME=/app/bili-data/bili-cli \
+    BILI_BIN=bili
 # 运行时仅需：依赖树 + 构建产物 + 插件源码（dsh 插件以 .ts 源码直接加载）
 COPY --from=build /app/harness/node_modules ./node_modules
 COPY --from=build /app/harness/package.json ./package.json
@@ -41,6 +49,8 @@ COPY deploy/entrypoint.sh ./deploy-entrypoint.sh
 RUN chmod +x ./deploy-entrypoint.sh
 # SQLite 业务库与 dsh home 落持久卷
 VOLUME ["/app/data"]
+# bilibili 账号状态（与 bili sidecar 共用同一卷的同一路径 → 同一个账号）
+VOLUME ["/app/bili-data"]
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=3s --retries=8 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api').then(r=>process.exit(0)).catch(()=>process.exit(1))"

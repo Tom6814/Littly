@@ -237,6 +237,8 @@ export interface BiliQrState {
   qrImage?: string;
   qrUrl?: string;
   message?: string;
+  /** sidecar 会话 id：轮询状态时必须带上 */
+  sessionId?: string;
 }
 
 export interface PromptLayer {

@@ -3,8 +3,12 @@
 # 从 web-app bundle 提取但去掉 webStartup / web 前端依赖；业务插件的行加在下面。
 - insert:
     # 业务存储（SQLite，业务 schema）
+    # file 走 LITTLY_DB_FILE：容器里必须落在持久卷上（默认 data/littly.db 是相对 cwd 的，
+    # 会落在 /app/harness/data 而不是挂载卷，容器重建即丢库）。
     - id: littly-storage
       name: '@littly/storage'
+      config:
+        file: !!js process.env.LITTLY_DB_FILE || 'data/littly.db'
 
     # 分层提示词组装（人格核心）
     - id: littly-persona
@@ -21,6 +25,10 @@
     # 人格成长系统（潜意识评审 / 事实审计 / 对抗质询 / 提议-审批）
     - id: littly-growth
       name: '@littly/growth'
+
+    # bilibili：收敛口（把原始 MCP 工具挡在带护栏的 bili 元工具后面）
+    - id: littly-bili
+      name: '@littly/bili'
 
     # 对话主链路 + 缓冲窗口 + 渠道投递
     - id: littly-agents
@@ -64,3 +72,19 @@
     # 定时任务服务（dsh 原生：cron → agent.followup），Littly 调度器底座
     - id: schedule
       name: '@deepseek-ai/dsh-schedule'
+
+    # bilibili MCP 服务器（stdio）：她自己的 B 站账号。
+    # 未安装 bili 时不阻塞启动（failOnStartupError=false）；模型侧统一走 bili 元工具，
+    # 原始 MCP 工具由 @littly/bili 收敛掉（见 docs/BILI-INTEGRATION.md）。
+    - id: mcp-bili
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: bili
+        transport: stdio
+        command: !!js process.env.BILI_BIN || 'bili'
+        args: [mcp, serve]
+        env:
+          BILI_CLI_HOME: !!js process.env.BILI_CLI_HOME || '/app/data/bili-cli'
+        failOnStartupError: false
+        reconnect:
+          enabled: false

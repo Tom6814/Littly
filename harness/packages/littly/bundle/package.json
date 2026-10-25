@@ -24,6 +24,7 @@
     "@littly/llm": "workspace:*",
     "@littly/memory": "workspace:*",
     "@littly/growth": "workspace:*",
+    "@littly/bili": "workspace:*",
     "@littly/persona": "workspace:*",
     "@littly/storage": "workspace:*",
     "@littly/tools": "workspace:*",

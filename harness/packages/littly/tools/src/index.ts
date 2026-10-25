@@ -9,9 +9,10 @@ import type { LittlyStorage, MemoryRow } from '@littly/storage'
 import { generateImage, webSearch } from '@littly/llm'
 import type { LittlyMemory } from '@littly/memory'
 import { ALL_TOOLS, type ToolDef } from './defs.ts'
+import { biliAuthStatus, biliRunCommand } from './bili.ts'
 
 export { extractTextToolCall, type TextToolCall, type TextToolParseResult } from './text-call.ts'
-export { ALL_TOOLS, toolByName, type ToolDef } from './defs.ts'
+export { ALL_TOOLS, toolByName, BILI_TOOL, type ToolDef } from './defs.ts'
 
 export interface ToolExecCtx {
   botId: string
@@ -174,6 +175,25 @@ class Registry implements LittlyToolRegistry {
         if (r.changes === 0) throw new Error('contact not found')
         return { result: { ok: true } }
       }
+      case 'bili': {
+        const argv = Array.isArray(args.argv) ? (args.argv as unknown[]).map((a) => String(a)).filter((a) => a.trim() !== '') : []
+        const dryRun = typeof args.dryRun === 'boolean' ? args.dryRun : undefined
+        if (argv.length === 0) {
+          // 不给子命令 → 返回账号状态（她自己的 B 站登录态）
+          const envelope = await biliAuthStatus()
+          return { result: { ok: envelope.ok !== false, account: envelope.data ?? null, error: envelope.error ?? null } }
+        }
+        const r = await biliRunCommand(argv, dryRun)
+        return {
+          result: {
+            ok: r.result.ok !== false,
+            exitCode: r.exitCode,
+            dryRun: r.dryRun,
+            data: r.result.data ?? null,
+            error: r.result.error ?? null,
+          },
+        }
+      }
       case 'web_search': {
         const results = await webSearch(this.storage, s('query'), Number(args.num) || 5)
         return { result: { ok: true, results } }
@@ -275,3 +295,5 @@ export function createToolRegistry(
 ): LittlyToolRegistry {
   return new Registry(storage, memory, bridge, cwd)
 }
+
+export * from './bili.ts'

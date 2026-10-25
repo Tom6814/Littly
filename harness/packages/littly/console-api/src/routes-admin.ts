@@ -6,40 +6,26 @@ import { randomUUID } from 'node:crypto'
 import type { AuditLogRow, BotRow, CharacterRow, ContactRow, MemoryRow, MessageRow, ScheduledMessageRow } from '@littly/storage'
 import { invalidateAIConfigCache } from '@littly/llm'
 import { parseChanges, parseProposalMeta } from '@littly/growth'
+import {
+  BiliSidecarError,
+  biliAuthStatus,
+  biliQrStart,
+  biliQrStatus,
+  biliRunCommand,
+} from '@littly/tools'
 import { json, err, bodyRecord, reqStr, reqNum, reqBool, type ApiRequest } from './http.ts'
 import { maskSecret, isMaskedInput } from './mapping.ts'
 import { isAdmin, ownSender, senderAllowed, loadBot, queryStr, nowIso } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
-const BILI_BASE_DEFAULT = 'http://127.0.0.1:3010'
-
-function biliBase(): string {
-  return process.env['BILI_SIDECAR_URL']?.replace(/\/+$/, '') || BILI_BASE_DEFAULT
-}
-
-/** Bilibili sidecar 代理：sidecar 不可达时统一 502。 */
-async function proxyBili(ctx: ApiRequest, path: string, init?: { method: string; body?: unknown }): Promise<void> {
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 15000)
-    const requestInit: RequestInit = { method: init?.method ?? 'GET', signal: controller.signal }
-    if (init?.body !== undefined) {
-      requestInit['headers'] = { 'content-type': 'application/json' }
-      requestInit['body'] = JSON.stringify(init.body)
-    }
-    const res = await fetch(`${biliBase()}${path}`, requestInit)
-    clearTimeout(timer)
-    const text = await res.text()
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(text) as unknown
-    } catch {
-      parsed = { output: text }
-    }
-    json(ctx.res, res.status, { data: parsed })
-  } catch (error) {
-    err(ctx.res, 502, 'bili_unavailable', `Bilibili sidecar 不可达：${error instanceof Error ? error.message : String(error)}`)
+/** Bilibili sidecar 错误 → 统一信封（sidecar 不可达 = 502；业务错误码原样透传）。 */
+function biliFail(ctx: ApiRequest, error: unknown): void {
+  if (error instanceof BiliSidecarError) {
+    const status = error.status === 502 || error.status === 504 ? 502 : error.status >= 400 && error.status < 600 ? error.status : 502
+    err(ctx.res, status, error.code, error.message)
+    return
   }
+  err(ctx.res, 502, 'bili_unavailable', `Bilibili sidecar 不可达：${error instanceof Error ? error.message : String(error)}`)
 }
 
 /** AI 设置的出参形状（apiKey / 嵌套 embedding、image 的密钥均打码）。 */
@@ -337,13 +323,89 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
 
   // ---- Bilibili sidecar 代理 ----
 
-  r.get('/api/bili/status', 'required', (ctx) => void proxyBili(ctx, '/status'))
-  r.post('/api/bili/qr/start', 'required', (ctx) => void proxyBili(ctx, '/qr/start', { method: 'POST' }))
-  r.get('/api/bili/qr/status', 'required', (ctx) => void proxyBili(ctx, '/qr/status'))
+  r.get('/api/bili/status', 'required', (ctx) => {
+    void (async (): Promise<void> => {
+      try {
+        const envelope = await biliAuthStatus()
+        const data = (typeof envelope.data === 'object' && envelope.data !== null ? envelope.data : {}) as Record<string, unknown>
+        const user = (typeof data['user'] === 'object' && data['user'] !== null ? data['user'] : {}) as Record<string, unknown>
+        json(ctx.res, 200, {
+          data: {
+            logined: data['logged_in'] === true || data['logined'] === true,
+            username: typeof user['uname'] === 'string' ? user['uname'] : typeof data['username'] === 'string' ? data['username'] : undefined,
+            mid: user['mid'] !== undefined ? String(user['mid']) : undefined,
+          },
+        })
+      } catch (e) {
+        biliFail(ctx, e)
+      }
+    })()
+  })
+
+  r.post('/api/bili/qr/start', 'required', (ctx) => {
+    void (async (): Promise<void> => {
+      try {
+        const body = await biliQrStart()
+        json(ctx.res, 200, {
+          data: {
+            status: typeof body['state'] === 'string' ? body['state'] : 'pending',
+            qrImage: typeof body['qr_image_base64'] === 'string' ? body['qr_image_base64'] : undefined,
+            qrUrl: typeof body['qr_url'] === 'string' ? body['qr_url'] : undefined,
+            sessionId: typeof body['session_id'] === 'string' ? body['session_id'] : undefined,
+            message: typeof body['next'] === 'string' ? body['next'] : undefined,
+          },
+        })
+      } catch (e) {
+        biliFail(ctx, e)
+      }
+    })()
+  })
+
+  r.get('/api/bili/qr/status', 'required', (ctx) => {
+    void (async (): Promise<void> => {
+      const sessionId = queryStr(ctx, 'sessionId', 'session_id') ?? ''
+      if (sessionId === '') {
+        err(ctx.res, 400, 'bad_request', '缺少 sessionId')
+        return
+      }
+      try {
+        const body = await biliQrStatus(sessionId)
+        json(ctx.res, 200, {
+          data: {
+            status: typeof body['state'] === 'string' ? body['state'] : 'unknown',
+            qrImage: typeof body['qr_image_base64'] === 'string' ? body['qr_image_base64'] : undefined,
+            message: typeof body['next'] === 'string' ? body['next'] : undefined,
+          },
+        })
+      } catch (e) {
+        biliFail(ctx, e)
+      }
+    })()
+  })
+
   r.post('/api/bili/cmd', 'required', (ctx) => {
-    const body = bodyRecord(ctx.body)
-    const argv = Array.isArray(body['argv']) ? (body['argv'] as unknown[]).map((a) => String(a)) : []
-    void proxyBili(ctx, '/cmd', { method: 'POST', body: { argv } })
+    void (async (): Promise<void> => {
+      const body = bodyRecord(ctx.body)
+      const argv = Array.isArray(body['argv']) ? (body['argv'] as unknown[]).map((a) => String(a)) : []
+      if (argv.length === 0) {
+        err(ctx.res, 400, 'bad_request', 'argv 不能为空')
+        return
+      }
+      try {
+        const r = await biliRunCommand(argv)
+        json(ctx.res, 200, {
+          data: {
+            ok: r.result.ok !== false,
+            exitCode: r.exitCode,
+            dryRun: r.dryRun,
+            output: typeof r.result.data === 'string' ? r.result.data : JSON.stringify(r.result.data ?? r.result.error ?? {}),
+            error: r.result.error ?? null,
+          },
+        })
+      } catch (e) {
+        biliFail(ctx, e)
+      }
+    })()
   })
 
   // ---- 调试 ----

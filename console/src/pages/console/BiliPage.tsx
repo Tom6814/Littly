@@ -27,6 +27,7 @@ export default function BiliPage() {
   const [qr, setQr] = useState<BiliQrState | null>(null);
   const [polling, setPolling] = useState(false);
   const pollRef = useRef<number | null>(null);
+  const sessionRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     return () => {
@@ -38,11 +39,12 @@ export default function BiliPage() {
     mutationFn: () => bili.qrStart(),
     onSuccess: (state) => {
       setQr(state);
+      sessionRef.current = state.sessionId;
       setPolling(true);
       if (pollRef.current !== null) window.clearInterval(pollRef.current);
       pollRef.current = window.setInterval(async () => {
         try {
-          const s = await bili.qrStatus();
+          const s = await bili.qrStatus(sessionRef.current);
           setQr((prev) => ({ ...(prev ?? {}), ...s }));
           const st = s.status ?? '';
           if (st === 'confirmed' || st.includes('confirm') || st.includes('success')) {

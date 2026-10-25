@@ -44,6 +44,8 @@
       "@littly/voice/src/*": ["./packages/littly/voice/src/*"],
       "@littly/growth": ["./packages/littly/growth/src/index.ts"],
       "@littly/growth/src/*": ["./packages/littly/growth/src/*"],
+      "@littly/bili": ["./packages/littly/bili/src/index.ts"],
+      "@littly/bili/src/*": ["./packages/littly/bili/src/*"],
       "@deepseek-ai/dsh-client-ui-entry-customization": ["./packages/client/ui-entry-customization/src/index.ts"],
       "@deepseek-ai/dsh-client-ui-entry-customization/client": ["./packages/client/ui-entry-customization/src/client/index.ts"],
       "@deepseek-ai/dsh-client-ui-entry-customization/src/*": ["./packages/client/ui-entry-customization/src/*"],

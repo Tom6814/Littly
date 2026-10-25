@@ -11867,6 +11867,9 @@ importers:
       '@littly/agents':
         specifier: workspace:*
         version: link:../agents
+      '@littly/bili':
+        specifier: workspace:*
+        version: link:../bili
       '@littly/channel-snowluma':
         specifier: workspace:*
         version: link:../channel-snowluma
@@ -11904,6 +11907,21 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:~
         version: link:../../../vendor/cordis
+
+  packages/littly/bili:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:~
+        version: link:../../core/tools
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/tools':
+        specifier: workspace:*
+        version: link:../tools
 
   packages/littly/channel-snowluma:
     dependencies:

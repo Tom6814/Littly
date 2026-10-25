@@ -744,11 +744,12 @@ export const bili = {
       status: asStr(firstOf(rec, 'status', 'state')),
       qrImage: asStr(firstOf(rec, 'qrImage', 'qr image', 'qrcodeImage', 'image')),
       qrUrl: asStr(firstOf(rec, 'qrUrl', 'url', 'qrcodeUrl')),
+      sessionId: asStr(firstOf(rec, 'sessionId', 'session_id')),
       message: asStr(rec.message),
     };
   },
-  async qrStatus(): Promise<BiliQrState> {
-    const data = await http.get<unknown>('/api/bili/qr/status');
+  async qrStatus(sessionId?: string): Promise<BiliQrState> {
+    const data = await http.get<unknown>('/api/bili/qr/status', sessionId ? { sessionId } : undefined);
     const rec = isRecord(data) ? data : {};
     return {
       status: asStr(firstOf(rec, 'status', 'state', 'code')),

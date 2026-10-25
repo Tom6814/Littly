@@ -7,7 +7,8 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     TZ=Asia/Shanghai \
-    BILI_CLI_HOME=/app/data/bili-cli
+    BILI_CLI_HOME=/app/bili-data/bili-cli \
+    BILI_SIDECAR_DATA=/app/bili-data/wrapper
 
 # ffmpeg：可选依赖——高清抽帧（video frames -q hd）、语音转写、投稿封面截取需要
 RUN apt-get update \
@@ -23,8 +24,8 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 COPY wrapper.py allowlist.py ./
 
-RUN mkdir -p /app/data
-VOLUME ["/app/data"]
+RUN mkdir -p /app/bili-data
+VOLUME ["/app/bili-data"]
 
 EXPOSE 3010
 
