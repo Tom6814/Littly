@@ -40,9 +40,11 @@ FROM node:24-bookworm-slim AS runtime
 # python3/pip：给 MCP 面提供 `bili mcp serve`（stdio）；ca-certificates 供网络请求
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip && rm -rf /var/lib/apt/lists/*
 # bili-agent：她自己的 B 站账号（与 sidecar 共用 BILI_CLI_HOME → 同一个账号）
-# 装不上也不阻塞镜像构建：MCP 行是 failOnStartupError=false，元工具走 HTTP sidecar
-RUN pip3 install --no-cache-dir --break-system-packages "bili-agent[mcp]==0.9.1" || \
-    echo "[warn] bili-agent 安装失败：MCP 面不可用，bili 元工具仍走 HTTP sidecar"
+# 给 MCP 面提供 `bili mcp serve`（stdio）。装不上也不阻塞镜像构建：
+# MCP 行是 failOnStartupError=false，bili 元工具走 HTTP sidecar。
+# 限时 300s：pip 解析慢时不让构建无限挂住。
+RUN timeout 300 pip3 install --no-cache-dir --break-system-packages --timeout 30 --retries 2 "bili-agent[mcp]==0.9.1" || \
+    echo "[warn] bili-agent 安装失败（或超时）：MCP 面不可用，bili 元工具仍走 HTTP sidecar"
 WORKDIR /app/harness
 ENV NODE_ENV=production \
     TZ=Asia/Shanghai \
