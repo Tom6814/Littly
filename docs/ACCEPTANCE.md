@@ -13,7 +13,7 @@
 | 控制台页面 | 15 + 聊天页 |
 | 内置工具 | 28 |
 | 控制台 API 路由 | 84 |
-| 行为断言 | 566（14 个脚本）+ 55（端到端） |
+| 行为断言 | 572（14 个脚本）+ 55（端到端）+ 15（扫码链路，需 live sidecar） |
 | 容器验收 | 10 项 |
 
 ---
@@ -57,7 +57,8 @@
 | Discord | `@littly/channel-discord`：Gateway + REST、DM 投递地址解析。`verify-discord.mjs` 68 项 |
 | 语音消息 | `@littly/voice`：Fish TTS + 三轮流水线（语气门按技术可读性判退），已接进对话主链路 |
 | /call 实时通话 | `@littly/voice-call`：同端口 `/call` WS（Deepgram STT → 角色快速回复 → Fish 流式 TTS → 通话卡片 → 挂断回响总结）。`verify-voice-call.mjs` 75 项 |
-| bilibili sidecar + 账号面板 | `sidecars/bili/`（HTTP wrapper）+ `@littly/tools` 的 `bili` 元工具（白名单 + dry-run + 限频 + 审计）+ 控制台「Bilibili」页（扫码登录）。`verify-bili.mjs` 30 项 |
+| bilibili sidecar + 账号面板 | `sidecars/bili/`（HTTP wrapper）+ `@littly/tools` 的 `bili` 元工具（白名单 + dry-run + 限频 + 审计）+ 控制台「Bilibili」页（扫码登录）。`verify-bili.mjs` 36 项 |
+| 扫码登录链路（用户反馈项） | 归一化在服务端做（`biliQrImageDataUrl`），API 直接返回 data URL，前端仍容错 —— 不再依赖「控制台 bundle 与 API 同版」。`verify-bili-sidecar.mjs` 15 项对着真 harness + 真 sidecar 跑完整链路；二维码 PNG 落盘肉眼确认为真实可扫的 B 站登录码 |
 | MCP 接入 | bundle 挂 `mcp-bili`（stdio `bili mcp serve`）；`@littly/bili` 收敛门把原始 `mcp__bili__*` 挡在元工具后面 |
 
 ## 5. M4 —— 控制台
@@ -76,7 +77,7 @@
 | 真实 dsh 插件兼容验收 | 实装 `dsh-case`（github:ZhijiangTang/dsh-case）：dsh 兼容性预检按设计拦下 → 精确豁免命令 → 安装 → 插件自检通过 → 其 `case_convert` 工具对 Littly 模型可见可调（`@littly/agents` 的 dsh-bridge）。另实测 npm 上真实社区插件 `dsh-context` 0.75.1 一键装成 bundle 并启用、可卸载 |
 | 迁移工具 | `scripts/migrate-legacy.mjs`：旧 Prisma 库 → 新 schema（20 表 + 记忆 v2 字段初值 + 全局配置）。**真库跑通**：818 消息 / 184 记忆 / 959 审计全部迁入。`verify-migrate.mjs` 21 项 |
 | deploy 编排 | `deploy/Dockerfile`（harness + 控制台同镜像）、`deploy/docker-compose.yml`（+ SnowLuma + bili sidecar）、`deploy/entrypoint.sh`（容器 IP 绑定 + profile 播种） |
-| 全量回归 | 566 行为断言 + 55 端到端 + 10 容器验收，全部通过 |
+| 全量回归 | 572 行为断言 + 55 端到端 + 15 扫码链路 + 10 容器验收，全部通过 |
 
 ## 6.5 绑定闭环（计划 v2 的硬承诺之一）
 
