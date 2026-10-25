@@ -13,6 +13,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+    # 显式给镜像名：构建一次，`compose up` 直接复用已构建好的镜像（`--no-build` 可完全跳过构建）
+    image: littly-harness:test
     container_name: littly-harness
     restart: unless-stopped
     ports:
@@ -34,7 +36,12 @@ services:
       - littly-data:/app/data
       - bili-data:/app/bili-data
     depends_on:
-      - bili
+      # bili 在 profile 里（默认不起），所以这个依赖必须是可选的 ——
+      # 否则默认的 `docker compose up` 会直接报 "depends on undefined service" 而起不来。
+      # sidecar 缺席时 harness 会优雅降级（控制台明确告诉用户它没连上、为什么、怎么起）。
+      bili:
+        condition: service_started
+        required: false
 
   snowluma:
     image: ghcr.io/snowluma/snowluma:latest  # TODO(M2): 锁定具体 tag
@@ -59,6 +66,7 @@ services:
     build:
       context: ../sidecars/bili
       dockerfile: Dockerfile
+    image: littly-bili:test
     container_name: littly-bili
     restart: unless-stopped
     profiles: ["bili"]
