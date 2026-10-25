@@ -64,6 +64,15 @@ ok(jar.size > 0, '拿到会话 cookie')
 const sess = await api('/api/auth/session')
 ok(sess.status === 200 && sess.json?.data?.user?.username === username, '会话可回读')
 
+// 装/卸插件是管理员操作：把本测试账号在库里提为管理员
+// （会话里的角色是每次请求实时读库的 —— 见 auth.ts userFromRequest）
+{
+  const { LittlyStorage } = await import('../packages/littly/storage/src/index.ts')
+  const store = new LittlyStorage({ logger: { info: () => {} } }, { file: process.env.LITTLY_DB_FILE ?? 'data/littly.db' })
+  store.prepare("UPDATE users SET role = 'admin' WHERE username = ?").run(username)
+  store.close()
+}
+
 console.log('== 插件清单（真实数据）==')
 const plugins = await api('/api/plugins')
 ok(plugins.status === 200, `/api/plugins 200（${plugins.status}）`)
@@ -77,6 +86,19 @@ ok(typeof caseTool?.description === 'string' && caseTool.description.length > 0,
 ok(Array.isArray(pdata.dsh) && pdata.dsh.length > 0, `dsh 插件清单非空（${(pdata.dsh ?? []).length}）`)
 ok(Array.isArray(pdata.skills), 'skills 字段存在')
 ok(Array.isArray(pdata.mcp), 'mcp 字段存在')
+
+console.log('== dsh 插件管理 ==')
+const pl = await api('/api/plugins')
+const pld = pl.json?.data ?? {}
+ok(Array.isArray(pld.installed), '已装插件清单存在')
+ok(pld.installed.length > 0, `已装插件非空（${(pld.installed ?? []).length}）`)
+ok(pld.installed.some((p) => String(p.name).includes('dsh-case')), '社区插件 dsh-case 在已装列表里')
+ok(Array.isArray(pld.bundles), '可安装 bundle 清单存在')
+ok((pld.bundles ?? []).some((b) => String(b.name).includes('dsh-case')), 'dsh-case 也在可安装清单里')
+const emptySpec = await api('/api/plugins/install', { method: 'POST', body: { spec: '' } })
+ok(emptySpec.status === 400, `空安装源 → 400（实际 ${emptySpec.status}）`)
+const dashSpec = await api('/api/plugins/install', { method: 'POST', body: { spec: '--dangerous' } })
+ok(dashSpec.status === 400, `以 - 开头的安装源 → 400（实际 ${dashSpec.status}）`)
 
 console.log('== 成长档案 ==')
 const growth = await api('/api/growth?botId=none')
