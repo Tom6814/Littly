@@ -33,6 +33,8 @@ export interface ApiRequest {
   query: URLSearchParams
   /** JSON body 解析结果；无 body / 非 JSON 时为 undefined。 */
   body: unknown
+  /** 原始请求体文本（JSON 请求保留原始串；HMAC 验签等场景需要）。 */
+  rawBody?: string | undefined
   /** multipart 普通字段。 */
   fields: Record<string, string>
   /** multipart 文件。 */
@@ -244,6 +246,7 @@ export class Router {
 
     // 请求体解析（统一读一次；GET/HEAD 之外都宽容解析 JSON，DELETE 也能带 body）
     let body: unknown
+    let rawBody: string | undefined
     let fields: Record<string, string> = {}
     let files: UploadedFile[] = []
     const contentType = String(req.headers['content-type'] ?? '')
@@ -261,7 +264,9 @@ export class Router {
           }
         } else {
           try {
-            body = JSON.parse(raw.toString('utf8')) as unknown
+            const text = raw.toString('utf8')
+            body = JSON.parse(text) as unknown
+            rawBody = text
           } catch {
             if (method !== 'DELETE') {
               err(res, 400, 'bad_request', '请求体不是合法 JSON')
@@ -280,6 +285,7 @@ export class Router {
       params,
       query: url.searchParams,
       body,
+      rawBody,
       fields,
       files,
       user,

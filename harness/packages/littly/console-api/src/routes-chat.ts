@@ -8,6 +8,7 @@ import { json, err, bodyRecord, reqStr, reqNum, type ApiRequest } from './http.t
 import { messageView, parseJsonObject } from './mapping.ts'
 import { isAdmin, resolveSender, senderAllowed, ownSender, queryStr, nowIso } from './deps.ts'
 import { listPendingCalls, consumePendingCall } from '@littly/voice-call'
+import { handleWechatWebhook } from '@littly/channel-wechat-ilink'
 import type { Deps, RegisterFn } from './deps.ts'
 
 function messageRowById(d: Deps, id: string): MessageRow | undefined {
@@ -298,6 +299,22 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
     }
     conversations.sort((a, b) => String(b['lastAt'] ?? '').localeCompare(String(a['lastAt'] ?? '')))
     json(ctx.res, 200, { data: { conversations } })
+  })
+
+  // ---- 微信桥接 Webhook（HMAC 验签 / challenge / reply_async / 幂等）----
+
+  r.post('/api/wechat/inbound', 'public', (ctx) => {
+    void (async (): Promise<void> => {
+      const rawBody = ctx.rawBody ?? (typeof ctx.body === 'string' ? ctx.body : JSON.stringify(ctx.body ?? {}))
+      const timestamp = ctx.req.headers['x-timestamp']
+      const signature = ctx.req.headers['x-signature']
+      const result = await handleWechatWebhook(
+        rawBody,
+        { timestamp: typeof timestamp === 'string' ? timestamp : null, signature: typeof signature === 'string' ? signature : null },
+        { storage: d.storage, hub: d.hub, log: d.log },
+      )
+      json(ctx.res, result.status, result.body)
+    })()
   })
 
   // ---- 来电请求（AI 主动来电：控制台轮询取件）----

@@ -88,6 +88,21 @@ const calls = await api('/api/call/requests?botId=none')
 ok(calls.status === 200, `/api/call/requests 200（${calls.status}）`)
 ok(Array.isArray(calls.json?.data?.calls), 'calls 数组存在')
 
+console.log('== 微信桥接 Webhook ==')
+// challenge 回显（不需要签名）
+const chal = await api('/api/wechat/inbound', {
+  method: 'POST',
+  body: { type: 'url_verification', challenge: 'echo-me' },
+})
+ok(chal.status === 200, `challenge 回显 200（${chal.status}）`)
+ok(chal.json?.challenge === 'echo-me', 'challenge 原样回显')
+// 正常消息但没有配置 bot → 明确错误，不是 500
+const noBot = await api('/api/wechat/inbound', {
+  method: 'POST',
+  body: { type: 'message', id: 'e1', from_user_id: 'wxid-x@im.wechat', content: 'hi' },
+})
+ok(noBot.status >= 400 && noBot.status < 500, `无匹配 bot → 4xx（实际 ${noBot.status}）`)
+
 console.log('== MCP 服务器增删 ==')
 const add = await api('/api/plugins/mcp', { method: 'POST', body: { name: 'e2e-demo', transport: 'stdio', command: 'true', args: [] } })
 ok(add.status === 200, `加 MCP 服务器 200（${add.status}）`)
@@ -101,9 +116,12 @@ const list2 = await api('/api/plugins')
 ok(!(list2.json?.data?.mcp ?? []).some((s) => s.name === 'e2e-demo'), '删除后不再出现在清单里')
 
 console.log('== 工具按角色启停 ==')
+// 先建一个角色（管理员才能建），这样启停断言不会因库里没角色而跳过
+const created = await api('/api/bots', { method: 'POST', body: { name: `e2e_bot_${Date.now()}` } })
+const createdBot = created.json?.data?.bot?.id ?? created.json?.data?.bot?.botId
 const bots = await api('/api/bots')
 const botList = bots.json?.data?.bots ?? bots.json?.data ?? []
-const botId = Array.isArray(botList) ? botList[0]?.id : undefined
+const botId = createdBot ?? (Array.isArray(botList) ? botList[0]?.id : undefined)
 if (!botId) {
   console.log('  （跳过：库里还没有 bot，停用断言需要先建角色）')
 } else {

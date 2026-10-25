@@ -109,3 +109,6 @@ export function apply(ctx: Context, config: Config): void {
   })
   ctx.logger.info('littly wechat-ilink channel ready (selfHeal=%dms)', selfHealMs)
 }
+
+export { handleWechatWebhook } from './webhook.ts'
+export type { WechatWebhookDeps, WechatWebhookResult } from './webhook.ts'

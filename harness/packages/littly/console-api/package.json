@@ -18,6 +18,7 @@
     "@deepseek-ai/dsh-plugin-manager": "workspace:~",
     "@deepseek-ai/dsh-skill": "workspace:~",
     "@littly/agents": "workspace:*",
+    "@littly/channel-wechat-ilink": "workspace:*",
     "@littly/growth": "workspace:*",
     "@littly/llm": "workspace:*",
     "@littly/mcp": "workspace:*",

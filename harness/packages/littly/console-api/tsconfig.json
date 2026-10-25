@@ -18,6 +18,7 @@
     { "path": "../growth" },
     { "path": "../mcp" },
     { "path": "../voice-call" },
+    { "path": "../channel-wechat-ilink" },
     { "path": "../../boot/plugin-manager" },
     { "path": "../../skill/skill" }
   ]
