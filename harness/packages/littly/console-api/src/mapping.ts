@@ -160,8 +160,9 @@ export function relationView(row: ContactRelationRow, nameBySender: Map<string, 
   }
 }
 
-export function memoryView(row: MemoryRow): Record<string, unknown> {
+export function memoryView(row: MemoryRow, protectedIds?: ReadonlySet<string>): Record<string, unknown> {
   return {
+    ...(protectedIds?.has(row.id) === true ? { protected: true } : {}),
     id: row.id,
     botId: row.bot_id,
     sender: row.sender,

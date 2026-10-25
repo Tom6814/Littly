@@ -82,6 +82,36 @@ export interface Memory {
   validUntil?: string;
   deletedAt?: string | null;
   createdAt?: string;
+  /** ⑨ newest-N 硬保护能力位 */
+  protected?: boolean;
+}
+
+export interface MemoryExplain {
+  memory: Memory;
+  timing: {
+    eventTime: string;
+    eventTimeRaw: string;
+    recordedAt: string;
+    lastVerified?: string | null;
+    effectiveTime: string;
+    volatility: string;
+    halfLifeDays: number;
+  };
+  provenance: { kind: string; note: string };
+  tombstone: {
+    deleted: boolean;
+    deletedAt?: string | null;
+    deletedReason: string;
+    supersededBy?: string | null;
+    supersededByContent?: string | null;
+    supersededFrom: Array<{ id: string; content: string }>;
+  };
+  retrieval: {
+    score: number;
+    matchedBy: string;
+    signals: { relevance: number; importance: number; recency: number };
+  };
+  protected?: boolean;
 }
 
 export interface Diary {

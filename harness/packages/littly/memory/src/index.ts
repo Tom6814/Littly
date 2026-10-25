@@ -4,6 +4,7 @@
  * v2 增量：event_time 衰减（score.ts）、supersede 语义、explain 台账、幂等回执。
  */
 import { randomUUID } from 'node:crypto'
+import { contentSha256, detectDrift, explainMemory, readReceipt, writeReceipt, type DriftReport, type MemoryExplain, type MemoryHit } from './explain.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { LittlyStorage, MemoryRow } from '@littly/storage'
@@ -34,8 +35,21 @@ export const SUMMARY_MAX_CHARS = 1500
 export const HARD_PROTECT_COUNT = 5
 export const MAX_AI_INPUT = 100
 
+/** ⑨ newest-N 硬保护：最近写入的 N 条打上 protected 能力位。 */
+function markProtected(rows: MemoryRow[]): MemoryHit[] {
+  const byNewest = [...rows].sort((a, b) => (b.recorded_at || b.created_at).localeCompare(a.recorded_at || a.created_at))
+  const protectedIds = new Set(byNewest.slice(0, HARD_PROTECT_COUNT).map((r) => r.id))
+  return rows.map((r) => (protectedIds.has(r.id) ? { ...r, protected: true } : { ...r }))
+}
+
 export class LittlyMemory {
-  constructor(private readonly ctx: Context, private readonly storage: LittlyStorage) {}
+  private readonly ctx: Context
+  private readonly storage: LittlyStorage
+
+  constructor(ctx: Context, storage: LittlyStorage) {
+    this.ctx = ctx
+    this.storage = storage
+  }
 
   private all<T>(sql: string, ...params: unknown[]): T[] {
     return this.storage.prepare(sql).all(...params) as T[]
@@ -72,7 +86,7 @@ export class LittlyMemory {
 
   // ---- 检索（铁律：绝不抛异常）----
 
-  async retrieveMemories(opts: { botId: string; sender: string; query: string; limit?: number }): Promise<MemoryRow[]> {
+  async retrieveMemories(opts: { botId: string; sender: string; query: string; limit?: number }): Promise<MemoryHit[]> {
     const limit = opts.limit ?? DEFAULT_LIMIT
     try {
       const pool = this.all<MemoryRow>(
@@ -122,16 +136,17 @@ export class LittlyMemory {
       // 副池：关系事实优先（6 + 4），防 thought 刷屏挤掉关键关系（08-28 事故教训）
       const crossRel = crossPool.filter((m) => m.category === 'relationship' || m.category === 'value').slice(0, 6)
       const crossOther = crossPool.filter((m) => !crossRel.includes(m)).slice(0, 4)
-      const picked = [...main, ...crossRel, ...crossOther]
-      return picked.slice(0, limit + 10)
+      const picked = [...main, ...crossRel, ...crossOther].slice(0, limit + 10)
+      // ⑨ newest-N 硬保护：变成命中结果上的 protected 能力位（最近写入的 N 条）
+      return markProtected(picked)
     } catch (err) {
       this.ctx.logger.warn('retrieveMemories failed: %s', err)
       try {
         // 兜底：重要度↓时间↓
-        return this.all<MemoryRow>(
+        return markProtected(this.all<MemoryRow>(
           'SELECT * FROM memories WHERE bot_id = ? AND sender = ? AND deleted_at IS NULL ORDER BY importance DESC, created_at DESC LIMIT ?',
           opts.botId, opts.sender, limit,
-        )
+        ))
       } catch {
         return []
       }
@@ -164,16 +179,35 @@ export class LittlyMemory {
   async remember(
     botId: string,
     sender: string,
-    item: { category?: string; content: string; importance?: number; expiresAt?: string | null; provenance?: string },
-  ): Promise<{ id: string; dupSkipped: boolean }> {
+    item: {
+      category?: string
+      content: string
+      importance?: number
+      expiresAt?: string | null
+      provenance?: string
+      /** 幂等键：同键重复写入返回同一条结果，不产生新行 */
+      idempotencyKey?: string
+      /** 期望的内容哈希：与库里实际内容不符时报告漂移 */
+      ifSha256?: string
+    },
+  ): Promise<{ id: string; dupSkipped: boolean; idempotentReplay?: boolean; drift?: DriftReport }> {
     const now = new Date().toISOString()
+    // ⑩ 幂等回执：同键直接回放上次结果
+    if (item.idempotencyKey) {
+      const receipt = readReceipt(this.storage, item.idempotencyKey)
+      if (receipt) return { ...receipt, idempotentReplay: true }
+    }
     const dup = await this.findDuplicateMemory(botId, sender, item.content)
     if (dup) {
+      // ⑩ if_sha256 漂移检测：同一话题的内容已被改动 → 报告漂移（不静默覆盖）
+      const drift = detectDrift(item.ifSha256, dup.content)
       const importance = Math.min(5, Math.max(1, item.importance ?? 1))
       if (importance > dup.importance) {
         this.storage.prepare('UPDATE memories SET importance = ? WHERE id = ?').run(importance, dup.id)
       }
-      return { id: dup.id, dupSkipped: true }
+      const receipt = { id: dup.id, dupSkipped: true }
+      if (item.idempotencyKey) writeReceipt(this.storage, item.idempotencyKey, receipt)
+      return drift ? { ...receipt, drift } : receipt
     }
     const id = randomUUID()
     this.storage.prepare(
@@ -197,7 +231,19 @@ export class LittlyMemory {
     })()
     // 整理阈值检查（fire-and-forget）
     void this.maybeAutoConsolidate(botId, sender).catch(() => {})
-    return { id, dupSkipped: false }
+    const receipt = { id, dupSkipped: false }
+    if (item.idempotencyKey) writeReceipt(this.storage, item.idempotencyKey, receipt)
+    return receipt
+  }
+
+  /** ⑧ explain 台账：一条记忆的完整来历（出处/时间/墓碑链/召回理由）。 */
+  explain(botId: string, id: string): MemoryExplain | null {
+    return explainMemory(this.storage, botId, id)
+  }
+
+  /** 内容哈希（if_sha256 漂移检测的期望值来源）。 */
+  static hashContent(content: string): string {
+    return contentSha256(content)
   }
 
   /** 翻旧账：淡忘池（时间窗）+ 历史原文（无窗）。 */
@@ -360,3 +406,5 @@ export function apply(ctx: Context, _config: Config): void {
   ctx.provide('littlyMemory', memory)
   ctx.logger.info('littly memory ready')
 }
+
+export * from './explain.ts'

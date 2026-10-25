@@ -12,6 +12,9 @@ import { contactView, relationView, memoryView, diaryView, photoView, scheduledV
 import { isAdmin, resolveSender, senderAllowed, ownSender, loadBot, queryStr, nowIso } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
+/** ⑨ newest-N 硬保护条数（与 memory 包同口径）。 */
+const HARD_PROTECT_COUNT = 5
+
 function savePhotoFile(d: Deps, filename: string, data: Buffer): string {
   const safeBase = basename(filename).replace(/[^\w.-]/g, '_') || 'photo'
   const ext = extname(safeBase) || '.png'
@@ -164,7 +167,10 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
           `SELECT * FROM memories WHERE bot_id = ?${includeDeleted ? '' : ' AND deleted_at IS NULL'} ORDER BY recorded_at DESC LIMIT 500`,
         ).all(botId)
     ) as unknown as MemoryRow[]
-    json(ctx.res, 200, { data: { memories: rows.map(memoryView) } })
+    // ⑨ newest-N 硬保护：列表里也标出来（与召回结果同一口径）
+    const newest = [...rows].sort((a, b) => (b.recorded_at || b.created_at).localeCompare(a.recorded_at || a.created_at))
+    const protectedIds = new Set(newest.slice(0, HARD_PROTECT_COUNT).map((r) => r.id))
+    json(ctx.res, 200, { data: { memories: rows.map((r) => memoryView(r, protectedIds)) } })
   })
 
   r.post('/api/memories', 'required', async (ctx) => {
@@ -247,6 +253,22 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
     d.storage.prepare("UPDATE memories SET deleted_at = ?, deleted_reason = ? WHERE id = ? AND deleted_at IS NULL").run(now, '控制台手动淡忘', row.id)
     const updated = memoryRow(d, row.id)
     json(ctx.res, 200, { data: { memory: updated === undefined ? memoryView(row) : memoryView(updated) } })
+  })
+
+  // §记忆检查器 —— explain 台账：这条记忆从哪来、什么时候、被谁取代、为什么被召回
+  r.get('/api/memories/:id/explain', 'required', (ctx) => {
+    const id = ctx.params['id'] ?? ''
+    const botId = queryStr(ctx, 'botId') ?? ''
+    if (id === '' || botId === '') {
+      err(ctx.res, 400, 'bad_request', '缺少记忆 id 或 botId')
+      return
+    }
+    const explain = d.memory.explain(botId, id)
+    if (explain === null) {
+      err(ctx.res, 404, 'not_found', '记忆不存在')
+      return
+    }
+    json(ctx.res, 200, { data: explain })
   })
 
   r.post('/api/memories/:id/restore', 'required', (ctx) => {

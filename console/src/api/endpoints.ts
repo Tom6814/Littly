@@ -14,6 +14,7 @@ import type {
   Diary,
   GrowthData,
   Memory,
+  MemoryExplain,
   PersonaRules,
   Photo,
   PluginsData,
@@ -369,6 +370,7 @@ function toMemory(v: unknown): Memory | undefined {
   const id = asStr(firstOf(v, 'id', 'memoryId'));
   if (!id) return undefined;
   return {
+    ...(asBool(v['protected']) ? { protected: true } : {}),
     id,
     botId: asStr(v.botId),
     sender: asStr(firstOf(v, 'sender', 'contactId', 'owner')),
@@ -409,6 +411,51 @@ export const memories = {
   },
   async restore(id: string): Promise<unknown> {
     return http.post(`/api/memories/${encodeURIComponent(id)}/restore`);
+  },
+  async explain(id: string, botId: string): Promise<MemoryExplain | undefined> {
+    const data = await http.get<unknown>(`/api/memories/${encodeURIComponent(id)}/explain`, { botId });
+    const rec = isRecord(data) ? data : {};
+    const mem = toMemory(rec['memory']);
+    if (!mem) return undefined;
+    const timing = isRecord(rec['timing']) ? rec['timing'] : {};
+    const prov = isRecord(rec['provenance']) ? rec['provenance'] : {};
+    const tomb = isRecord(rec['tombstone']) ? rec['tombstone'] : {};
+    const retr = isRecord(rec['retrieval']) ? rec['retrieval'] : {};
+    const signals = isRecord(retr['signals']) ? retr['signals'] : {};
+    return {
+      memory: mem,
+      timing: {
+        eventTime: asStr(timing['eventTime']) ?? '',
+        eventTimeRaw: asStr(timing['eventTimeRaw']) ?? '',
+        recordedAt: asStr(timing['recordedAt']) ?? '',
+        lastVerified: asStr(timing['lastVerified']),
+        effectiveTime: asStr(timing['effectiveTime']) ?? '',
+        volatility: asStr(timing['volatility']) ?? 'stable',
+        halfLifeDays: asNum(timing['halfLifeDays']) ?? 30,
+      },
+      provenance: { kind: asStr(prov['kind']) ?? 'unknown', note: asStr(prov['note']) ?? '' },
+      tombstone: {
+        deleted: asBool(tomb['deleted']) ?? false,
+        deletedAt: asStr(tomb['deletedAt']),
+        deletedReason: asStr(tomb['deletedReason']) ?? '',
+        supersededBy: asStr(tomb['supersededBy']),
+        supersededByContent: asStr(tomb['supersededByContent']),
+        supersededFrom: pickArray<unknown>(tomb, 'supersededFrom').map((x) => {
+          const r = isRecord(x) ? x : {};
+          return { id: asStr(r['id']) ?? '', content: asStr(r['content']) ?? '' };
+        }),
+      },
+      retrieval: {
+        score: asNum(retr['score']) ?? 0,
+        matchedBy: asStr(retr['matchedBy']) ?? 'lexical',
+        signals: {
+          relevance: asNum(signals['relevance']) ?? 0,
+          importance: asNum(signals['importance']) ?? 0,
+          recency: asNum(signals['recency']) ?? 0,
+        },
+      },
+      protected: asBool(rec['protected']) ?? false,
+    };
   },
   async consolidate(botId: string, sender: string, dryRun: boolean): Promise<unknown> {
     return http.post('/api/memories/consolidate', { botId, sender, dryRun });

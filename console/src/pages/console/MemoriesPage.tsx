@@ -35,6 +35,7 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import dayjs from 'dayjs';
 import { contacts as contactsApi, memories as memoriesApi } from '../../api/endpoints';
 import type { Memory } from '../../api/types';
+import { memories } from '../../api/endpoints';
 import { errMsg, useUiStore } from '../../stores/uiStore';
 import { useBotId } from '../../hooks';
 import PageHeader from '../../components/PageHeader';
@@ -116,6 +117,15 @@ export default function MemoriesPage() {
   const [form, setForm] = useState<MemoryForm | null>(null);
   const [fadeTarget, setFadeTarget] = useState<Memory | null>(null);
   const [consolidatePreview, setConsolidatePreview] = useState<unknown>(null);
+  // §记忆检查器 —— explain 台账
+  const [ledgerId, setLedgerId] = useState<string | null>(null);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  const ledgerQuery = useQuery({
+    queryKey: ['memory-ledger', ledgerId, botId],
+    queryFn: () => memories.explain(ledgerId!, botId ?? ''),
+    enabled: !!ledgerId && !!botId && ledgerOpen,
+  });
+
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['memories', botId] });
@@ -285,6 +295,11 @@ export default function MemoriesPage() {
                       )}
                     </TableCell>
                     <TableCell align="right">
+                      <Tooltip title="台账（这条记忆从哪来）">
+                        <Button size="small" onClick={(e) => { e.stopPropagation(); setLedgerId(m.id); setLedgerOpen(true); }}>
+                          台账
+                        </Button>
+                      </Tooltip>
                       <Tooltip title="编辑">
                         <Button size="small" onClick={(e) => { e.stopPropagation(); setForm(formFrom(m)); }}>
                           编辑
@@ -356,6 +371,63 @@ export default function MemoriesPage() {
       </Paper>
 
       {/* 新建/编辑 */}
+      {/* §记忆检查器 —— explain 台账：出处 / 三层时间 / 墓碑链 / 召回理由 */}
+      <Dialog open={ledgerOpen} onClose={() => setLedgerOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>记忆台账</DialogTitle>
+        <DialogContent>
+          {ledgerQuery.isPending ? (
+            <SkeletonTable />
+          ) : ledgerQuery.data ? (
+            <Stack spacing={1.5}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">内容</Typography>
+                <Typography variant="body2">{ledgerQuery.data.memory.content}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">出处</Typography>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Chip size="small" variant="outlined" label={ledgerQuery.data.provenance.kind} />
+                  <Typography variant="body2">{ledgerQuery.data.provenance.note}</Typography>
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  记忆是提示，不是证据 —— 拿不准的事，回原话里看。
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">三层时间</Typography>
+                <Typography variant="body2">
+                  发生：{ledgerQuery.data.timing.eventTime || '—'}（半衰期 {ledgerQuery.data.timing.halfLifeDays} 天，{ledgerQuery.data.timing.volatility}）
+                </Typography>
+                <Typography variant="body2">记录：{ledgerQuery.data.timing.recordedAt || '—'}</Typography>
+                <Typography variant="body2">最后核验：{ledgerQuery.data.timing.lastVerified || '—'}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">墓碑链</Typography>
+                {ledgerQuery.data.tombstone.deleted ? (
+                  <Typography variant="body2">已淡忘（{ledgerQuery.data.tombstone.deletedReason || '无原因'}）</Typography>
+                ) : (
+                  <Typography variant="body2">有效</Typography>
+                )}
+                {ledgerQuery.data.tombstone.supersededByContent && (
+                  <Typography variant="body2">已被取代 → {ledgerQuery.data.tombstone.supersededByContent}</Typography>
+                )}
+                {ledgerQuery.data.tombstone.supersededFrom.map((s) => (
+                  <Typography key={s.id} variant="body2">取代了：{s.content}</Typography>
+                ))}
+              </Box>
+              {ledgerQuery.data.protected && (
+                <Chip size="small" color="success" variant="outlined" label="硬保护（最近写入，不会被整理掉）" />
+              )}
+            </Stack>
+          ) : (
+            <Typography variant="body2">没有找到这条记忆的台账</Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLedgerOpen(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={!!form} onClose={() => setForm(null)} maxWidth="sm" fullWidth>
         <DialogTitle>{form?.id ? '编辑记忆' : '新建记忆'}</DialogTitle>
         <DialogContent>
