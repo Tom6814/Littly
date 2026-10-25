@@ -1,0 +1,128 @@
+name: littly-ci
+
+# 门禁：构建全绿 + 全部行为断言通过 + 控制台构建通过。
+# 与本地验证一致：node scripts/verify-*.mjs（除 verify-e2e.mjs 需真启动服务）。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  harness:
+    name: harness 构建与行为断言
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: harness
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: harness/pnpm-lock.yaml
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建产物（含 native 插件）
+        run: pnpm run build:artifacts
+
+      - name: 行为断言
+        run: |
+          set -e
+          for s in scripts/verify-*.mjs; do
+            case "$s" in
+              # 端到端要真启动服务，由下面的 e2e job 跑
+              *verify-e2e.mjs) continue ;;
+            esac
+            echo "== $s =="
+            node "$s"
+          done
+
+  console:
+    name: 控制台构建
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+
+  e2e:
+    name: 端到端（真启动）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: harness
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: harness/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build:artifacts
+
+      - name: 启动并跑端到端断言
+        run: |
+          set -e
+          export DSH_HOME="$PWD/.dsh-home-ci"
+          node apps/cli/lib/bin.js --profile chat > /tmp/boot.log 2>&1 &
+          BOOT_PID=$!
+          trap 'kill -9 $BOOT_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:3000/api > /dev/null; then break; fi
+            sleep 1
+          done
+          node scripts/verify-e2e.mjs 3000
+
+  docker:
+    name: 容器镜像构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建镜像
+        run: docker build -f deploy/Dockerfile -t littly-harness:ci .
+      - name: 起容器并探活
+        run: |
+          set -e
+          docker run -d --name littly-ci -p 3000:3000 littly-harness:ci
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:3000/api > /dev/null; then
+              echo "容器就绪"
+              curl -s http://127.0.0.1:3000/api
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "容器 180s 内未就绪"
+          docker logs littly-ci || true
+          exit 1

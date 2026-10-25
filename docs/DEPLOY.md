@@ -1,0 +1,155 @@
+# Littly 部署与验收
+
+> 一句话：**单容器 = harness 内核 + 控制台前端 + 业务库**；QQ 与 B 站是可选 sidecar。
+
+---
+
+## 1. 容器部署（推荐）
+
+```sh
+# 构建（仓库根）
+docker build -f deploy/Dockerfile -t littly-harness .
+
+# 起容器
+docker run -d --name littly \
+  -p 3000:3000 \
+  -v littly-data:/app/data \
+  -v littly-bili:/app/bili-data \
+  -e TZ=Asia/Shanghai \
+  -e OPENAI_API_KEY=sk-xxx \
+  littly-harness
+
+# 打开 http://localhost:3000/ ，注册第一个账号（自动成为管理员）
+```
+
+镜像里有什么：
+
+| 层 | 内容 |
+|---|---|
+| `harness/` | dsh 内核 + `@littly/bundle`（业务插件）+ 构建产物 |
+| `console/dist` | 控制台前端（MUI + Vite），由 console-api 的 fallback 托管 |
+| `python3 + bili-agent` | MCP 面的 `bili mcp serve`（stdio） |
+
+持久卷：
+
+| 卷 | 路径 | 内容 |
+|---|---|---|
+| `littly-data` | `/app/data` | 业务 SQLite（`littly.db`）+ dsh home（`dsh-home/`） |
+| `littly-bili` | `/app/bili-data` | 她的 bilibili 账号状态（与 sidecar 共用同一路径 → 同一个账号） |
+
+**首启会做两件事**（都由 `deploy/entrypoint.sh` 触发）：
+
+1. **profile 播种** —— dsh 的 profile 是 `$DSH_HOME/profiles/<name>` 的一等公民，
+   容器里没有开发时那根软链，所以首启由 `harness/scripts/seed-profile.mjs`
+   把镜像里的 `profiles/chat` 播种过去（幂等，不覆盖你改过的内容），
+   并按需装一次 profile 的外部依赖。
+2. **webserver 绑定** —— dsh 拒绝 `0.0.0.0` 通配绑定，entrypoint 用
+   `hostname -i` 取容器自身 IP 再注入。
+
+### 必填环境变量
+
+| 变量 | 说明 |
+|---|---|
+| `OPENAI_API_KEY` | 模型服务密钥（也可在控制台「全局设置」里配，走 DB KV） |
+| `OPENAI_BASE_URL` | 可选，OpenAI 兼容服务地址 |
+| `OPENAI_CHAT_MODEL` | 可选，默认模型名 |
+| `PORT` | 可选，默认 3000 |
+| `BILI_SIDECAR_URL` | 有 bili sidecar 时设 `http://bili:3010` |
+| `BILI_SIDECAR_TOKEN` | sidecar 设了 token 时必须一致 |
+
+---
+
+## 2. 编排（harness + SnowLuma + bili sidecar）
+
+```sh
+docker compose -f deploy/docker-compose.yml up -d --profile qq --profile bili
+```
+
+- **SnowLuma**（QQ 账号）：官方镜像，需 `SYS_PTRACE`；首次启用用 noVNC(6081) 扫码登录。
+  harness 侧在控制台「角色设置 → SnowLuma」填 OneBot 正向 WS 地址。
+- **bili sidecar**：`sidecars/bili` 构建，`BILI_ALLOW_WRITES=0` 时写操作一律预演。
+  控制台「Bilibili」页扫码登录，AI 侧走 `bili` 元工具（白名单 + dry-run + 审计）。
+
+---
+
+## 3. 接入社区 dsh 插件
+
+harness 支持直接装社区插件（计划 v2 §2 的兼容性验收）：
+
+```sh
+cd harness
+DSH_HOME="$PWD/.dsh-home" node apps/cli/lib/bin.js plugin --profile chat add "github:<owner>/<repo>"
+```
+
+- 插件的 peer 版本与当前 dsh 不匹配时，插件管理器会**按设计拦下**并给出精确的豁免命令；
+  确认风险后可执行它提示的 `allow-version ... --accept-risk` 再重试。
+- 装好后**它注册的工具对她可见可调**：`@littly/agents` 的 dsh-bridge 把
+  `ctx.tools` 的工具投影成 Littly 工具形状，模型调用时转回 `ctx.tools.execute`。
+- 例：`dsh-case` 提供 `case_convert`（命名风格转换），控制台「插件管理」页能看到。
+
+---
+
+## 4. 旧库迁移
+
+旧项目（Next.js 单体）的 `db/custom.db` 一次性迁进新 schema：
+
+```sh
+cd harness
+node scripts/migrate-legacy.mjs "/path/to/old/db/custom.db" /path/to/new/littly.db
+```
+
+- 旧库只读；新库没有 schema 会就地按 storage 插件同一份 DDL 建表。
+- 记忆补 v2 字段初值（`event_time=recorded_at`、`provenance='user-stated'`）。
+- 旧审计类别 `call_summary` 映射为 `heartbeat`（新库 CHECK 只认 7 种）。
+- 全局配置（模型配置的唯一真相源，含 API Key）一并带走。
+- `BindingToken` 是一次性凭证（10 分钟时效），故意不迁。
+
+---
+
+## 5. 验收（全部是能跑的脚本）
+
+```sh
+cd harness
+pnpm run build:artifacts          # 构建：7 个 gate 全绿才算过
+
+# 行为断言（逐个跑，退出码非 0 即失败）
+for s in scripts/verify-*.mjs; do
+  case "$s" in *verify-e2e.mjs) continue ;; esac
+  node "$s"
+done
+
+# 端到端（要真起服务）
+DSH_HOME="$PWD/.dsh-home" node apps/cli/lib/bin.js --profile chat &
+node scripts/verify-e2e.mjs 3000
+```
+
+| 脚本 | 覆盖 |
+|---|---|
+| `verify-memory.mjs` | 记忆打分 / 历史窗口 / 拟人化分片 / 出口后处理 / 工具兜底 |
+| `verify-memory-v2.mjs` | explain 台账 / protected 能力位 / 幂等回执 + 漂移检测 |
+| `verify-growth.mjs` | 三铁律硬校验 / 月底窗口 / 提议-审批全链路 / 版本冲突 / 回滚 |
+| `verify-heartbeat.mjs` | 退避序列 / 静默时段 / JSON 稳健提取 / 决策落地 / 扫描守卫 |
+| `verify-bili.mjs` | sidecar 客户端 / 元工具 / dry-run 强制 / MCP 收敛门 |
+| `verify-mcp.mjs` | 服务器清单解析 / 工具命名 / 按角色启停集合 |
+| `verify-events.mjs` | 对话过程事件订阅/退订/异常隔离/按会话路由 |
+| `verify-migrate.mjs` | 旧库迁移的行数守恒 / 字段映射 / 幂等 |
+| `verify-qq-official.mjs` | QQ 官方网关（59 项） |
+| `verify-discord.mjs` | Discord 网关（68 项） |
+| `verify-wechat-ilink.mjs` | 微信 iLink + 桥接 Webhook（78 项） |
+| `verify-voice-call.mjs` | 通话协议 / 精简 prompt 层集 / 回响总结（75 项） |
+| `verify-e2e.mjs` | 真启动：注册登录 / 插件清单 / 成长 / 来电 / MCP 增删 / 工具启停 / 控制台静态托管 / 越界防护 |
+
+CI（`.github/workflows/ci.yml`）跑同样的门禁：构建 + 断言 + 控制台构建 + 端到端 + 容器构建探活。
+
+---
+
+## 6. 本地开发
+
+```sh
+# harness（端口 3000）
+cd harness && pnpm install && pnpm run build:artifacts
+DSH_HOME="$PWD/.dsh-home" node apps/cli/lib/bin.js --profile chat
+
+# 控制台（另开一个，端口 5173，API 代理到 3000）
+cd console && pnpm install && pnpm run dev
+```
