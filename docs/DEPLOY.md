@@ -46,6 +46,11 @@ docker run -d --name littly \
 2. **webserver 绑定** —— dsh 拒绝 `0.0.0.0` 通配绑定，entrypoint 用
    `hostname -i` 取容器自身 IP 再注入。
 
+另外，**业务库是空的，第一次打开控制台时会自动播种**（旧仓 `ensureSeed` 的行为）：
+自动建出 bot「小璃」、**完整的**铁律、演示角色卡和三条演示世界书。
+所以新装好打开 `http://localhost:3000/` 就能直接聊，不用先去后台点任何东西。
+播种是幂等的 —— 已有就不动，你改过的铁律 / 角色卡不会被覆盖。
+
 ### 必填环境变量
 
 | 变量 | 说明 |
@@ -62,13 +67,21 @@ docker run -d --name littly \
 ## 2. 编排（harness + SnowLuma + bili sidecar）
 
 ```sh
+# 全量（QQ + B 站）
 docker compose -f deploy/docker-compose.yml up -d --profile qq --profile bili
+
+# 只要 harness（bili 是可选依赖，缺席时控制台会明确告诉你它没连上）
+docker compose -f deploy/docker-compose.yml up -d
 ```
 
 - **SnowLuma**（QQ 账号）：官方镜像，需 `SYS_PTRACE`；首次启用用 noVNC(6081) 扫码登录。
   harness 侧在控制台「角色设置 → SnowLuma」填 OneBot 正向 WS 地址。
 - **bili sidecar**：`sidecars/bili` 构建，`BILI_ALLOW_WRITES=0` 时写操作一律预演。
   控制台「Bilibili」页扫码登录，AI 侧走 `bili` 元工具（白名单 + dry-run + 审计）。
+
+编排文件里的两个服务都写了显式 image 名（`littly-harness:test` / `littly-bili:test`），
+所以 `docker compose build` 构建一次，之后 `compose up` 直接复用，
+`--no-build` 可以完全跳过构建步骤。
 
 ---
 
@@ -125,19 +138,23 @@ node scripts/verify-e2e.mjs 3000
 
 | 脚本 | 覆盖 |
 |---|---|
-| `verify-memory.mjs` | 记忆打分 / 历史窗口 / 拟人化分片 / 出口后处理 / 工具兜底 |
-| `verify-memory-v2.mjs` | explain 台账 / protected 能力位 / 幂等回执 + 漂移检测 |
-| `verify-growth.mjs` | 三铁律硬校验 / 月底窗口 / 提议-审批全链路 / 版本冲突 / 回滚 |
-| `verify-heartbeat.mjs` | 退避序列 / 静默时段 / JSON 稳健提取 / 决策落地 / 扫描守卫 |
-| `verify-bili.mjs` | sidecar 客户端 / 元工具 / dry-run 强制 / MCP 收敛门 |
-| `verify-mcp.mjs` | 服务器清单解析 / 工具命名 / 按角色启停集合 |
-| `verify-events.mjs` | 对话过程事件订阅/退订/异常隔离/按会话路由 |
-| `verify-migrate.mjs` | 旧库迁移的行数守恒 / 字段映射 / 幂等 |
+| `verify-memory.mjs` | 记忆打分 / 历史窗口 / 拟人化分片 / 出口后处理 / 工具兜底（32 项） |
+| `verify-memory-v2.mjs` | explain 台账 / protected 能力位 / 幂等回执 + 漂移检测（29 项） |
+| `verify-growth.mjs` | 三铁律硬校验 / 月底窗口 / 提议-审批全链路 / 版本冲突 / 回滚（58 项） |
+| `verify-heartbeat.mjs` | 退避序列 / 静默时段 / JSON 稳健提取 / 决策落地 / 扫描守卫（42 项） |
+| `verify-bili.mjs` | sidecar 客户端 / 元工具 / dry-run 强制 / MCP 收敛门 / 二维码归一化（36 项） |
+| `verify-bili-sidecar.mjs` | 扫码登录全链路（需真 harness + 真 sidecar，15 项） |
+| `verify-mcp.mjs` | 服务器清单解析 / 工具命名 / 按角色启停集合（18 项） |
+| `verify-events.mjs` | 对话过程事件订阅/退订/异常隔离/按会话路由（9 项） |
+| `verify-migrate.mjs` | 旧库迁移的行数守恒 / 字段映射 / 幂等（21 项） |
+| `verify-bind.mjs` | 发码 / 消费 / 一次性 / 冲突 / 身份归一 / 解绑（22 项） |
+| `verify-seed.mjs` | 首启播种：bot / 完整铁律 / 角色卡 / 世界书 / 幂等 / 不覆盖（40 项） |
+| `verify-secret-mask.mjs` | 密钥三态：掩码=保持 / 空串=清空 / 其它=写入（25 项） |
 | `verify-qq-official.mjs` | QQ 官方网关（59 项） |
 | `verify-discord.mjs` | Discord 网关（68 项） |
 | `verify-wechat-ilink.mjs` | 微信 iLink + 桥接 Webhook（78 项） |
 | `verify-voice-call.mjs` | 通话协议 / 精简 prompt 层集 / 回响总结（75 项） |
-| `verify-e2e.mjs` | 真启动：注册登录 / 插件清单 / 成长 / 来电 / MCP 增删 / 工具启停 / 控制台静态托管 / 越界防护 |
+| `verify-e2e.mjs` | 真启动：首启播种 / 注册登录 / 插件清单 / 成长 / 来电 / MCP 增删 / 工具启停 / 控制台静态托管 / 越界防护（59 项） |
 
 CI（`.github/workflows/ci.yml`）跑同样的门禁：构建 + 断言 + 控制台构建 + 端到端 + 容器构建探活。
 

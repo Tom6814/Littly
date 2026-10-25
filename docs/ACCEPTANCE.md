@@ -13,7 +13,7 @@
 | 控制台页面 | 15 + 聊天页 |
 | 内置工具 | 28 |
 | 控制台 API 路由 | 84 |
-| 行为断言 | 572（14 个脚本）+ 55（端到端）+ 15（扫码链路，需 live sidecar） |
+| 行为断言 | 612（15 个脚本）+ 59（端到端）+ 15（扫码链路，需 live sidecar） |
 | 容器验收 | 10 项 |
 
 ---
@@ -77,7 +77,7 @@
 | 真实 dsh 插件兼容验收 | 实装 `dsh-case`（github:ZhijiangTang/dsh-case）：dsh 兼容性预检按设计拦下 → 精确豁免命令 → 安装 → 插件自检通过 → 其 `case_convert` 工具对 Littly 模型可见可调（`@littly/agents` 的 dsh-bridge）。另实测 npm 上真实社区插件 `dsh-context` 0.75.1 一键装成 bundle 并启用、可卸载 |
 | 迁移工具 | `scripts/migrate-legacy.mjs`：旧 Prisma 库 → 新 schema（20 表 + 记忆 v2 字段初值 + 全局配置）。**真库跑通**：818 消息 / 184 记忆 / 959 审计全部迁入。`verify-migrate.mjs` 21 项 |
 | deploy 编排 | `deploy/Dockerfile`（harness + 控制台同镜像）、`deploy/docker-compose.yml`（+ SnowLuma + bili sidecar）、`deploy/entrypoint.sh`（容器 IP 绑定 + profile 播种） |
-| 全量回归 | 572 行为断言 + 55 端到端 + 15 扫码链路 + 10 容器验收，全部通过 |
+| 全量回归 | 612 行为断言 + 59 端到端 + 15 扫码链路 + 10 容器验收，全部通过 |
 
 ## 6.5 绑定闭环（计划 v2 的硬承诺之一）
 
@@ -120,6 +120,43 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 `settings` 与 `channels` 两条写回路径一致。`scripts/verify-secret-mask.mjs`（25 项）逐条锁定，
 包括「请求里没出现的字段（其它渠道的密钥）不受影响」这一条 —— 改一个渠道的另一个字段，不会碰到别的渠道的密钥。
 
+## 6.7 首启播种（开箱即用）
+
+容器验收时发现：容器内 e2e 只有 48 项（本地 55），差的那 7 项是「QQ 个人号渠道配置」——
+因为**新容器里根本没有 bot**。翻旧仓才找到根因。
+
+旧仓 `src/internal/config/seed.ts` 的 `ensureSeed()` 挂在
+`/api/bots`、`/api/chat`、`/api/chat/buffer`、`/api/chat/buffer/flush` 上：
+第一次打开控制台或第一次发消息就自动播种，全程感知不到。
+新仓移植时只剩 admin 手动 `POST /api/seed` —— 全新 Docker 部署打开控制台是一片空白。
+
+按旧仓逐字移植 `ensureSeed()`（`console-api/src/seed.ts`）：
+
+| 项 | 内容 | 旧仓一致 |
+|---|---|---|
+| bot | 小璃 + system_prompt / temperature 0.85 / maxHistory 20 / memoryScope global / 微信口语体 / 主动性 | ✓ |
+| 铁律 | **完整的** `DEFAULT_IRON_RULES`（1597 字） | ✓ |
+| 角色卡 | 旧仓原文（含 mes_example / tags / creator） | ✓ |
+| 世界书 | 三条：怕坐飞机 / 加班 / 生日 | ✓ |
+
+顺带修掉一个更要紧的：原来 `runSeed` 写的是 4 行**概括版**铁律 ——
+一旦触发就把「严格反 NTR」「唯一且永久不可改变」「记忆静默铁律」这些核心条覆盖掉，
+人格就变了。现在写的是完整版。
+
+实测（全新空库 —— 正是新 Docker 卷的样子）：
+
+| 检查 | 结果 |
+|---|---|
+| `GET /api/bots` → 1 个 bot 小璃 | ✓ |
+| `GET /api/characters` → 1 张角色卡 | ✓ |
+| 铁律 1597 字，含「严格反 NTR」「记忆静默铁律」，bot 级 + 全局兜底各一份 | ✓ |
+| 三条世界书按旧仓原文落库 | ✓ |
+| 播种幂等（连播三次不多出任何东西） | ✓ |
+| 用户改过的铁律 / bot 名不被覆盖 | ✓ |
+| 全新库上跑完整 e2e 59 项 | ✓ 0 失败 |
+
+`scripts/verify-seed.mjs`（40 项）逐条锁定。
+
 ## 7. 部署级验证（真实容器）
 
 `scripts/verify-container.sh` 起真实容器后逐项断言：
@@ -133,7 +170,7 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 | profile 已播种到 `$DSH_HOME`（首启关键动作） | ✓ |
 | SQLite 落在持久卷路径（不是容器临时路径） | ✓ |
 | 社区插件装进 profile | ✓ |
-| 对着容器跑端到端 55 项 | ✓ |
+| 对着容器跑端到端 59 项 | ✓ |
 | 容器日志无 fatal / failed to import | ✓ |
 | bili sidecar 不可达时优雅降级 | ✓ |
 
