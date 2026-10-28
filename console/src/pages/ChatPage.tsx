@@ -35,7 +35,7 @@ import dayjs from 'dayjs';
 import { API_BASE } from '../api/client';
 import { chat, contacts as contactsApi, normalizeMessage, normalizeToolCall } from '../api/endpoints';
 import type { BufferState, ChatMessage, Contact, ToolCallEvent } from '../api/types';
-import { useBotId, useCurrentBot } from '../hooks';
+import { useBotId, useCurrentBot, useUser } from '../hooks';
 import { useAppStore } from '../stores/appStore';
 import { errMsg, useUiStore } from '../stores/uiStore';
 import Composer from './chat/Composer';
@@ -95,9 +95,17 @@ export default function ChatPage() {
     enabled: !!botId,
   });
   const contactList: Contact[] = contactsQuery.data ?? [];
-  const sender = senderParam || contactList[0]?.id || '';
+  // 会话对象：优先用 URL 里指定的联系人；没有就退回「登录的这个用户」。
+  // 旧仓（src/app/page.tsx）就是拿 session.user.id 当 sender 的 ——
+  // 「你和她」是主线，联系人只是多场景的扩展。
+  // 如果绑死在联系人列表第一个：全新部署时库里一个联系人都没有，
+  // 聊天框就用不了、标题显示「未选择联系人」—— 那不是「要你先建联系人」，
+  // 那就是开箱用不了。
+  const currentUser = useUser();
+  const selfSender = currentUser?.id ?? '';
+  const sender = senderParam || contactList[0]?.id || selfSender;
 
-  // 未选择 sender 时默认选第一个联系人
+  // 未选择 sender 时默认选第一个联系人（没有联系人就不动 URL，用「我」）
   useEffect(() => {
     if (!botId) return;
     if (!senderParam && contactList.length > 0) {
@@ -414,6 +422,12 @@ export default function ChatPage() {
   }
 
   const currentContact = contactList.find((c) => c.id === sender);
+  // 会话对象的显示名：联系人优先；否则是「我」（登录的这个用户）
+  const senderName =
+    currentContact?.name ??
+    (sender !== '' && sender === selfSender ? (currentUser?.username ?? '我') : '未选择会话');
+  const senderAvatar = currentContact?.avatarUrl;
+  const isSelf = sender !== '' && sender === selfSender && !currentContact;
 
   const contactPicker = (
     <Box sx={{ borderBottom: 1, borderColor: 'divider', px: 1.5, py: 1 }}>
@@ -422,10 +436,15 @@ export default function ChatPage() {
           select
           fullWidth
           size="small"
-          label="联系人"
+          label="会话对象"
           value={sender}
           onChange={(e) => setSearchParams({ sender: e.target.value })}
         >
+          {isSelf && (
+            <MenuItem value={selfSender}>
+              我（{currentUser?.username ?? '本人'}）
+            </MenuItem>
+          )}
           {contactList.map((c) => (
             <MenuItem key={c.id} value={c.id}>
               {c.name}
@@ -434,10 +453,10 @@ export default function ChatPage() {
         </TextField>
       ) : (
         <Stack direction="row" alignItems="center" spacing={1}>
-          <Avatar src={currentContact?.avatarUrl} sx={{ width: 30, height: 30, fontSize: 13 }}>
-            {(currentContact?.name ?? '?').slice(0, 1)}
+          <Avatar src={senderAvatar} sx={{ width: 30, height: 30, fontSize: 13 }}>
+            {senderName.slice(0, 1)}
           </Avatar>
-          <Typography variant="subtitle2">{currentContact?.name ?? '未选择联系人'}</Typography>
+          <Typography variant="subtitle2">{senderName}</Typography>
           <Box sx={{ flexGrow: 1 }} />
           {sseDown && (
             <Tooltip title="实时连接不可用，已切换为轮询">
@@ -469,7 +488,8 @@ export default function ChatPage() {
       ) : merged.length === 0 ? (
         <Box sx={{ py: 8, textAlign: 'center' }}>
           <Typography color="text.secondary" variant="body2">
-            {sender ? '还没有对话，说第一句话吧。' : '先在「联系人」中创建一位联系人。'}
+            {/* 会话对象默认是「我」（登录的这个用户），不需要先建联系人 */}
+            还没有对话，说第一句话吧。
           </Typography>
         </Box>
       ) : (
@@ -496,7 +516,7 @@ export default function ChatPage() {
                   own={own}
                   botName={bot?.name ?? '她'}
                   botAvatar={bot?.avatarUrl}
-                  senderName={currentContact?.name}
+                  senderName={currentContact?.name ?? (isSelf ? currentUser?.username : undefined)}
                   senderAvatar={currentContact?.avatarUrl}
                   onContextMenu={(e: MouseEvent<HTMLDivElement>, msg) => {
                     e.preventDefault();
