@@ -79,6 +79,11 @@ VOLUME ["/app/data"]
 # bilibili 账号状态（与 bili sidecar 共用同一卷的同一路径 → 同一个账号）
 VOLUME ["/app/bili-data"]
 EXPOSE 3000
-HEALTHCHECK --interval=15s --timeout=3s --retries=8 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api').then(r=>process.exit(0)).catch(()=>process.exit(1))"
+# 健康检查探的是**实际在监听的那个地址**。
+# dsh 拒绝 0.0.0.0 通配绑定，entrypoint 让它绑容器自身 IP（hostname -i）——
+# 所以探 127.0.0.1 永远 ECONNREFUSED，容器会一直显示 unhealthy。
+# 地址由 entrypoint 写到 /tmp/littly-web-host（healthcheck 是另起的 exec，
+# 拿不到 entrypoint 的 export）。
+HEALTHCHECK --interval=15s --timeout=5s --retries=8 \
+  CMD node -e "const fs=require('node:fs');let h='';try{h=fs.readFileSync('/tmp/littly-web-host','utf8').trim()}catch{};if(!h){const os=require('node:os');h=(Object.values(os.networkInterfaces()).flat().find(i=>i&&i.family==='IPv4'&&!i.internal)||{}).address||'127.0.0.1'}fetch('http://'+h+':'+(process.env.PORT||3000)+'/api').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 ENTRYPOINT ["./deploy-entrypoint.sh"]

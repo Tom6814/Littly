@@ -52,6 +52,16 @@ echo "== 健康与静态资源 =="
 code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${PORT}/api")
 ok "$([ "$code" = "200" ] && echo 1 || echo 0)" "/api 200（实际 ${code}）"
 
+# 健康检查探的是**实际在监听的那个地址**（dsh 拒绝 0.0.0.0，绑的是容器 IP）。
+# 如果它还在探 127.0.0.1，容器会一直 unhealthy —— 这里真等它变 healthy。
+HEALTHY=0
+for i in $(seq 1 40); do
+  state=$(docker inspect "$NAME" --format '{{.State.Health.Status}}' 2>/dev/null || echo none)
+  if [ "$state" = "healthy" ]; then HEALTHY=1; break; fi
+  sleep 3
+done
+ok "$HEALTHY" "容器健康检查变成 healthy（否则编排里 depends_on: service_healthy 永远等不到）"
+
 code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${PORT}/")
 ok "$([ "$code" = "200" ] && echo 1 || echo 0)" "控制台首页 200（实际 ${code}）"
 
