@@ -124,12 +124,6 @@ export function ensureSeed(d: Deps): SeedResult {
       now,
     )
     character = { id: characterId }
-    // 挂到 bot 上
-    d.storage.prepare('UPDATE bots SET character_id = ? WHERE id = ? AND (character_id IS NULL OR character_id = ?)').run(
-      characterId,
-      bot.id,
-      characterId,
-    )
     // 演示世界书
     for (const e of DEMO_WORLD_ENTRIES) {
       d.storage.prepare(
@@ -150,6 +144,17 @@ export function ensureSeed(d: Deps): SeedResult {
         '',
       )
     }
+  }
+
+  // 角色卡挂到 bot 上（不管角色卡是这次新建的还是早就有的）。
+  // 旧仓只在「角色卡刚创建」时挂 —— 那是因为旧仓里 bot 和角色卡总是一起出现。
+  // 但如果 bot 存在而角色卡后来被删了/别的路径建的，旧逻辑就永远挂不上，
+  // 结果是「有角色卡，但 bot 没挂她」—— 提示词里就没有角色卡那一层。
+  const attached = d.storage.prepare('SELECT character_id FROM bots WHERE id = ?').get(bot.id) as
+    | { character_id: string | null }
+    | undefined
+  if (attached === undefined || attached.character_id === null || attached.character_id === '') {
+    d.storage.prepare('UPDATE bots SET character_id = ? WHERE id = ?').run(character.id, bot.id)
   }
 
   return { seeded: true, skipped: false, botId: bot.id, characterId: character.id }

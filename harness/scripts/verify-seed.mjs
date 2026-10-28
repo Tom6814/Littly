@@ -110,6 +110,18 @@ const after2 = storage.prepare('SELECT rules_text FROM persona_rules WHERE bot_i
 ok(after2.rules_text === '我自己写的铁律', '用户改过的铁律不被覆盖')
 ok(storage.prepare('SELECT name FROM bots WHERE id = ?').get(bot.id).name === '我改的名字', '用户改过的 bot 名不被覆盖')
 
+console.log('== 角色卡必须真的挂在 bot 上 ==')
+// 角色卡存在但 bot 没挂她 —— 提示词里就没有「角色卡」那一层，人格会缺一大块。
+storage.prepare('UPDATE bots SET character_id = NULL WHERE id = ?').run(bot.id)
+ensureSeed(deps)
+const reattached = storage.prepare('SELECT character_id FROM bots WHERE id = ?').get(bot.id).character_id
+ok(reattached === ch.id, '角色卡丢了挂载关系时，播种会补挂回去')
+ok((storage.prepare('SELECT COUNT(*) AS c FROM characters').get()).c === 1, '补挂不会多造角色卡')
+// 已经挂好的 bot 不动
+storage.prepare('UPDATE bots SET character_id = ? WHERE id = ?').run(ch.id, bot.id)
+ensureSeed(deps)
+ok(storage.prepare('SELECT character_id FROM bots WHERE id = ?').get(bot.id).character_id === ch.id, '挂好了就保持不动')
+
 rmSync(dir, { recursive: true, force: true })
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`)
 process.exit(fail === 0 ? 0 : 1)
