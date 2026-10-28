@@ -8,7 +8,7 @@
 
 ## 现在能跑什么
 
-- **对话主链路**：入站缓冲窗口（15~20 秒合并、原子认领「恰好一次」模型调用）→ 分层提示词组装 → 26 个内置工具的 agentic 循环 → 拟人化分片投递。
+- **对话主链路**：入站缓冲窗口（15~20 秒合并、原子认领「恰好一次」模型调用）→ 分层提示词组装 → 27 个内置工具的 agentic 循环 → 拟人化分片投递。
   沉默 = 不落库，投递失败 = 落库但标 `failed`（两者在数据上可区分）。
 - **记忆 v2**：五层记忆（短期 / 滚动摘要 / 活跃池 / 淡忘池 / 人格档案）、按 event_time 衰减、
   类别半衰期、supersede 取代链、provenance 出处、**explain 台账**、**protected 能力位**、
@@ -45,6 +45,8 @@
 docker build -f deploy/Dockerfile -t littly-harness .
 docker run -d -p 3000:3000 -v littly-data:/app/data littly-harness
 # → http://localhost:3000/ ，注册第一个账号即管理员
+# 首次打开控制台会自动播种：bot「小璃」+ 完整铁律 + 演示角色卡 + 三条世界书，
+# 不用先去后台点任何东西就能直接开聊。
 ```
 
 详见 [docs/DEPLOY.md](docs/DEPLOY.md)（编排、旧库迁移、社区插件接入、验收脚本清单）。
@@ -56,8 +58,9 @@ cd harness && pnpm run build:artifacts      # 构建门禁
 for s in scripts/verify-*.mjs; do node "$s"; done   # 行为断言
 ```
 
-13 个脚本、600+ 条断言，覆盖记忆 v2、成长三铁律、心跳退避、bili 护栏、dsh 插件桥、
-五个渠道、通话协议、旧库迁移、端到端真启动。
+15 个脚本、615 条行为断言 + 61 条端到端 + 15 条扫码链路，覆盖记忆 v2、成长三铁律、
+心跳退避、bili 护栏、dsh 插件桥、首启播种、密钥三态、五个渠道、通话协议、旧库迁移、
+端到端真启动（含「容器重建不丢数据」）。
 
 ## 旧项目
 
