@@ -46,8 +46,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 # bili-agent：她自己的 B 站账号（与 sidecar 共用 BILI_CLI_HOME → 同一个账号）
 # 给 MCP 面提供 `bili mcp serve`（stdio）。装不上也不阻塞镜像构建：
 # MCP 行是 failOnStartupError=false，bili 元工具走 HTTP sidecar。
-# 限时 300s：pip 解析慢时不让构建无限挂住。
-RUN timeout 300 pip3 install --no-cache-dir --break-system-packages --timeout 30 --retries 2 "bili-agent[mcp]==0.9.1" || \
+# 限时 900s：PyPI 慢的时候（实测能到 30~40kB/s）不让构建无限挂住。
+RUN timeout 900 pip3 install --no-cache-dir --break-system-packages --timeout 60 --retries 3 "bili-agent[mcp]==0.9.1" || \
     echo "[warn] bili-agent 安装失败（或超时）：MCP 面不可用，bili 元工具仍走 HTTP sidecar"
 WORKDIR /app/harness
 # corepack：运行期若改动了 profile 依赖，播种脚本可以退回 pnpm install

@@ -174,7 +174,11 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 | 容器日志无 fatal / failed to import | ✓ |
 | bili sidecar 不可达时优雅降级 | ✓ |
 
-镜像构建：harness 构建 7 gate 全绿、控制台构建全绿、native 插件现场编译通过、bili-agent（Python）装入运行时。
+镜像构建：harness 构建 7 gate 全绿、控制台构建全绿、native 插件现场编译通过。
+
+`bili-agent`（Python，给 MCP 面提供 `bili mcp serve`）装入运行时；PyPI 慢到超时时
+**不阻塞构建** —— 那一步会打 `[warn]`，镜像照出，MCP 行被跳过，
+`bili` 元工具仍然走 HTTP sidecar（那条是主路径）。
 
 ## 8. 已知边界（不是缺陷，是取舍）
 

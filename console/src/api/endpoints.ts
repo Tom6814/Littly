@@ -1,5 +1,5 @@
 /** 各领域的类型化 API 封装。页面只调用这里的函数，不直接 fetch。 */
-import { http, pickArray, pickRecord, asStr, asNum, asBool, firstOf, isRecord, downloadFile } from './client';
+import { http, pickArray, pickRecord, asStr, asNum, asBool, firstOf, isRecord, downloadFile, ApiError } from './client';
 import type {
   AuditEntry,
   Bot,
@@ -141,9 +141,18 @@ export function normalizeMessages(data: unknown): ChatMessage[] {
 
 export const auth = {
   async session(): Promise<User | null> {
-    const data = await http.get<unknown>('/api/auth/session');
-    const user = pickRecord(data, 'user');
-    return toUser(user ?? data) ?? null;
+    // 没登录是**正常状态**，不是错误。
+    // 这里必须把 401 吞成 null —— 否则 RequireAuth 会走 isError 分支，
+    // 页面变成「无法确认登录状态：未登录」+ 一个重试按钮，永远到不了登录页。
+    // （/api/auth/* 路径不触发 client 的 401 自动跳登录，所以得在这里兜住。）
+    try {
+      const data = await http.get<unknown>('/api/auth/session');
+      const user = pickRecord(data, 'user');
+      return toUser(user ?? data) ?? null;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return null;
+      throw e;
+    }
   },
   async login(username: string, password: string): Promise<User> {
     const data = await http.post<unknown>('/api/auth/login', { username, password });

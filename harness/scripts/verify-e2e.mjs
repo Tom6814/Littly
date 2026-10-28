@@ -116,6 +116,7 @@ console.log('== 首启播种（开箱可用）==')
 const botsQ = await api('/api/bots')
 const botListQ = botsQ.json?.data?.bots ?? botsQ.json?.data ?? []
 ok(Array.isArray(botListQ) && botListQ.length > 0, `至少有 1 个 bot（实际 ${botListQ.length ?? 0}）`)
+const botIdQ = Array.isArray(botListQ) ? botListQ[0]?.id : undefined
 const charsQ = await api('/api/characters')
 const charList = charsQ.json?.data?.characters ?? []
 ok(Array.isArray(charList) && charList.length > 0, `至少有 1 张角色卡（实际 ${charList.length ?? 0}）`)
@@ -124,8 +125,29 @@ const rulesText = rulesQ.json?.data?.content ?? rulesQ.json?.data?.rulesText ?? 
 ok(typeof rulesText === 'string' && rulesText.includes('严格反 NTR'), '铁律是完整版（含「严格反 NTR」，不是概括版）')
 ok(typeof rulesText === 'string' && rulesText.includes('记忆静默铁律'), '铁律含「记忆静默铁律」核心条')
 
+console.log('== 直接跟 bot 聊天（不需要先建联系人）==')
+// 用户反馈：网页端聊天页说「先在「联系人」中创建一位联系人」，不能直接跟 bot 聊。
+// 根因是聊天页把会话对象绑死在「联系人列表第一个」—— 全新库里一个联系人都没有。
+// 旧仓是拿登录用户的 id 当会话对象。这条断言锁住「用登录用户身份就能直接聊」。
+if (botIdQ) {
+  const myId = sess.json?.data?.user?.id ?? ''
+  const probe = `e2e-chat-probe-${Date.now()}`
+  const chatRes = await api('/api/chat', {
+    method: 'POST',
+    body: { botId: botIdQ, sender: myId, text: probe },
+  })
+  // 没配模型时会在模型那一层失败（文案清楚）；配了模型时会成功回复。
+  // 但两种情况下都不该是「机器人不存在」「缺少联系人」这类错误。
+  const chatErr = chatRes.json?.error?.message ?? ''
+  ok(!chatErr.includes('机器人不存在') && !chatErr.includes('联系人'), `直接聊天没被会话对象挡住（${chatErr || '成功'}）`)
+  const hist = await api(`/api/messages?botId=${encodeURIComponent(botIdQ)}&sender=${encodeURIComponent(myId)}`)
+  const texts = (hist.json?.data?.messages ?? []).map((m) => m.text ?? m.content ?? '')
+  ok(texts.includes(probe), '以登录用户身份发的消息进了历史')
+} else {
+  console.log('  （跳过：库里没有 bot）')
+}
+
 console.log('== 渠道配置（QQ 个人号 / SnowLuma）==')
-const botIdQ = Array.isArray(botListQ) ? botListQ[0]?.id : undefined
 if (botIdQ) {
   const putCh = await api(`/api/bots/${botIdQ}/channels`, {
     method: 'PUT',
