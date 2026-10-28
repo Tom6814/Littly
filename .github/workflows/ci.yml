@@ -105,24 +105,14 @@ jobs:
           node scripts/verify-e2e.mjs 3000
 
   docker:
-    name: 容器镜像构建
+    name: 容器镜像构建与验收
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: 构建镜像
         run: docker build -f deploy/Dockerfile -t littly-harness:ci .
-      - name: 起容器并探活
+      - name: 容器验收（探活 / 播种 / e2e / 重建不丢数据 / 健康检查）
         run: |
           set -e
-          docker run -d --name littly-ci -p 3000:3000 littly-harness:ci
-          for i in $(seq 1 90); do
-            if curl -sf http://127.0.0.1:3000/api > /dev/null; then
-              echo "容器就绪"
-              curl -s http://127.0.0.1:3000/api
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "容器 180s 内未就绪"
-          docker logs littly-ci || true
-          exit 1
+          chmod +x harness/scripts/verify-container.sh
+          harness/scripts/verify-container.sh littly-harness:ci 3000
