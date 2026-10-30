@@ -33,7 +33,7 @@
   → 完成；状态存 `global_settings.onboarding`，管理员可一键重置重走。
 - **控制台（重写）**：Vue 3.5 + Vite + Tailwind 4 + [@felinic/ui](https://github.com/felinics/ui) 设计系统，
   22 条真 URL 路由按使用逻辑分五组——**对话 / 她（角色卡·世界书·铁律·成长·相册·日记）/ 记忆 / 主动 /
-  连接（微信·Telegram·QQ·Discord·Bilibili·联系人·账号绑定）/ 系统（概览·设置·插件·调试）**；
+  连接（微信·Telegram·QQ·Discord·Bilibili·X·联系人；账号绑定已并入各渠道页）/ 系统（概览·设置·插件·调试）**；
   含 SSE 实时推送（思考态 / 工具阶段 / 沉默终止态）。
 
 ## 结构

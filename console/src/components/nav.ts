@@ -12,7 +12,6 @@ import {
   Gamepad2,
   Images,
   LayoutDashboard,
-  Link2,
   MessageCircle,
   MessagesSquare,
   NotebookPen,
@@ -63,7 +62,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/channels/bilibili', label: 'Bilibili', icon: Tv },
       { to: '/channels/x', label: 'X', icon: Twitter },
       { to: '/contacts', label: '联系人', icon: Users },
-      { to: '/bind', label: '账号绑定', icon: Link2 },
     ],
   },
   {

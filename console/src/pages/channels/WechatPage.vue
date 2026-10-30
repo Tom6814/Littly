@@ -20,6 +20,7 @@ import {
   toast,
 } from '@felinic/ui'
 import { Download, QrCode, RefreshCw, Smartphone } from 'lucide-vue-next'
+import AccountBindSection from '@/components/AccountBindSection.vue'
 import { botsApi, wechatApi } from '@/api/endpoints'
 import { ApiError } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -423,6 +424,12 @@ const lastInboundText = computed(() => {
             </div>
           </div>
         </section>
+
+        <!-- 账号绑定（扫码是主路径；这里是同一微信身份的「绑定码」补充路径） -->
+        <AccountBindSection
+          channel="wechat"
+          hint="扫码是主路径；也可生成一次性绑定码，把微信里的这个号绑到当前控制台账号：在微信里私聊她发送「绑定 <码>」。"
+        />
 
         <!-- 渠道开关 -->
         <SettingsSection title="微信渠道">

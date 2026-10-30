@@ -3,7 +3,7 @@
  *   fe-core 拥有：/login /register /onboarding /chat /her/character
  *                /channels/*（5） /system/*（4）
  *   Lead 拥有（本骨架只建 stub，不实现）：/her/{worldbook,rules,growth,album,diary}
- *                /memory /proactive /contacts /bind
+ *                /memory /proactive /contacts
  * 冻结后不要改路径或文件名 —— 页面实现按此表填充。
  */
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
@@ -54,7 +54,6 @@ const routes: RouteRecordRaw[] = [
   { path: '/channels/bilibili', name: 'channel-bilibili', component: () => import('@/pages/channels/BilibiliPage.vue'), meta: { title: 'Bilibili' } },
   { path: '/channels/x', name: 'channel-x', component: () => import('@/pages/channels/XPage.vue'), meta: { title: 'X' } },
   { path: '/contacts', name: 'contacts', component: () => import('@/pages/contacts/ContactsPage.vue'), meta: { title: '联系人' } },
-  { path: '/bind', name: 'bind', component: () => import('@/pages/bind/BindPage.vue'), meta: { title: '账号绑定' } },
 
   // 系统
   { path: '/system/overview', name: 'system-overview', component: () => import('@/pages/system/OverviewPage.vue'), meta: { title: '概览' } },

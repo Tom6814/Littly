@@ -1,17 +1,15 @@
 <script setup lang="ts">
 /**
- * 渠道配置页的共享骨架（telegram / qq / discord 共用）。
+ * 渠道配置页的共享骨架（telegram / discord 共用）。
  * - 配置：GET /api/bots/:id/channels + PUT（admin；密钥打码回显、打码值不回写）
- * - 绑定：POST /api/bind/:channel/code、GET /api/bind/status、POST /api/bind/unbind
- * 页面只负责布局，渠道字段由各页以 props 传入（单一实现，避免三份同形异码）。
+ * - 绑定：账号绑定区块已抽到 components/AccountBindSection.vue（各渠道页共用）；
+ *   配置用的 `channel` 与绑定用的渠道 key 不一定同名（telegram → tg），用 bindChannel 覆盖。
+ * 页面只负责布局，渠道字段由各页以 props 传入（单一实现，避免多份同形异码）。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
   Button,
   CalloutBanner,
-  ConfirmPopover,
-  CopyButton,
-  FieldStack,
   Input,
   PageShell,
   SettingsRow,
@@ -20,11 +18,11 @@ import {
   Switch,
   toast,
 } from '@felinic/ui'
-import { channelsApi, botsApi } from '@/api/endpoints'
+import { botsApi } from '@/api/endpoints'
 import { ApiError } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { useBots } from '@/stores/bots'
-import type { BindIdentity } from '@/api/endpoints'
+import AccountBindSection from '@/components/AccountBindSection.vue'
 
 const props = defineProps<{
   channel: string
@@ -41,6 +39,8 @@ const props = defineProps<{
   /** 是否提供「账号绑定码」区块（bilibili 等扫码渠道不需要）。 */
   bindable?: boolean
   bindHint?: string
+  /** 绑定渠道 key（默认与 channel 相同；telegram 的绑定 key 是 tg）。 */
+  bindChannel?: string
 }>()
 
 const auth = useAuthStore()
@@ -51,17 +51,10 @@ const loading = ref(true)
 const error = ref('')
 const denied = ref(false)
 const saving = ref(false)
-const binding = ref(false)
-const unbinding = ref('')
 
 const enabled = ref(false)
 const values = reactive<Record<string, string>>({})
 const secretSet = reactive<Record<string, boolean>>({})
-
-const identities = ref<BindIdentity[]>([])
-const code = ref('')
-const instruction = ref('')
-const expiresAt = ref('')
 
 onMounted(async () => {
   await bots.bootstrap()
@@ -89,12 +82,6 @@ async function loadAll(): Promise<void> {
   } catch (e) {
     if (e instanceof ApiError && e.status === 403) denied.value = true
     else error.value = e instanceof Error ? e.message : '加载渠道配置失败'
-  }
-  try {
-    const status = await channelsApi.bindStatus()
-    identities.value = status.identities.filter((i) => i.channel === props.channel)
-  } catch {
-    /* 绑定状态读取失败不阻塞配置展示 */
   }
   loading.value = false
 }
@@ -124,33 +111,8 @@ async function save(): Promise<void> {
   }
 }
 
-async function createCode(): Promise<void> {
-  binding.value = true
-  error.value = ''
-  try {
-    const out = await channelsApi.bindCode(props.channel, bots.state.currentBotId ?? undefined)
-    code.value = out.code
-    instruction.value = String(out.instruction ?? '')
-    expiresAt.value = String(out.expiresAt ?? '')
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '生成绑定码失败'
-  } finally {
-    binding.value = false
-  }
-}
-
-async function unbind(identity: BindIdentity): Promise<void> {
-  unbinding.value = identity.externalId
-  try {
-    await channelsApi.unbind(identity.channel, identity.externalId)
-    toast.success('已解绑（历史与记忆保留）')
-    await loadAll()
-  } catch (e) {
-    toast.error(e instanceof Error ? e.message : '解绑失败')
-  } finally {
-    unbinding.value = ''
-  }
-}
+/** 配置 channel → 绑定 channel；目前只有 Telegram 两者不同（配置组 telegram / 身份 tg）。 */
+const bindChannelKey = computed(() => props.bindChannel ?? (props.channel === 'telegram' ? 'tg' : props.channel))
 </script>
 
 <template>
@@ -192,54 +154,11 @@ async function unbind(identity: BindIdentity): Promise<void> {
           </template>
         </SettingsSection>
 
-        <SettingsSection v-if="bindable !== false" title="账号绑定">
-          <SettingsRow
-            label="生成绑定码"
-            :description="bindHint || '在渠道里私聊她，发送「绑定 <码>」完成绑定。'"
-            stack="sm"
-          >
-            <div class="flex items-center gap-2">
-              <Button variant="outline" size="sm" :loading="binding" @click="createCode">生成绑定码</Button>
-              <CopyButton
-                v-if="code"
-                :text="code"
-                label="复制绑定码"
-                copied-label="已复制"
-                failed-message="复制失败，请手动选择复制"
-              />
-            </div>
-          </SettingsRow>
-          <div v-if="code" class="mx-4 border-b border-border px-0 py-3">
-            <div class="text-caption text-muted-foreground">绑定码（10 分钟内有效）</div>
-            <div class="mt-1 font-mono text-control font-medium tracking-wide text-foreground">{{ code }}</div>
-            <p v-if="instruction" class="mt-1 text-caption text-muted-foreground">{{ instruction }}</p>
-            <p v-if="expiresAt" class="mt-0.5 text-caption text-muted-foreground">过期时间：{{ expiresAt }}</p>
-          </div>
-
-          <div v-if="identities.length === 0" class="px-4 py-6 text-center text-label text-muted-foreground">
-            还没有绑定该渠道的账号。
-          </div>
-          <SettingsRow
-            v-for="identity in identities"
-            :key="identity.externalId"
-            :label="identity.externalId"
-            :description="`绑定于 ${identity.createdAt}`"
-          >
-            <ConfirmPopover
-              title="解绑这个渠道账号？"
-              message="历史与记忆会保留，但之后无法再通过该渠道聊天。"
-              confirm-text="解绑"
-              cancel-text="取消"
-              variant="destructive"
-              :loading="unbinding === identity.externalId"
-              @confirm="unbind(identity)"
-            >
-              <template #trigger>
-                <Button variant="outline" size="sm">解绑</Button>
-              </template>
-            </ConfirmPopover>
-          </SettingsRow>
-        </SettingsSection>
+        <AccountBindSection
+          v-if="bindable !== false"
+          :channel="bindChannelKey"
+          :hint="bindHint"
+        />
       </template>
     </div>
   </PageShell>

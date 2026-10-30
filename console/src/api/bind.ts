@@ -1,9 +1,9 @@
 /**
  * 账号绑定域 API（`/api/bind/*`，console-api routes-bind.ts）。
  *
- * 为什么自建：fe-core 的 `channelsApi.bindStatus()/unbind()` 是早期按猜测 key 写的
- * （`bindings`/`items`、unbind 无参数），与本页真实契约不符；本域页面只从
- * 这里 import，等 fe-core 修正后可直接换回。
+ * 渠道页共用：`components/AccountBindSection.vue` 只从这里取，不直接散调 http。
+ * `channelsApi`（api/endpoints.ts）里也有一组等价方法，属于历史遗留；
+ * 本模块是账号绑定 UI 的单一来源，避免两处契约各自漂移。
  */
 import { asStr, http, isRecord, pickArray } from '@/api/client'
 
@@ -32,6 +32,7 @@ export interface BindCode {
 }
 
 export const bindApi = {
+  /** `GET /api/bind/status`：当前登录用户在各渠道已绑定的身份 + 未消费的码。 */
   async status(): Promise<BindStatus> {
     const out = await http.get<unknown>('/api/bind/status')
     const rec = isRecord(out) ? out : {}
@@ -48,13 +49,14 @@ export const bindApi = {
         .filter(isRecord)
         .map((p) => ({
           kind: asStr(p.kind) ?? '',
-          // 后端 SELECT 出的是 snake_case `expires_at`，这里两种都认。
+          // 后端 SELECT 出的是 snake_case `expires_at`，两种都认。
           expiresAt: asStr(p.expiresAt) ?? asStr(p.expires_at),
         }))
         .filter((p) => p.kind !== ''),
     }
   },
 
+  /** `POST /api/bind/:channel/code`：一次性绑定码（10 分钟；同 kind 新码顶掉旧码）。 */
   async createCode(channel: string, botId?: string): Promise<BindCode> {
     const out = await http.post<unknown>(`/api/bind/${encodeURIComponent(channel)}/code`, {
       ...(botId ? { botId } : {}),
@@ -69,6 +71,7 @@ export const bindApi = {
     }
   },
 
+  /** `POST /api/bind/unbind`：解绑某渠道身份（历史与记忆保留）。 */
   async unbind(channel: string, externalId: string): Promise<boolean> {
     const out = await http.post<unknown>('/api/bind/unbind', { channel, externalId })
     const rec = isRecord(out) ? out : {}

@@ -35,6 +35,7 @@ import {
   toast,
 } from '@felinic/ui'
 import { RefreshCw, ScrollText, Wifi } from 'lucide-vue-next'
+import AccountBindSection from '@/components/AccountBindSection.vue'
 import { qqApi, type QqStatus } from '@/api/endpoints'
 import { ApiError } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -378,6 +379,11 @@ async function loadLogs(): Promise<void> {
             </template>
           </SettingsSection>
 
+          <AccountBindSection
+            channel="qqp"
+            hint="在 QQ 里私聊她（SnowLuma 通道），发送「绑定 <码>」完成绑定。"
+          />
+
           <SurfaceCard padding="lg" class="space-y-2">
             <h2 class="text-label font-medium text-muted-foreground">自动发现</h2>
             <p class="text-label text-muted-foreground">
@@ -440,6 +446,11 @@ async function loadLogs(): Promise<void> {
               </Button>
             </template>
           </SettingsSection>
+
+          <AccountBindSection
+            channel="qqp"
+            hint="在 QQ 里私聊官方机器人发送「绑定 <码>」完成绑定；官方 QQBot 与 SnowLuma 共用同一个 QQ 身份（channel=qqp），绑定一次即可。"
+          />
 
           <SurfaceCard padding="lg" class="space-y-2">
             <h2 class="text-label font-medium text-muted-foreground">被动回复窗口</h2>
