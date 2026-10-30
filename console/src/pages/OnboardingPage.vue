@@ -5,7 +5,7 @@
  * 关键写操作都走后端：模型设置 /api/settings/ai、角色卡 /api/characters、
  * 完成态 /api/onboarding/complete（契约接口未就绪时本地降级，不阻塞流程）。
  * 第 4 步「给她账号」把她的各平台账号接进来：
- *   微信/Bilibili/X 内联快速配置；Telegram/QQ/Discord 跳到 /channels/<x>?from=onboarding。
+ *   微信/X 内联快速配置；Bilibili / Telegram / QQ / Discord 跳到 /channels/<x>?from=onboarding。
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -104,7 +104,7 @@ const accounts = reactive({
   loading: false,
   loaded: false,
   wechat: { bound: false, nickname: '' },
-  bili: { connected: false, logined: false, username: '' },
+  bili: { available: true, authenticated: false, username: '' },
   bindings: [] as Array<{ channel: string; externalId: string }>,
   channels: {} as Record<string, { enabled: boolean; hasToken: boolean }>,
   x: { available: true, configured: false, username: '' },
@@ -127,15 +127,6 @@ const wechat = reactive({
   qrDataUrl: '',
   sessionId: '',
   status: 'wait' as string,
-  pollTimer: 0 as number | ReturnType<typeof setInterval>,
-})
-
-const bili = reactive({
-  loading: false,
-  qrDataUrl: '',
-  sessionId: '',
-  status: '' as string,
-  message: '',
   pollTimer: 0 as number | ReturnType<typeof setInterval>,
 })
 
@@ -218,9 +209,9 @@ async function loadAccounts(): Promise<void> {
     (async () => {
       try {
         const out = await biliApi.status()
-        accounts.bili.connected = out.connected === true
-        accounts.bili.logined = out.logined === true
-        accounts.bili.username = String(out.username ?? '')
+        accounts.bili.available = out.available
+        accounts.bili.authenticated = out.authenticated
+        accounts.bili.username = out.username
       } catch {
         /* B站 sidecar 未连接：保持未配置 */
       }
@@ -303,11 +294,17 @@ const platforms = computed<PlatformView[]>(() => {
     id: 'bilibili',
     name: 'Bilibili',
     icon: Tv,
-    statusText: !accounts.bili.connected ? 'sidecar 未连接' : accounts.bili.logined ? '已登录' : '未登录',
-    badgeVariant: accounts.bili.logined ? 'success' : accounts.bili.connected ? 'warning' : 'outline',
-    actionLabel: accounts.bili.logined ? '已登录' : quickPanel.value === 'bilibili' ? '收起' : '扫码登录',
-    actionDisabled: accounts.bili.logined || !accounts.bili.connected,
-    connected: accounts.bili.logined,
+    statusText: !accounts.bili.available
+      ? '接口未就绪'
+      : accounts.bili.authenticated
+        ? accounts.bili.username
+          ? `已登录 ${accounts.bili.username}`
+          : '已登录'
+        : '未登录',
+    badgeVariant: accounts.bili.authenticated ? 'success' : accounts.bili.available ? 'outline' : 'warning',
+    actionLabel: accounts.bili.authenticated ? '管理 B 站' : '扫码登录',
+    actionDisabled: false,
+    connected: accounts.bili.authenticated,
   })
   // Telegram / Discord —— 跳转控制台对应页面完成官方渠道配置
   const jumpPlatforms: Array<{ id: PlatformId; name: string; icon: typeof MessageCircle }> = [
@@ -384,8 +381,7 @@ function onPlatformAction(platform: PlatformView): void {
     return
   }
   if (platform.id === 'bilibili') {
-    quickPanel.value = quickPanel.value === 'bilibili' ? '' : 'bilibili'
-    if (quickPanel.value === 'bilibili' && bili.qrDataUrl === '') void startBiliQr()
+    void router.push('/channels/bilibili?from=onboarding')
     return
   }
   if (platform.id === 'x') {
@@ -566,56 +562,6 @@ function stopWechatPoll(): void {
   }
 }
 
-/* ---------------- 步骤 4：Bilibili 内联扫码 ---------------- */
-async function startBiliQr(): Promise<void> {
-  bili.loading = true
-  error.value = ''
-  try {
-    const out = (await biliApi.qrStart()) as Record<string, unknown>
-    bili.sessionId = typeof out.sessionId === 'string' ? out.sessionId : ''
-    bili.qrDataUrl = typeof out.qrImage === 'string' ? out.qrImage : ''
-    bili.status = typeof out.status === 'string' ? out.status : ''
-    bili.message = typeof out.message === 'string' ? out.message : ''
-    stopBiliPoll()
-    if (bili.sessionId !== '') {
-      bili.pollTimer = setInterval(() => void pollBili(bili.sessionId), 2000)
-    }
-  } catch (e) {
-    error.value =
-      e instanceof ApiError && e.status === 403
-        ? '需要管理员权限才能登录 Bilibili。'
-        : `Bilibili sidecar 暂不可用：${e instanceof Error ? e.message : '未知错误'}（可先跳过）`
-  } finally {
-    bili.loading = false
-  }
-}
-
-async function pollBili(sessionId: string): Promise<void> {
-  if (sessionId === '') return
-  try {
-    const out = (await biliApi.qrStatus(sessionId)) as Record<string, unknown>
-    bili.status = typeof out.status === 'string' ? out.status : bili.status
-    if (typeof out.qrImage === 'string' && out.qrImage !== '') bili.qrDataUrl = out.qrImage
-    bili.message = typeof out.message === 'string' ? out.message : bili.message
-    if (bili.status === 'success' || bili.status === 'confirmed' || bili.status === 'logined') {
-      stopBiliPoll()
-      accounts.bili.logined = true
-      await loadAccounts()
-    } else if (bili.status === 'expired' || bili.status === 'failed') {
-      stopBiliPoll()
-    }
-  } catch {
-    stopBiliPoll()
-  }
-}
-
-function stopBiliPoll(): void {
-  if (bili.pollTimer) {
-    clearInterval(bili.pollTimer as ReturnType<typeof setInterval>)
-    bili.pollTimer = 0
-  }
-}
-
 /* ---------------- 步骤 4：X 内联登录 ---------------- */
 async function submitXLogin(): Promise<void> {
   xForm.error = ''
@@ -674,7 +620,6 @@ async function probeX(): Promise<void> {
 /* ---------------- 步骤 4：跳过 ---------------- */
 function stopAccountPolls(): void {
   stopWechatPoll()
-  stopBiliPoll()
 }
 
 function skipAccounts(): void {
@@ -929,29 +874,6 @@ function onPresetChange(e: Event): void {
             <Button variant="ghost" size="sm" :loading="wechat.loading" @click="startWechatBind">
               刷新二维码
             </Button>
-          </div>
-        </SurfaceCard>
-
-        <!-- 内联快速配置：Bilibili -->
-        <SurfaceCard v-if="quickPanel === 'bilibili'" data-testid="accounts-bili-panel" padding="lg" class="space-y-3">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <div class="text-label font-medium text-foreground">Bilibili 扫码登录</div>
-              <div class="mt-0.5 text-caption text-muted-foreground">需要本机 Bilibili sidecar 正在运行。</div>
-            </div>
-            <Button variant="ghost" size="sm" @click="quickPanel = ''">收起</Button>
-          </div>
-          <div v-if="!bili.qrDataUrl" class="flex items-center gap-3">
-            <Button variant="outline" size="sm" :loading="bili.loading" @click="startBiliQr">获取登录二维码</Button>
-          </div>
-          <div v-else class="flex flex-col items-center gap-3">
-            <img
-              :src="bili.qrDataUrl"
-              alt="Bilibili 登录二维码"
-              class="size-44 rounded-md border border-border bg-card object-contain p-2"
-            />
-            <div class="text-label text-muted-foreground">{{ bili.message || bili.status }}</div>
-            <Button variant="ghost" size="sm" :loading="bili.loading" @click="startBiliQr">刷新二维码</Button>
           </div>
         </SurfaceCard>
 

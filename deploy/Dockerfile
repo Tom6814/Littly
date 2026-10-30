@@ -41,14 +41,13 @@ ENV VITE_API_BASE=
 RUN pnpm run build
 
 FROM node:24-bookworm-slim AS runtime
-# python3/pip：给 MCP 面提供 `bili mcp serve`（stdio）；ca-certificates 供网络请求
+# python3/pip：容器内跑 `bili`（bilibili-cli，Python CLI）；ca-certificates 供网络请求
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip && rm -rf /var/lib/apt/lists/*
-# bili-agent：她自己的 B 站账号（与 sidecar 共用 BILI_CLI_HOME → 同一个账号）
-# 给 MCP 面提供 `bili mcp serve`（stdio）。装不上也不阻塞镜像构建：
-# MCP 行是 failOnStartupError=false，bili 元工具走 HTTP sidecar。
-# 限时 900s：PyPI 慢的时候（实测能到 30~40kB/s）不让构建无限挂住。
-RUN timeout 900 pip3 install --no-cache-dir --break-system-packages --timeout 60 --retries 3 "bili-agent[mcp]==0.9.1" || \
-    echo "[warn] bili-agent 安装失败（或超时）：MCP 面不可用，bili 元工具仍走 HTTP sidecar"
+# bilibili-cli：她自己的 B 站账号（@littly/bili 直接 spawn `bili`；控制台扫码/浏览器 Cookie 认证）。
+# 装不上不阻塞镜像构建：插件 binOk=false，控制台明确显示「未安装」。
+# 限时 600s：PyPI 慢的时候不让构建无限挂住。
+RUN timeout 600 pip3 install --no-cache-dir --break-system-packages --timeout 60 --retries 3 "bilibili-cli==0.6.2" || \
+    echo "[warn] bilibili-cli 安装失败（或超时）：B 站接入不可用（binOk=false）"
 # twitter-cli：她自己的 X 账号（@littly/x 插件调用 `twitter` 二进制；写操作默认预演）。
 # 装不上也不阻塞镜像构建：插件 binOk=false，控制台明确显示「已安装/未安装」。
 RUN timeout 600 pip3 install --no-cache-dir --break-system-packages --timeout 60 --retries 3 "twitter-cli==0.8.5" || \
@@ -62,7 +61,7 @@ ENV NODE_ENV=production \
     DSH_HOME=/app/data/dsh-home \
     LITTLY_DB_FILE=/app/data/littly.db \
     LITTLY_CONSOLE_DIR=/app/harness/console/dist \
-    BILI_CLI_HOME=/app/bili-data/bili-cli \
+    BILI_CLI_HOME=/app/bili-data \
     BILI_BIN=bili
 # 运行时仅需：依赖树 + 构建产物 + 插件源码（dsh 插件以 .ts 源码直接加载）
 COPY --from=build /app/harness/node_modules ./node_modules
@@ -81,7 +80,7 @@ COPY deploy/entrypoint.sh ./deploy-entrypoint.sh
 RUN chmod +x ./deploy-entrypoint.sh
 # SQLite 业务库与 dsh home 落持久卷
 VOLUME ["/app/data"]
-# bilibili 账号状态（与 bili sidecar 共用同一卷的同一路径 → 同一个账号）
+# bilibili-cli 的 HOME：credential.json 随卷持久化（容器重建不丢登录态）
 VOLUME ["/app/bili-data"]
 EXPOSE 3000
 # 健康检查探的是**实际在监听的那个地址**。

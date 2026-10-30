@@ -1,23 +1,13 @@
 /**
  * 管理与运维端点：铁律、全局设置（AI 打码）、成长系统、插件清单、
- * Bilibili sidecar 代理、调试（系统提示词 / 审计）、活动统计、全局搜索、种子初始化。
+ * 调试（系统提示词 / 审计）、活动统计、全局搜索、种子初始化。
  */
 import { randomUUID } from 'node:crypto'
 import type { AuditLogRow, BotRow, CharacterRow, ContactRow, MemoryRow, MessageRow, ScheduledMessageRow } from '@littly/storage'
 import { invalidateAIConfigCache } from '@littly/llm'
 import { parseChanges, parseProposalMeta } from '@littly/growth'
-import {
-  BILI_SIDECAR_HINT,
-  BiliSidecarError,
-  biliAuthStatus,
-  biliQrImageDataUrl,
-  biliQrStart,
-  biliQrStatus,
-  biliRunCommand,
-  getDisabledTools,
-  toggleDisabledTool,
-} from '@littly/tools'
-import { json, err, bodyRecord, reqStr, reqNum, reqBool, fire, type ApiRequest } from './http.ts'
+import { getDisabledTools, toggleDisabledTool } from '@littly/tools'
+import { json, err, bodyRecord, reqStr, reqNum, reqBool, fire } from './http.ts'
 import { maskSecret, isMaskedInput } from './mapping.ts'
 import { ensureSeed } from './seed.ts'
 import { isAdmin, ownSender, senderAllowed, loadBot, queryStr, nowIso, botOwnedBy, requireBotAccess } from './deps.ts'
@@ -117,16 +107,6 @@ function auditMcpChange(d: Deps, action: 'mcp_upsert' | 'mcp_remove', detail: Re
   } catch (e) {
     d.log('[mcp] 审计写入失败: %s', e instanceof Error ? e.message : e)
   }
-}
-
-/** Bilibili sidecar 错误 → 统一信封（sidecar 不可达 = 502；业务错误码原样透传）。 */
-function biliFail(ctx: ApiRequest, error: unknown): void {
-  if (error instanceof BiliSidecarError) {
-    const status = error.status === 502 || error.status === 504 ? 502 : error.status >= 400 && error.status < 600 ? error.status : 502
-    err(ctx.res, status, error.code, error.message)
-    return
-  }
-  err(ctx.res, 502, 'bili_unavailable', `Bilibili sidecar 不可达：${error instanceof Error ? error.message : String(error)}`)
 }
 
 /** AI 设置的出参形状（apiKey / 嵌套 embedding、image 的密钥均打码）。 */
@@ -677,101 +657,6 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
     }
     toggleDisabledTool(d.storage, botId, toolName, enabled)
     json(ctx.res, 200, { data: { ok: true, name: toolName, botId, enabled } })
-  })
-
-  // ---- Bilibili sidecar 代理 ----
-
-  r.get('/api/bili/status', 'required', (ctx) => {
-    fire(ctx, (async (): Promise<void> => {
-      try {
-        const envelope = await biliAuthStatus()
-        const data = (typeof envelope.data === 'object' && envelope.data !== null ? envelope.data : {}) as Record<string, unknown>
-        const user = (typeof data['user'] === 'object' && data['user'] !== null ? data['user'] : {}) as Record<string, unknown>
-        json(ctx.res, 200, {
-          data: {
-            connected: true,
-            logined: data['logged_in'] === true || data['logined'] === true,
-            username: typeof user['uname'] === 'string' ? user['uname'] : typeof data['username'] === 'string' ? data['username'] : undefined,
-            mid: user['mid'] !== undefined ? String(user['mid']) : undefined,
-          },
-        })
-      } catch (e) {
-        // sidecar 没连上不是「接口坏了」：明确告诉前端它没连上、为什么、怎么起
-        if (e instanceof BiliSidecarError && e.code === 'sidecar_down') {
-          json(ctx.res, 200, {
-            data: { connected: false, logined: false, error: e.message, hint: BILI_SIDECAR_HINT },
-          })
-          return
-        }
-        biliFail(ctx, e)
-      }
-    })())
-  })
-
-  r.post('/api/bili/qr/start', 'required', (ctx) => {
-    fire(ctx, (async (): Promise<void> => {
-      try {
-        const body = await biliQrStart()
-        json(ctx.res, 200, {
-          data: {
-            status: typeof body['state'] === 'string' ? body['state'] : 'pending',
-            qrImage: biliQrImageDataUrl(body['qr_image_base64']),
-            qrUrl: typeof body['qr_url'] === 'string' ? body['qr_url'] : undefined,
-            sessionId: typeof body['session_id'] === 'string' ? body['session_id'] : undefined,
-            message: typeof body['next'] === 'string' ? body['next'] : undefined,
-          },
-        })
-      } catch (e) {
-        biliFail(ctx, e)
-      }
-    })())
-  })
-
-  r.get('/api/bili/qr/status', 'required', (ctx) => {
-    fire(ctx, (async (): Promise<void> => {
-      const sessionId = queryStr(ctx, 'sessionId', 'session_id') ?? ''
-      if (sessionId === '') {
-        err(ctx.res, 400, 'bad_request', '缺少 sessionId')
-        return
-      }
-      try {
-        const body = await biliQrStatus(sessionId)
-        json(ctx.res, 200, {
-          data: {
-            status: typeof body['state'] === 'string' ? body['state'] : 'unknown',
-            qrImage: biliQrImageDataUrl(body['qr_image_base64']),
-            message: typeof body['next'] === 'string' ? body['next'] : undefined,
-          },
-        })
-      } catch (e) {
-        biliFail(ctx, e)
-      }
-    })())
-  })
-
-  r.post('/api/bili/cmd', 'required', (ctx) => {
-    fire(ctx, (async (): Promise<void> => {
-      const body = bodyRecord(ctx.body)
-      const argv = Array.isArray(body['argv']) ? (body['argv'] as unknown[]).map((a) => String(a)) : []
-      if (argv.length === 0) {
-        err(ctx.res, 400, 'bad_request', 'argv 不能为空')
-        return
-      }
-      try {
-        const r = await biliRunCommand(argv)
-        json(ctx.res, 200, {
-          data: {
-            ok: r.result.ok !== false,
-            exitCode: r.exitCode,
-            dryRun: r.dryRun,
-            output: typeof r.result.data === 'string' ? r.result.data : JSON.stringify(r.result.data ?? r.result.error ?? {}),
-            error: r.result.error ?? null,
-          },
-        })
-      } catch (e) {
-        biliFail(ctx, e)
-      }
-    })())
   })
 
   // ---- 调试 ----

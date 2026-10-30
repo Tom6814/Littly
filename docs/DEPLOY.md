@@ -14,7 +14,7 @@ docker build -f deploy/Dockerfile -t littly-harness .
 docker run -d --name littly \
   -p 3000:3000 \
   -v littly-data:/app/data \
-  -v littly-bili:/app/bili-data \
+  -v bili-data:/app/bili-data \
   -e TZ=Asia/Shanghai \
   -e OPENAI_API_KEY=sk-xxx \
   littly-harness
@@ -28,14 +28,14 @@ docker run -d --name littly \
 |---|---|
 | `harness/` | dsh 内核 + `@littly/bundle`（业务插件）+ 构建产物 |
 | `console/dist` | 控制台前端（MUI + Vite），由 console-api 的 fallback 托管 |
-| `python3 + bili-agent` | MCP 面的 `bili mcp serve`（stdio） |
+| `python3 + bilibili-cli` | `bili` CLI（v0.6.2）——`@littly/bili` 直接 spawn 它执行 B 站命令；控制台扫码/浏览器 Cookie 认证也由它落凭证 |
 
 持久卷：
 
 | 卷 | 路径 | 内容 |
 |---|---|---|
 | `littly-data` | `/app/data` | 业务 SQLite（`littly.db`）+ dsh home（`dsh-home/`） |
-| `littly-bili` | `/app/bili-data` | 她的 bilibili 账号状态（与 sidecar 共用同一路径 → 同一个账号） |
+| `bili-data` | `/app/bili-data` | 她的 bilibili 账号状态：`BILI_CLI_HOME` 是 bili CLI 的 HOME，凭证落 `<HOME>/.bilibili-cli/credential.json`（0600） |
 
 **首启会做两件事**（都由 `deploy/entrypoint.sh` 触发）：
 
@@ -62,27 +62,29 @@ docker run -d --name littly \
 | `LITTLY_DATA_DIR` | 可选，业务数据根目录（**上传/生成文件**落这里的 `downloads/`），默认 `<cwd>/data`；容器 entrypoint 默认 `/app/data`（与 SQLite 同卷）。B11 起不再写 `public/downloads` —— 容器重建不丢相册/文档/语音/头像 |
 | `LITTLY_DB_FILE` | 可选，业务 SQLite 路径，默认 `data/littly.db`；容器里是 `/app/data/littly.db` |
 | `X_BIN` | 可选，twitter-cli 可执行文件路径，默认 `twitter`（镜像运行层已 `pip3 install twitter-cli==0.8.5`；装不上时控制台 `binOk=false`） |
-| `BILI_SIDECAR_URL` | 有 bili sidecar 时设 `http://bili:3010` |
-| `BILI_SIDECAR_TOKEN` | sidecar 设了 token 时必须一致 |
+| `BILI_BIN` | 可选，bilibili-cli 可执行文件路径，默认 `bili`（镜像运行层已 `pip3 install bilibili-cli==0.6.2`；装不上时控制台 `binOk=false`） |
+| `BILI_CLI_HOME` | 可选，bili CLI 的 HOME（凭证 `<HOME>/.bilibili-cli/credential.json`），容器里默认 `/app/bili-data`（持久卷） |
 
 ---
 
-## 2. 编排（harness + SnowLuma + bili sidecar）
+## 2. 编排（harness + SnowLuma）
 
 ```sh
-# 全量（QQ + B 站）
-docker compose -f deploy/docker-compose.yml up -d --profile qq --profile bili
+# 全量（QQ 渠道 + harness；B 站能力内置在 harness 里，无需额外服务）
+docker compose -f deploy/docker-compose.yml up -d --profile qq
 
-# 只要 harness（bili 是可选依赖，缺席时控制台会明确告诉你它没连上）
+# 只要 harness（B 站能力同样可用，只要镜像里 bilibili-cli 安装成功）
 docker compose -f deploy/docker-compose.yml up -d
 ```
 
 - **SnowLuma**（QQ 账号）：官方镜像，需 `SYS_PTRACE`；首次启用用 noVNC(6081) 扫码登录。
   harness 侧在控制台「角色设置 → SnowLuma」填 OneBot 正向 WS 地址。
-- **bili sidecar**：`sidecars/bili` 构建，`BILI_ALLOW_WRITES=0` 时写操作一律预演。
-  控制台「Bilibili」页扫码登录，AI 侧走 `bili` 元工具（白名单 + dry-run + 审计）。
+- **B 站（bilibili-cli）**：无独立 sidecar。`@littly/bili` 在 harness 进程内 spawn `bili`，
+  控制台「Bilibili」页扫码登录（后端直连 passport HTTP，自绘 PNG 二维码）或一键提取本机浏览器
+  Cookie；写操作默认预演（控制台「允许写操作」打开 + 显式 dryRun:false 才真执行）。
+  AI 侧走 `bili` 元工具（子命令白名单 + 限频 30/5 每小时 + 审计）。
 
-编排文件里的两个服务都写了显式 image 名（`littly-harness:test` / `littly-bili:test`），
+编排文件里的 harness 服务写了显式 image 名（`littly-harness:test`），
 所以 `docker compose build` 构建一次，之后 `compose up` 直接复用，
 `--no-build` 可以完全跳过构建步骤。
 
@@ -214,8 +216,7 @@ node scripts/verify-onboarding.mjs 3000
 | `verify-memory-v2.mjs` | explain 台账 / protected 能力位 / 幂等回执 + 漂移检测（41 项） |
 | `verify-growth.mjs` | 三铁律硬校验 / 月底窗口 / 提议-审批全链路 / 版本冲突 / 回滚（86 项） |
 | `verify-heartbeat.mjs` | 退避序列 / 静默时段 / JSON 稳健提取 / 决策落地 / 扫描守卫（50 项） |
-| `verify-bili.mjs` | sidecar 客户端 / 元工具 / dry-run 强制 / MCP 收敛门 / 二维码归一化（36 项） |
-| `verify-bili-sidecar.mjs` | 扫码登录全链路（需真 harness + 真 sidecar，15 项） |
+| `verify-bili.mjs` | bilibili-cli 壳：允许清单 / 写默认 dry-run / audio 输出目录 / JSON 信封与错误码 / 扫码三态与凭证 0600 / 限频 / 审计脱敏 / 工具注册与 MCP 收敛门（fake bin + mock passport，140 项） |
 | `verify-mcp.mjs` | 服务器清单解析 / 工具命名 / 按角色启停集合（18 项） |
 | `verify-events.mjs` | 对话过程事件订阅/退订/异常隔离/按会话路由（9 项） |
 | `verify-migrate.mjs` | 旧库迁移的行数守恒 / 字段映射 / 幂等（21 项） |

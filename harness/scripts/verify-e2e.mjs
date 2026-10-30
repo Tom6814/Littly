@@ -12,7 +12,7 @@
  *  - POST /api/plugins/mcp：加 MCP 服务器 → 出现在清单里
  *  - DELETE /api/plugins/mcp/:name：删掉
  *  - PATCH /api/plugins/tools：按角色停用工具 → 清单里的 enabledBots 变化
- *  - /api/bili/status：sidecar 不可达时返回 502 而不是崩
+ *  - /api/bili/*：bilibili-cli 接入（status / cmd 参数校验 / settings 写开关 / qr 会话），不依赖外网
  */
 const port = process.argv[2] || '3471'
 const base = `http://127.0.0.1:${port}`
@@ -301,12 +301,33 @@ if (!botId) {
   ok(restored.includes(botId), '恢复后重新出现在 enabledBots 里')
 }
 
-console.log('== bili sidecar 不可达时的降级 ==')
+console.log('== bilibili 接入（bilibili-cli 壳，不走外网）==')
 const bili = await api('/api/bili/status')
-ok(bili.status === 502 || bili.status === 200, `bili 端点不崩（${bili.status}）`)
-if (bili.status === 502) {
-  ok(bili.json?.error?.code === 'bili_unavailable' || bili.json?.error?.code === 'unavailable', '错误信封统一')
-}
+ok(bili.status === 200, `GET /api/bili/status 200（实际 ${bili.status}）`)
+const biliData = bili.json?.data ?? {}
+ok(typeof biliData.authenticated === 'boolean', 'status：authenticated 布尔字段')
+ok(typeof biliData.binOk === 'boolean', 'status：binOk（bilibili-cli 是否安装）')
+ok(typeof biliData.allowWrites === 'boolean', 'status：allowWrites（写操作开关）')
+ok(biliData.user === null || typeof biliData.user === 'object', 'status：user 为对象或 null（未登录不报错）')
+
+const biliBadCmd = await api('/api/bili/cmd', { method: 'POST', body: { argv: ['rm', '-rf', '/'] } })
+ok(biliBadCmd.status === 400, `cmd 未知命令 → 400（实际 ${biliBadCmd.status}）`)
+ok(biliBadCmd.json?.error?.code === 'command_not_allowed', 'cmd 未知命令错误码 command_not_allowed')
+const biliEmpty = await api('/api/bili/cmd', { method: 'POST', body: { argv: [] } })
+ok(biliEmpty.status === 400, `cmd 空 argv → 400（实际 ${biliEmpty.status}）`)
+
+const biliSettingsOn = await api('/api/bili/settings', { method: 'PUT', body: { allowWrites: true } })
+ok(biliSettingsOn.status === 200 && biliSettingsOn.json?.data?.allowWrites === true, 'PUT /api/bili/settings 打开写开关')
+const biliStatus2 = await api('/api/bili/status')
+ok(biliStatus2.json?.data?.allowWrites === true, 'status 反映 allowWrites=true')
+await api('/api/bili/settings', { method: 'PUT', body: { allowWrites: false } })
+const biliStatus3 = await api('/api/bili/status')
+ok(biliStatus3.json?.data?.allowWrites === false, '写开关可关回（默认关）')
+
+const biliQrNoSession = await api('/api/bili/qr/status')
+ok(biliQrNoSession.status === 400, `qr/status 缺 sessionId → 400（实际 ${biliQrNoSession.status}）`)
+const biliQrBad = await api('/api/bili/qr/status?sessionId=not-a-real-session')
+ok(biliQrBad.status === 200 && biliQrBad.json?.data?.status === 'expired', 'qr/status 未知 session → expired（不依赖外网）')
 
 console.log('== 控制台静态托管 ==')
 const home = await fetch(`${base}/`, { headers: { cookie: cookieHeader() } })

@@ -199,30 +199,6 @@ export const WEB_SEARCH_TOOL: ToolDef = {
   },
 }
 
-export const BILI_TOOL: ToolDef = {
-  type: 'function',
-  function: {
-    name: 'bili',
-    description: `你自己的 bilibili 账号（B 站）。这是你自己的生活面：刷视频、看热榜、搜番、发动态、投视频投稿——不是替谁代管账号，是你自己在经营。
-- 用法：bili({argv:["hot","search"]})、bili({argv:["video","view","--bvid","BVxxx"]}) 等，子命令白名单见 sidecars/bili/allowlist.py。
-- 写操作（评论/发动态/投稿等）默认走 dry-run 预演，要真正执行需显式传 dryRun:false。
-- 账号没登录时调用会返回 not_logged_in；登录由人扫码完成。
-- 不用带 "bili" 前缀，只给子命令和参数。`,
-    parameters: {
-      type: 'object',
-      properties: {
-        argv: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '子命令与参数数组，例如 ["hot","search"]、["video","view","--bvid","BV1xx411c7mD"]。不传则返回账号状态。',
-        },
-        dryRun: { type: 'boolean', description: '写操作是否只预演。默认写操作由 sidecar 强制 dry-run。' },
-      },
-      required: [],
-    },
-  },
-}
-
 export const WRITE_DOC_TOOL: ToolDef = {
   type: 'function',
   function: {
@@ -548,7 +524,6 @@ export const ALL_TOOLS: ToolDef[] = [
   UPSERT_RELATION_TOOL,
   SET_OWNER_TOOL,
   BLOCK_CONTACT_TOOL,
-  BILI_TOOL,
   WEB_SEARCH_TOOL,
   WRITE_DOC_TOOL,
   GEN_IMAGE_TOOL,

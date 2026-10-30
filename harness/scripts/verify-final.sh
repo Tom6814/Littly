@@ -20,6 +20,11 @@ if node "$HERE/verify-x.mjs"; then
 else
   echo ">>> x：失败"; FAIL=1
 fi
+if node "$HERE/verify-bili.mjs"; then
+  echo ">>> bili：通过"
+else
+  echo ">>> bili：失败"; FAIL=1
+fi
 
 echo
 echo "############ 1) 容器验收 ############"
@@ -36,13 +41,11 @@ cat > "$OVERRIDE" <<'EOF'
 services:
   littly:
     ports: !override ["3100:3000"]
-  bili:
-    ports: !override ["3110:3010"]
 EOF
 cd "$ROOT"
 # 用新镜像重建整栈（连卷一起清 —— 要验的是「全新部署」）
-docker compose -f deploy/docker-compose.yml -f "$OVERRIDE" --profile bili down -v > /dev/null 2>&1
-docker compose -f deploy/docker-compose.yml -f "$OVERRIDE" --profile bili up -d --no-build 2>&1 | tail -3
+docker compose -f deploy/docker-compose.yml -f "$OVERRIDE" down -v > /dev/null 2>&1
+docker compose -f deploy/docker-compose.yml -f "$OVERRIDE" up -d --no-build 2>&1 | tail -3
 
 READY=0
 for i in $(seq 1 90); do
@@ -62,13 +65,6 @@ if [ "$READY" = "1" ]; then
     echo ">>> compose 栈内 e2e：通过"
   else
     echo ">>> compose 栈内 e2e：失败"; FAIL=1
-  fi
-  echo
-  echo "--- compose 网络内 bili 扫码链路（harness → http://bili:3010）---"
-  if node "$HERE/verify-bili-sidecar.mjs" 3100; then
-    echo ">>> 扫码链路：通过"
-  else
-    echo ">>> 扫码链路：失败"; FAIL=1
   fi
   echo
   echo "--- 微信 iLink mock 套件（绑定/收发/窗口）---"

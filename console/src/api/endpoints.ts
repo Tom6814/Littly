@@ -795,23 +795,203 @@ export const wechatApi = {
   },
 }
 
-/* ---------------- Bilibili sidecar ---------------- */
+/* ---------------- Bilibili（bilibili-cli 重写：扫码 / 浏览器 Cookie / 预览） ---------------- */
+
+export interface BiliStatus {
+  /** 接口是否可用（404/未就绪 false，页面据此静默降级）。 */
+  available: boolean
+  authenticated: boolean
+  username: string
+  mid: string
+  avatarUrl: string
+  /** 等级（字符串数字，展示为 Lv.N）。 */
+  level: string
+  /** 大会员文案（'' = 非会员）。 */
+  vip: string
+  /** 最近登录时间（ISO；后端未提供则空）。 */
+  lastLoginAt: string
+  /** 是否已开启写操作（后端可选返回；未知时 undefined）。 */
+  allowWrites: boolean | undefined
+  hint: string
+  /** 最近错误（未登录以外的失败原因，后端返回时展示）。 */
+  lastError: string
+}
+
+export interface BiliQrSession {
+  available: boolean
+  sessionId: string
+  qrDataUrl: string
+  link: string
+  expiresInMs: number
+}
+
+export interface BiliQrPollResult {
+  available: boolean
+  /** wait | scaned | confirmed | expired（兼容 success/logined） */
+  status: string
+  message: string
+  username: string
+  mid: string
+  avatarUrl: string
+}
+
+export interface BiliCmdResult {
+  ok: boolean
+  output: string
+  error: string
+}
+
+function emptyBiliStatus(available = false): BiliStatus {
+  return {
+    available,
+    authenticated: false,
+    username: '',
+    mid: '',
+    avatarUrl: '',
+    level: '',
+    vip: '',
+    lastLoginAt: '',
+    allowWrites: undefined,
+    hint: '',
+    lastError: '',
+  }
+}
+
+function asStrOrNum(v: unknown): string {
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+  if (typeof v === 'string') return v
+  return ''
+}
+
+function toBiliStatus(v: unknown, available = true): BiliStatus {
+  if (isRecord(v) && typeof v.__status === 'number') return emptyBiliStatus(false)
+  const rec = isRecord(v) ? v : {}
+  const user = pickRecord(rec, 'user', 'profile', 'account') ?? {}
+  const authenticated =
+    asBool(rec.authenticated) ?? asBool(rec.logined) ?? asBool(rec.loggedIn) ?? (Object.keys(user).length > 0)
+  const vipRaw = user.vip ?? rec.vip
+  let vip = ''
+  if (typeof vipRaw === 'string') vip = vipRaw
+  else if (isRecord(vipRaw)) {
+    if (asBool(vipRaw.status) === true || asBool(vipRaw.vipStatus) === true) vip = asStr(vipRaw.label) ?? asStr(vipRaw.type) ?? '大会员'
+  } else if (asBool(vipRaw) === true) vip = '大会员'
+  // routes-bili 的 statusView 同时给扁平 vipLabel（user.vip 结构未知时兜底）。
+  if (vip === '') vip = asStr(rec.vipLabel) ?? asStr(user.vipLabel) ?? ''
+  const rawLast =
+    asStr(rec.loggedInAt) ??
+    asStr(user.lastLoginAt) ??
+    asStr(user.last_login) ??
+    asStr(rec.lastLoginAt) ??
+    asStr(rec.last_login) ??
+    asStr(rec.savedAt) ??
+    asStr(rec.saved_at) ??
+    asStr(rec.updated_at) ??
+    ''
+  const lastLoginAt = (() => {
+    if (rawLast === '') return ''
+    if (/^\d+$/.test(rawLast)) {
+      const n = Number(rawLast)
+      const ms = n > 1e12 ? n : n > 1e9 ? n * 1000 : NaN
+      return Number.isFinite(ms) ? new Date(ms).toISOString() : ''
+    }
+    const t = Date.parse(rawLast)
+    return Number.isFinite(t) ? new Date(t).toISOString() : rawLast
+  })()
+  return {
+    available,
+    authenticated,
+    username:
+      asStr(user.uname) ?? asStr(user.username) ?? asStr(rec.uname) ?? asStr(rec.username) ?? '',
+    mid: asStrOrNum(user.mid) || asStrOrNum(user.dedeuserid) || asStrOrNum(rec.mid),
+    avatarUrl: asStr(user.avatar) ?? asStr(user.face) ?? asStr(rec.avatar) ?? '',
+    level: asStrOrNum(user.level) || asStrOrNum(user.level_id) || asStrOrNum(rec.level),
+    vip,
+    lastLoginAt,
+    allowWrites: asBool(rec.allowWrites) ?? asBool(rec.allow_writes),
+    hint: asStr(rec.hint) ?? '',
+    lastError: asStr(rec.lastError) ?? '',
+  }
+}
+
+function toBiliQrPoll(v: unknown): BiliQrPollResult {
+  if (isRecord(v) && typeof v.__status === 'number') {
+    return { available: false, status: '', message: '', username: '', mid: '', avatarUrl: '' }
+  }
+  const rec = isRecord(v) ? v : {}
+  const user = pickRecord(rec, 'user', 'profile') ?? {}
+  return {
+    available: true,
+    status: asStr(rec.status) ?? '',
+    message: asStr(rec.message) ?? '',
+    username: asStr(user.uname) ?? asStr(user.username) ?? asStr(rec.username) ?? '',
+    mid: asStr(user.mid) ?? asStr(user.dedeuserid) ?? asStr(rec.mid) ?? '',
+    avatarUrl: asStr(user.avatar) ?? asStr(user.face) ?? asStr(rec.avatar) ?? '',
+  }
+}
+
+function toBiliCmd(v: unknown): BiliCmdResult {
+  if (isRecord(v) && typeof v.__status === 'number') {
+    return { ok: false, output: '', error: readErrorEnvelope(v.__body).message }
+  }
+  const rec = isRecord(v) ? v : {}
+  if (asBool(rec.ok) === false) {
+    return { ok: false, output: '', error: asStr(rec.error) ?? asStr(rec.message) ?? readErrorEnvelope(rec).message }
+  }
+  const payload = rec.data ?? rec.result ?? rec
+  return { ok: true, output: JSON.stringify(payload, null, 2), error: '' }
+}
 
 export const biliApi = {
-  async status(): Promise<Record<string, unknown>> {
-    const out = await http.get<unknown>('/api/bili/status')
-    return pickRecord(out) ?? {}
+  /** GET /api/bili/status（required）→ 登录状态 + 账号信息（未登录不报错）。 */
+  async status(): Promise<BiliStatus> {
+    const out = await http.get<unknown>('/api/bili/status', undefined, {
+      silentUnauthorized: true,
+      allowAnyStatus: true,
+    })
+    return toBiliStatus(out)
   },
-  async qrStart(): Promise<Record<string, unknown>> {
-    const out = await http.post<unknown>('/api/bili/qr/start')
-    return pickRecord(out) ?? {}
+  /** POST /api/bili/qr/start（required）→ PNG data URL 二维码。 */
+  async qrStart(): Promise<BiliQrSession> {
+    const out = await http.post<unknown>('/api/bili/qr/start', undefined, { allowAnyStatus: true })
+    if (isRecord(out) && typeof out.__status === 'number') {
+      return { available: false, sessionId: '', qrDataUrl: '', link: '', expiresInMs: 0 }
+    }
+    const rec = isRecord(out) ? out : {}
+    return {
+      available: true,
+      sessionId: asStr(rec.sessionId) ?? '',
+      qrDataUrl: asStr(rec.qrDataUrl) ?? asStr(rec.qrImage) ?? '',
+      link: asStr(rec.link) ?? asStr(rec.qrUrl) ?? '',
+      expiresInMs: asNum(rec.expiresInMs) ?? 180_000,
+    }
   },
-  async qrStatus(sessionId: string): Promise<Record<string, unknown>> {
-    const out = await http.get<unknown>('/api/bili/qr/status', { sessionId })
-    return pickRecord(out) ?? {}
+  /** GET /api/bili/qr/status?sessionId=（required）→ 四态。 */
+  async qrPoll(sessionId: string): Promise<BiliQrPollResult> {
+    const out = await http.get<unknown>('/api/bili/qr/status', { sessionId }, { allowAnyStatus: true })
+    return toBiliQrPoll(out)
   },
-  async command(argv: string[]): Promise<Record<string, unknown>> {
-    const out = await http.post<unknown>('/api/bili/cmd', { argv })
-    return pickRecord(out) ?? {}
+  /** POST /api/bili/extract-cookie（admin）→ 从本机浏览器提取 Cookie 后重新读取状态。 */
+  async extractCookie(): Promise<BiliStatus> {
+    const out = await http.post<unknown>('/api/bili/extract-cookie', undefined, { allowAnyStatus: true })
+    return toBiliStatus(out)
+  },
+  /** POST /api/bili/logout（admin）→ 清除 CLI 凭证。 */
+  async logout(): Promise<void> {
+    await http.post('/api/bili/logout')
+  },
+  /**
+   * 写操作开关。契约 §1.3 未列该端点（§1.1 用 `bili.allow_writes` 设置）：
+   * 这里按 `PUT /api/bili/settings {allowWrites}` 对接；后端未提供时返回 available:false，
+   * 页面据此提示「开关暂不可持久化」，不阻塞其它功能。
+   */
+  async saveSettings(allowWrites: boolean): Promise<{ available: boolean }> {
+    const out = await http.put<unknown>('/api/bili/settings', { allowWrites }, { allowAnyStatus: true })
+    if (isRecord(out) && typeof out.__status === 'number') return { available: false }
+    return { available: true }
+  },
+  /** POST /api/bili/cmd（required）{argv, dryRun?} → 只读预览（写命令受开关限制）。 */
+  async cmd(argv: string[], dryRun = false): Promise<BiliCmdResult> {
+    const out = await http.post<unknown>('/api/bili/cmd', { argv, dryRun }, { allowAnyStatus: true })
+    return toBiliCmd(out)
   },
 }

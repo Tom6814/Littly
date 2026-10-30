@@ -57,8 +57,8 @@
 | Discord | `@littly/channel-discord`：Gateway + REST、DM 投递地址解析。`verify-discord.mjs` 68 项 |
 | 语音消息 | `@littly/voice`：Fish TTS + 三轮流水线（语气门按技术可读性判退），已接进对话主链路 |
 | /call 实时通话 | `@littly/voice-call`：同端口 `/call` WS（Deepgram STT → 角色快速回复 → Fish 流式 TTS → 通话卡片 → 挂断回响总结）。`verify-voice-call.mjs` 75 项 |
-| bilibili sidecar + 账号面板 | `sidecars/bili/`（HTTP wrapper）+ `@littly/tools` 的 `bili` 元工具（白名单 + dry-run + 限频 + 审计）+ 控制台「Bilibili」页（扫码登录）。`verify-bili.mjs` 36 项 |
-| 扫码登录链路（用户反馈项） | 归一化在服务端做（`biliQrImageDataUrl`），API 直接返回 data URL，前端仍容错 —— 不再依赖「控制台 bundle 与 API 同版」。`verify-bili-sidecar.mjs` 15 项对着真 harness + 真 sidecar 跑完整链路；二维码 PNG 落盘肉眼确认为真实可扫的 B 站登录码 |
+| bilibili sidecar + 账号面板（**已于 §11.2 被 bilibili-cli 方案替换**） | `sidecars/bili/`（HTTP wrapper）+ `@littly/tools` 的 `bili` 元工具（白名单 + dry-run + 限频 + 审计）+ 控制台「Bilibili」页（扫码登录）。`verify-bili.mjs` 36 项 |
+| 扫码登录链路（用户反馈项，**已于 §11.2 被替换**） | 归一化在服务端做（`biliQrImageDataUrl`），API 直接返回 data URL，前端仍容错 —— 不再依赖「控制台 bundle 与 API 同版」。`verify-bili-sidecar.mjs` 15 项对着真 harness + 真 sidecar 跑完整链路；二维码 PNG 落盘肉眼确认为真实可扫的 B 站登录码 |
 | MCP 接入 | bundle 挂 `mcp-bili`（stdio `bili mcp serve`）；`@littly/bili` 收敛门把原始 `mcp__bili__*` 挡在元工具后面 |
 
 ## 5. M4 —— 控制台
@@ -364,3 +364,17 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 | 删除 | `/bind` 路由、导航「账号绑定」项、`pages/bind/` 目录（api 迁到 `api/bind.ts`） |
 | 顺手修复 | ChannelConfigPage 曾把 `telegram` 直接当绑定 key → 后端 400；现映射 `telegram → tg`，绑定码可用 |
 | 验证 | console build ✓ / typecheck 0 / check-icons ✓；3115 scratch 逐渠道绑定码接口 200/400 符合预期；3000 `GET /api/bind/status` 200 |
+
+### 11.2 B 站升级：基于 bilibili-cli 重写（2026-10-31）
+
+用户要求升级 B 站能力（视频/用户/搜索/发现/动态/收藏/互动 + 智能认证），以
+[`public-clis/bilibili-cli`](https://github.com/public-clis/bilibili-cli)（Apache-2.0）为基座。
+
+| 项 | 内容 |
+|---|---|
+| 插件 | `@littly/bili` 重写为 CLI 壳（`bili` v0.6.2）：工具 `bili{argv,dryRun}`；20 命令允许清单、写/audio 默认 dry-run（开关+显式 dryRun 双条件）、读 30/h 写 5/h、`audit_logs` 审计（凭证三处脱敏）、无 shell spawn、超时 SIGKILL、JSON 信封解析（`bili status` 未登录 exit=1 但 JSON 合法） |
+| 智能认证 | **扫码**：后端直连 passport `qrcode/generate`+`poll`（不复用纯 TTY 的 `bili login`），零依赖 QR 编码出 PNG；Set-Cookie 优先、crossDomain URL 兜底、refresh_token→ac_time_value；写 `credential.json`（7 字段、0600、合并 buvid）→ `bili status` 复核。**浏览器 Cookie**：`extract-cookie`（admin）删除凭证后由 CLI 自动从本机浏览器提取 |
+| API | `GET /api/bili/status`、`POST /api/bili/qr/start`、`GET /api/bili/qr/status`、`POST /api/bili/extract-cookie`(admin)、`POST /api/bili/logout`(admin)、`PUT /api/bili/settings`(admin)、`POST /api/bili/cmd` |
+| 下线 | `sidecars/bili/`、MCP `mcp-bili`、旧 4 条 sidecar 路由、`@littly/tools` 旧 bili 客户端/工具、compose bili 服务、`verify-bili-sidecar.mjs` |
+| 前端 | `/channels/bilibili` 重写：状态卡（头像/账号/UID/等级/VIP/最近登录）、扫码四态轮询自动刷新、一键提取浏览器 Cookie、登出、写开关、只读预览（视频/热门/排行/搜索） |
+| 验证 | `verify-bili` **140/0**（fake bin + mock passport）；`build:artifacts` 7/7；`verify-e2e` **83/0**（+12 bili）；其余 17 套脚本 + agent-loop 30 + backend-mainloop 47 全 0 失败；真机 live（3000）：authenticated=true/银色的whale/mid 3546953329674695、qr/start 真 passport 链接 + PNG(2338B)、qr/status wait、cmd status ok、settings 写开关可持久化 |

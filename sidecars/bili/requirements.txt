@@ -1,3 +1,0 @@
-# wrapper 自身依赖；bili-agent[mcp]==0.9.1 由 Dockerfile 单独钉版本安装
-fastapi>=0.115,<1
-uvicorn>=0.30

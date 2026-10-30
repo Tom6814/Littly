@@ -1,13 +1,11 @@
-# Littly 单机编排：harness 核心 + SnowLuma（QQ 账号协议端）+ bilibili sidecar。
+# Littly 单机编排：harness 核心 + SnowLuma（QQ 账号协议端）。
 # 说明：
 # - littly：dsh-base 内核 chat profile，SQLite 落持久卷；先单独可跑。
 # - snowluma：需 SYS_PTRACE 注入 NTQQ，官方 Docker 镜像内含 QQ+Xvfb+noVNC（见 docs/SNOWLUMA-CONTRACT.md §1）。
 #   镜像名/版本以 SnowLuma Releases 为准（早期项目迭代快，锁 tag），首次启用需 noVNC(6081) 扫码。
-# - bili：bili-cli（Python）以 HTTP wrapper 形态运行，harness 侧：
-#   ① 控制台扫码登录与命令执行（/api/bili/* 代理）；
-#   ② AI 侧 bili 元工具 → sidecar /cmd（白名单 + dry-run + 限频 + 审计）；
-#   ③ MCP 面：harness 挂 `bili mcp serve`（stdio），原始 MCP 工具由 @littly/bili 收敛到元工具。
-#   账号状态放在共享卷 bili-data 的同一路径（两边 BILI_CLI_HOME 必须一致，否则是两个账号）。
+# - bilibili 不再有独立 sidecar：`@littly/bili` 直接 spawn 容器内的 `bili`（bilibili-cli，Python），
+#   控制台扫码/浏览器 Cookie 认证 + 命令执行都在 harness 进程内完成（/api/bili/*）。
+#   B 站账号状态（credential.json）落在持久卷 bili-data：BILI_CLI_HOME 被解释为 bili CLI 的 HOME。
 services:
   littly:
     build:
@@ -27,23 +25,15 @@ services:
       LITTLY_DB_FILE: /app/data/littly.db
       # B11：上传/生成文件（相册/文档/语音/头像）与 SQLite 同卷，重建容器不丢
       LITTLY_DATA_DIR: /app/data
-      # bilibili sidecar（MCP/元工具共用同一份账号状态）
-      BILI_SIDECAR_URL: http://bili:3010
-      BILI_SIDECAR_TOKEN: ${BILI_SIDECAR_TOKEN:-}
-      BILI_CLI_HOME: /app/bili-data/bili-cli
+      # bilibili-cli：BILI_CLI_HOME 是 bili CLI 的 HOME（凭证落 <HOME>/.bilibili-cli/credential.json）
+      BILI_CLI_HOME: /app/bili-data
       BILI_BIN: bili
       # 密钥经 env 注入（勿写进镜像）；模型配置也可后续在 DB KV 里配
       # OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_CHAT_MODEL ...
     volumes:
       - littly-data:/app/data
+      # bilibili-cli 的 HOME（credential.json 随卷持久化，容器重建不丢登录态）
       - bili-data:/app/bili-data
-    depends_on:
-      # bili 在 profile 里（默认不起），所以这个依赖必须是可选的 ——
-      # 否则默认的 `docker compose up` 会直接报 "depends on undefined service" 而起不来。
-      # sidecar 缺席时 harness 会优雅降级（控制台明确告诉用户它没连上、为什么、怎么起）。
-      bili:
-        condition: service_started
-        required: false
 
   snowluma:
     image: ghcr.io/snowluma/snowluma:latest  # TODO(M2): 锁定具体 tag
@@ -63,28 +53,6 @@ services:
       - "6081:6081"   # noVNC 扫码登录（勿暴露公网）
     volumes:
       - snowluma-data:/app/data
-
-  bili:
-    build:
-      context: ../sidecars/bili
-      dockerfile: Dockerfile
-    image: littly-bili:test
-    container_name: littly-bili
-    restart: unless-stopped
-    profiles: ["bili"]
-    ports:
-      - "3010:3010"   # sidecar HTTP 面（本地开发直连；生产走 compose 网络内的 http://bili:3010）
-    environment:
-      TZ: Asia/Shanghai
-      # 与 harness 侧同路径同卷 → 同一个账号状态
-      BILI_CLI_HOME: /app/bili-data/bili-cli
-      # wrapper 自己的审计与限频状态
-      BILI_SIDECAR_DATA: /app/bili-data/wrapper
-      BILI_SIDECAR_TOKEN: ${BILI_SIDECAR_TOKEN:-}
-      # 写操作默认 dry-run；要放开需显式设 1（谨慎）
-      BILI_ALLOW_WRITES: ${BILI_ALLOW_WRITES:-0}
-    volumes:
-      - bili-data:/app/bili-data
 
 volumes:
   littly-data:

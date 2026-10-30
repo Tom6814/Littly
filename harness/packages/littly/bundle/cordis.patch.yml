@@ -26,7 +26,7 @@
     - id: littly-growth
       name: '@littly/growth'
 
-    # bilibili：收敛口（把原始 MCP 工具挡在带护栏的 bili 元工具后面）
+    # bilibili：CLI 壳（bilibili-cli；模型只走带护栏的 bili 元工具）
     - id: littly-channel-discord
       name: '@littly/channel-discord'
     - id: littly-channel-wechat-ilink
@@ -91,18 +91,5 @@
     - id: schedule
       name: '@deepseek-ai/dsh-schedule'
 
-    # bilibili MCP 服务器（stdio）：她自己的 B 站账号。
-    # 未安装 bili 时不阻塞启动（failOnStartupError=false）；模型侧统一走 bili 元工具，
-    # 原始 MCP 工具由 @littly/bili 收敛掉（见 docs/BILI-INTEGRATION.md）。
-    - id: mcp-bili
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        serverName: bili
-        transport: stdio
-        command: !!js process.env.BILI_BIN || 'bili'
-        args: [mcp, serve]
-        env:
-          BILI_CLI_HOME: !!js process.env.BILI_CLI_HOME || '/app/data/bili-cli'
-        failOnStartupError: false
-        reconnect:
-          enabled: false
+    # bilibili 能力由 @littly/bili 直接 spawn `bili`（CLI 壳），没有 MCP 服务器；
+    # 旧的 mcp-bili（stdio `bili mcp serve`）随 bili-agent 一起下线（见 docs/BILI-INTEGRATION.md）。

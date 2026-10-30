@@ -25,8 +25,10 @@
 - **她自己的 X（Twitter）**：`x` 元工具走 twitter-cli（[jackwener/twitter-cli](https://github.com/jackwener/twitter-cli)，
   无官方 API key）——读 feed/搜索/用户/推文，写推文/回复/点赞/转推/关注默认**预演**，开启写开关后才真发；
   凭据是你自己的 X 登录 cookie（存 DB、不回显、不进日志），支持代理。
-- **她自己的 B 站**：`bili` 元工具走 sidecar（子命令白名单 + 写操作默认预演 + 限频 + 审计），
-  harness 同时挂上 bili 的 MCP 服务器；原始 MCP 工具由收敛门挡在元工具后面。
+- **她自己的 B 站**：`bili` 元工具封装 [bilibili-cli](https://github.com/public-clis/bilibili-cli)
+  （视频详情/字幕/AI 总结/评论/相关、UP 主/视频列表/关注、搜索、热门/排行、动态、收藏夹/稍后再看/历史、
+  点赞/投币/一键三连）——子命令白名单 + 写操作默认预演 + 限频 + 审计；控制台扫码登录（passport HTTP 自绘二维码）
+  或一键提取本机浏览器 Cookie。
 - **社区 dsh 插件可直接接入**：装完的插件注册的工具对她可见可调（dsh-bridge）。
 - **首启引导（onboarding）**：全新部署打开控制台 → 5 步向导：她是谁 → 模型连接（真实测连通 + 延迟）
   → 人格 → **给她账号**（微信 / B 站 / Telegram / QQ / Discord / X，逐平台状态 + 内联快速配置，可跳过）
@@ -43,8 +45,7 @@
 | `harness/` | 基座：[DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) fork（vendor 于固定 commit），继承插件系统 / MCP / skills / 定时任务 / LLM 适配器 |
 | `harness/packages/littly/` | 业务插件（从旧项目逐行移植 / 本轮新增）：`storage` `persona` `memory` `agents` `tools` `voice` `voice-call` `growth` `scheduler` `console-api` `mcp` `bili` `x` + 渠道 `channel-qq`（SnowLuma + 官方 QQBot）`channel-telegram` `channel-wechat-ilink` `channel-discord` |
 | `console/` | Vue 3.5 + Vite + Tailwind 4 + `@felinic/ui` 控制台（真 URL 路由，五组导航 + 首启引导；`packages/ui` 为 vendored 设计系统） |
-| `sidecars/bili/` | bili-cli（bili-agent）HTTP wrapper sidecar —— AI 自己的 bilibili 账号 |
-| `deploy/` | 容器编排（harness + SnowLuma + bili sidecar） |
+| `deploy/` | 容器编排（harness + SnowLuma） |
 | `docs/` | [宪法](docs/PRINCIPLES.md) · [移植指南](docs/PORTING-GUIDE.md) · [部署与验收](docs/DEPLOY.md) · [QQ / SnowLuma 接入](docs/SNOWLUMA-CONTRACT.md) · [bilibili 接入](docs/BILI-INTEGRATION.md) |
 
 ## 跑起来

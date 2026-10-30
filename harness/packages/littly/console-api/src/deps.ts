@@ -14,6 +14,102 @@ import type { QqChannelService } from '@littly/channel-qq'
 import type { SessionManager } from './auth.ts'
 import { err, type Router, type ApiRequest } from './http.ts'
 
+
+/** Bilibili 服务（@littly/bili）的结构面；profile 未启用该插件时为 undefined。 */
+export interface BiliUserLike {
+  id: string
+  mid: string
+  name: string
+  username: string
+  uname: string
+  level: number
+  coins: number
+  sign: string
+  vip: { status: number; type: number; label: string }
+  avatarUrl: string
+}
+
+/** 凭证摘要（不含 Cookie 值）。 */
+export interface BiliCredentialLike {
+  present: boolean
+  savedAt: string
+  hasBuvid: boolean
+}
+
+/** 统一错误信息。 */
+export interface BiliErrorLike {
+  code: string
+  message: string
+  raw?: string
+}
+
+/** 登录状态。 */
+export interface BiliStatusLike {
+  authenticated: boolean
+  user: BiliUserLike | null
+  credential: BiliCredentialLike
+  allowWrites: boolean
+  bin: string
+  error?: BiliErrorLike
+}
+
+/** 命令执行结果。 */
+export interface BiliRunResultLike {
+  ok: boolean
+  dryRun: boolean
+  exitCode: number
+  command: string
+  argv: string[]
+  data?: unknown
+  error?: BiliErrorLike
+  note?: string
+  outputDir?: string
+}
+
+/** 扫码开始结果。 */
+export interface BiliQrStartLike {
+  sessionId: string
+  qrDataUrl: string
+  link: string
+  expiresInMs: number
+}
+
+/** 扫码轮询结果。 */
+export interface BiliQrPollLike {
+  status: 'wait' | 'scaned' | 'confirmed' | 'expired' | 'error'
+  message?: string
+  user?: BiliUserLike | null
+  expiresInMs?: number
+}
+
+/** 浏览器 Cookie 提取结果。 */
+export interface BiliBrowserExtractLike {
+  ok: boolean
+  status: BiliStatusLike
+  hint?: string
+  error?: string
+}
+
+/** 最近一次探测记录。 */
+export interface BiliProbeInfoLike {
+  ok: boolean
+  error: string
+  at: string
+}
+
+/** Bilibili 服务最小面（@littly/bili 的 littlyBili 服务）。 */
+export interface BiliServiceLike {
+  status(): Promise<BiliStatusLike>
+  browserExtract(): Promise<BiliBrowserExtractLike>
+  qrStart(): Promise<BiliQrStartLike>
+  qrPoll(sessionId: string): Promise<BiliQrPollLike>
+  logout(): Promise<{ ok: boolean; cleared: boolean }>
+  settings(input: { allowWrites?: boolean }): { ok: boolean; allowWrites: boolean }
+  binOk(): Promise<boolean>
+  lastProbe(): BiliProbeInfoLike | null
+  run(argv: string[], opts?: { botId?: string; dryRun?: boolean }): Promise<BiliRunResultLike>
+}
+
 export interface Deps {
   storage: LittlyStorage
   persona: LittlyPersona
@@ -29,6 +125,8 @@ export interface Deps {
   x: XService | undefined
   /** QQ 渠道（SnowLuma/官方 QQBot）服务；profile 未启用 @littly/channel-qq 时为 undefined。 */
   qq: QqChannelService | undefined
+  /** Bilibili 服务；profile 未启用 @littly/bili 时为 undefined。 */
+  bili: BiliServiceLike | undefined
   sessions: SessionManager
   cwd: string
   log: (msg: string, ...args: unknown[]) => void

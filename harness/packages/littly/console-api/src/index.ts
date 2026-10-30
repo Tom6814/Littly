@@ -36,6 +36,7 @@ import { registerOnboardingRoutes } from './routes-onboarding.ts'
 import { registerWechatRoutes, createWechatServiceGetter } from './routes-wechat.ts'
 import { registerXRoutes } from './routes-x.ts'
 import { registerQqRoutes } from './routes-qq.ts'
+import { registerBiliRoutes } from './routes-bili.ts'
 import type { XService } from '@littly/x'
 import type { QqChannelService } from '@littly/channel-qq'
 
@@ -69,6 +70,7 @@ export function apply(ctx: Context, _config: Config): void {
     skills: ctx.get('skills') as LittlySkillRegistry | undefined,
     x: ctx.get('littlyX') as XService | undefined,
     qq: ctx.get('littlyChannelQq') as QqChannelService | undefined,
+    bili: ctx.get('littlyBili') as Deps['bili'],
     sessions,
     cwd: process.cwd(),
     log: (msg, ...args) => ctx.logger.info(msg, ...args),
@@ -87,6 +89,7 @@ export function apply(ctx: Context, _config: Config): void {
   registerWechatRoutes(router, deps, createWechatServiceGetter(ctx))
   registerXRoutes(router, deps)
   registerQqRoutes(router, deps)
+  registerBiliRoutes(router, deps)
   router.get('/api', 'public', (a) => {
     jsonHealth(a)
   })
