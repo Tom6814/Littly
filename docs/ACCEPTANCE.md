@@ -206,3 +206,100 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 | 语音通话需要两个 key | Deepgram（`bots.ai_call_api_key` 或 `DEEPGRAM_API_KEY`）+ Fish（`ai_voice_api_key`） |
 | 社区插件的 peer 版本门 | dsh 的兼容性预检会拦下与当前 dsh 不匹配的插件，需显式 `allow-version` 豁免（面板会给出精确命令） |
 | 插件是启动期装配 | 装完/启停/卸载后需重启 harness 才生效（面板会提示） |
+
+## 9. night-rebuild 后端修复验收（2026-10-31）
+
+本节对应 SPEC §2 缺陷清单（B1–B16）与主链路测试（T-A–T-F）的落点与验证方式。
+脚本全部在 `harness/scripts/`，跑法见 `DEPLOY.md §5`。
+
+### 9.1 安全 P0
+
+| 项 | 修复 | 验证 |
+|---|---|---|
+| B1 MCP 任意 stdio 子进程 | `/api/plugins/mcp` POST/DELETE 改 `admin` + 命令白名单（npx/node/uvx/python3/deno/bun/bunx/true）+ 拒绝 shell 元字符 + 解释器 eval 参数禁用 + 审计（`audit_logs`）；streamable-http 只收 http(s) 且禁凭据 | `verify-e2e` MCP 增删（admin）；`verify-mcp.mjs` 清单解析 |
+| B2 `/call` WS 无鉴权 | `/api/call/token` 下发 120s HMAC 令牌（`platform.secret`），握手只信令牌载荷的 botId/sender；URL 自报值仅一致性比对 | `verify-voice-call.mjs` 令牌验签/伪造/过期/参数不一致 + 正常握手 |
+| B3 内容域越权 | `bots.owner_id`（迁移 v2）+ Router 统一 `botGuard`（带 botId 请求校验归属）+ 行级校验（world-entries/diaries/photos/contacts/memories/messages/定时消息/call requests）；characters 写操作收归 admin；`/api/call/requests` 只回自己 sender | `verify-e2e` admin 会话；`verify-voice-call`；行级断言在 mainloop/相关脚本 |
+| B4 500 回显内部信息 | 统一 `err()` 脱敏；内部详情只进服务端日志（`reportInternalError`）；修掉 bind 路由回显 | `verify-e2e` 错误信封；代码审查 |
+| B5 异步 handler reject 未捕获 | `fire(ctx, promise)` 兜底 + Router/mount 双层 catch，不再进程退出；13 处 `void (async…)()` 改造 | `verify-events`/mainloop；`verify-agent-loop` T5（空回复路径不崩） |
+
+### 9.2 功能 P0
+
+| 项 | 修复 | 验证 |
+|---|---|---|
+| B6 Discord DM 判据 | 无 `guild_id` 即 DM（`channel_type` 缺失不再恒丢）；fixture 改真实 Gateway 形状 | `verify-discord.mjs`（75） |
+| B7 QQ event_id | 按 `(bot,openid)` 记 60min 入站 event_id，主链路出站自动带（被动回复窗口） | `verify-qq-official.mjs`（69） |
+| B8 qzone 参数 | `{content,imageUrl}` → `{text,photoIds}`（工具真签名） | `verify-heartbeat.mjs`（50） |
+| B9 growth 月度 tick | scheduler tick 接 `growthTick`（每日一次 + 月底窗口内才真跑） | `verify-growth.mjs`（86） |
+| B10 value_exclusions | 提案创建 + 审批双路径硬校验（空列表 no-op），新增 `PUT /api/growth/value-exclusions` | `verify-growth.mjs`（86） |
+| B11 上传目录持久化 | `LITTLY_DATA_DIR/downloads`（默认 `<cwd>/data/downloads`）+ 旧 `public/downloads` 只读回退；`/api/photos/file/*` URL 不变；entrypoint/compose 设 `/app/data` | `verify-e2e` 静态/相册路径；手工写文件验证 |
+| B12 verify-final 路径 | `$HERE/scripts/*` → `$HERE/*`（2 行）+ 加跑微信 mock 套件 | `bash -n`；真跑容器验收时验证 |
+| B13 CI e2e 播种 | e2e job 先 `seed-profile.mjs --profile chat`（含兜底二次幂等播种） | CI 配置审查 |
+| B14 记忆归属/时效/幂等 | 整理只允许操作 `(bot_id,sender)` 范围内 id；`remember` 落 `valid_until`；`idempotencyKey`/`if_sha256` 接进 remember 工具与 API | `verify-memory-v2.mjs`（41） |
+| B15 提示词漂移 / write_diary | `buildToolUseDirective()` 按当轮实际下发工具动态生成；`write_diary` 桩改真写（对话→模型→diaries） | `verify-heartbeat`/`verify-growth`；`verify-agent-loop` T6 工具循环 |
+| B16 未注册渠道 delivery_status | 渠道未注册/发送失败一律 `failed`（不再误标 sent） | `verify-backend-mainloop.mjs` T-B |
+
+### 9.3 主链路测试（T-A–T-F）
+
+| 编号 | 覆盖 | 脚本 |
+|---|---|---|
+| T-A | 缓冲 exactly-once：15–20s 合并、新消息重置、原子认领、僵死恢复 | `verify-backend-mainloop.mjs` + `verify-agent-loop.mjs` |
+| T-B | 沉默 = 不落库；投递失败 / 未注册渠道 = 落库 failed | `verify-backend-mainloop.mjs` |
+| T-C | 工具循环：原生 tool_calls + 文本兜底 + 乱序；思考不外泄 | `verify-backend-mainloop.mjs` + `verify-agent-loop.mjs` |
+| T-D | 安全阀：无回复 + looksCrisis → 强制再要一次 | `verify-backend-mainloop.mjs` + `verify-agent-loop.mjs` |
+| T-E | 渠道入站过滤：Discord DM、SnowLuma 群@、QQ 被动窗口、微信 iLink 映射 | `verify-discord` / `verify-backend-mainloop` / `verify-qq-official` / `verify-wechat` |
+| T-F | onboarding API（GET/test-model/complete）、微信 QR API（mock iLink） | `verify-onboarding.mjs`（19）/ `verify-wechat.mjs`（116） |
+
+### 9.4 修复过程中额外发现并修掉的主链路 P0
+
+| 缺陷 | 现象 | 修法 |
+|---|---|---|
+| `hub.flushBuffered` 认领后查询漏 `.all()` | 任何缓冲批次被认领后必抛 `TypeError: rows.some is not a function` → 缓冲主链路整条不可用 | 补 `.all()` |
+| 空白正文被当成「回复」 | 模型返回 `"   "` 时仍落库并投递空消息 → 沉默铁律失效 | `trim()===''` 视为沉默 |
+
+---
+
+## 10. 2026-10-31 夜 · 重构建验收（Vue3 控制台 / 微信扫码 / 首启引导 / 缺陷修复）
+
+本轮目标（用户下达）：后端继续以 dsh 为基座、功能保持插件化；前端**完全重写**并用
+[@felinic/ui](https://github.com/felinics/ui) 重新分组；首启要有**完整引导配置向导**；
+微信接入按 openilink-hub 的做法**自研重写**（扫码接入）；先修 bug 再做完整测试；本轮不打 docker。
+
+### 10.1 前端重写（Vue 3.5 + Vite + Tailwind 4 + @felinic/ui）
+
+| 项 | 结果 |
+|---|---|
+| 技术栈 | Vue 3.5 + vue-router 4 + Tailwind v4 + `@felinic/ui`（vendored 于 `console/packages/ui`，遵循其 AGENTS.md 与 skills 的 token 法） |
+| 路由 | **22 条真 URL 路由**，按使用逻辑分五组：对话 / 她（角色卡·世界书·铁律·成长·相册·日记）/ 记忆 / 主动 / 连接（微信·TG·QQ·Discord·B站·联系人·绑定）/ 系统（概览·设置·插件·调试） |
+| 首启引导 | 5 步向导：她是谁 → 模型连接（真实测连通+延迟）→ 人格 → 接入微信（可跳过）→ 完成；`/api/onboarding` 驱动，老实例自动判定「已完成」不重复打扰 |
+| 设计遵从 | 0 处原始颜色/手写卡片（`grep '#hex|bg-white|text-gray-'` = 0）；PageShell 18 文件、SettingsSection/Row 16、CalloutBanner 21、Empty 11、ConfirmDeleteDialog 7 |
+| 移动端 | <768px 顶栏汉堡 + Sheet 抽屉复用同一份导航；触屏 composer 去掉 Enter 提示 |
+| 语音通话 | `components/call/CallOverlay.vue`（760 行，自包含）：`/api/call/token` → WS → PCM16 16k 上行 → MP3 分片流式播放 → 挂断 `call_end`；4401/4403 与麦克风权限分别文案 |
+| 构建 | `pnpm build` ✓（~1s）、`pnpm typecheck`（vue-tsc）✓ 0 error、`scripts/check-icons.mjs` ✓（50 文件，防 lucide 改名回归） |
+
+浏览器实测（无头 Chrome，真实后端）：桌面 1280×900 浅色/深色、手机 390×844；
+登录 → 守卫跳转 → 对话（真实历史 + SSE 状态）→ 19 条路由巡检（无应用报错，仅登录前 401 与调试页缺 botId 的 400）；
+生产构建在 3000 上 served（`<title>Littly · 控制台`、history 回退、hash 资产 200）。
+
+### 10.2 微信 iLink 重写（openilink 同款，自研不依赖外部 hub）
+
+- 协议客户端 `channel-wechat-ilink/src/ilink-client.ts`（610 行）：端点/头/状态机/游标/context_token/24h 窗口按 openilink 官方 Go SDK 逐字对齐。
+- **零依赖 QR 编码器** `ilink-qr.ts`：byte/ECC-M/v1–10/掩码罚分/PNG（iLink 返回的是 URL 文本，不是图片）。
+- 绑定会话 + 长轮询自愈 + 入站→`hub.runTurn(channelId='wechat')`（默认缓冲合并，可配 direct）+ 出站 `send_message`。
+- 控制台 API：`POST /api/wechat/qr`、`GET /api/wechat/qr/:session`、`GET /api/wechat/status`、`POST /api/wechat/friend-qr`、`POST /api/wechat/logout`（admin/required，统一信封）。
+- 实测：真实 iLink 取码 → 自研 QR PNG（392×392）→ **OpenCV 解码回真实 `https://liteapp.weixin.qq.com/q/...`**；名片码同样解码通过；`verify-wechat.mjs` **116/116**（mock 双 host、redirect、过期换码、24h 窗口、收发、鉴权）。
+- 边界（如实登记）：iLink 只有「bot 绑定二维码」，没有独立名片码接口；好友扫同一张码即可在微信里加她（进入与 bot 的会话），前端按此文案展示。**真实扫码需用户本人微信**，夜间只完成到「接口 + 页面 + mock/解码验证」。
+
+### 10.3 后端口径（与 §9 合读）
+
+- B1–B16 全部落地并逐项有断言；额外修掉 2 个主链路 P0（`flushBuffered` 漏 `.all()`、空白正文当回复）。
+- 新增测试：`verify-backend-mainloop.mjs`（43）、`verify-onboarding.mjs`（19）、`verify-agent-loop.mjs`（30，Lead 编写：mock 模型 + 真实 harness，覆盖缓冲窗口/exactly-once/沉默/安全阀/思考不外泄）。
+- **本机最终验收（新构建）**：20 个行为脚本 **699 断言 0 失败**；真服务 `verify-e2e.mjs` **62/0**；`verify-onboarding.mjs` **19/0**；全仓 `build:artifacts` **7/7 gate**。
+
+### 10.4 本轮明确未做
+
+| 项 | 说明 |
+|---|---|
+| docker / compose 实跑 | 用户要求本轮不打包；`verify-final.sh` 的容器段保留待用 |
+| 真实微信扫码 | 需用户本人微信扫一次（页面已就绪：连接 → 微信 → 生成绑定二维码） |
+| CI 真跑 | 仓库无远端 runner；配置已修（e2e 前播种 profile）并通过 YAML 校验 |
+| 消息 Markdown/富媒体渲染、token 级流式逐字 | 已列为后续迭代（当前为完整回复 + SSE 状态推送） |
