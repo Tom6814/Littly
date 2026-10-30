@@ -4,11 +4,12 @@
  * 消息写操作一律要求登录；管理员保留任意 sender 的 power-user 能力。
  */
 import type { MessageRow } from '@littly/storage'
-import { json, err, bodyRecord, reqStr, reqNum, type ApiRequest } from './http.ts'
+import { json, err, bodyRecord, reqStr, reqNum, fire, type ApiRequest } from './http.ts'
 import { messageView, parseJsonObject } from './mapping.ts'
 import { ensureSeed } from './seed.ts'
-import { isAdmin, resolveSender, senderAllowed, ownSender, queryStr, nowIso } from './deps.ts'
-import { listPendingCalls, consumePendingCall } from '@littly/voice-call'
+import { isAdmin, resolveSender, senderAllowed, ownSender, queryStr, nowIso, loadBot, botOwnedBy, requireRowBotAccess } from './deps.ts'
+import { listPendingCalls, consumePendingCall, signCallToken, CALL_TOKEN_TTL_MS } from '@littly/voice-call'
+import { ensureSecret } from './auth.ts'
 import { handleWechatWebhook } from '@littly/channel-wechat-ilink'
 import type { Deps, RegisterFn } from './deps.ts'
 
@@ -63,6 +64,8 @@ async function runAndRespond(d: Deps, ctx: ApiRequest, botId: string, sender: st
 }
 
 export const registerChatRoutes: RegisterFn = (r, d) => {
+  // B3：内容域归属守卫 —— 带 botId 的请求要求 admin 或该 bot 的 owner。
+  r.botGuard = (ctx, botId) => botOwnedBy(ctx, d, botId)
   // ---- 直接对话 ----
 
   r.post('/api/chat', 'required', async (ctx) => {
@@ -246,6 +249,7 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '消息不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     if (!senderAllowed(ctx, row.sender)) {
       err(ctx.res, 403, 'forbidden', '只能删除自己会话中的消息')
       return
@@ -260,6 +264,7 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '消息不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     if (!senderAllowed(ctx, row.sender)) {
       err(ctx.res, 403, 'forbidden', '只能恢复自己会话中的消息')
       return
@@ -315,7 +320,7 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
   // ---- 微信桥接 Webhook（HMAC 验签 / challenge / reply_async / 幂等）----
 
   r.post('/api/wechat/inbound', 'public', (ctx) => {
-    void (async (): Promise<void> => {
+    fire(ctx, (async (): Promise<void> => {
       const rawBody = ctx.rawBody ?? (typeof ctx.body === 'string' ? ctx.body : JSON.stringify(ctx.body ?? {}))
       const timestamp = ctx.req.headers['x-timestamp']
       const signature = ctx.req.headers['x-signature']
@@ -325,7 +330,7 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
         { storage: d.storage, hub: d.hub, log: d.log },
       )
       json(ctx.res, result.status, result.body)
-    })()
+    })())
   })
 
   // ---- 来电请求（AI 主动来电：控制台轮询取件）----
@@ -336,14 +341,42 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 400, 'bad_request', '缺少 botId')
       return
     }
-    const calls = listPendingCalls(botId)
+    // §B3 内容域越权修复：普通用户只看得见自己作为接听方的来电，admin 可看全部。
+    const calls = listPendingCalls(botId).filter((c) => isAdmin(ctx) || c.sender === ownSender(ctx))
     json(ctx.res, 200, { data: { calls: calls.map((c) => ({ id: c.id, botId: c.botId, sender: c.sender, reason: c.reason, topic: c.topic, createdAt: c.createdAt })) } })
+  })
+
+  /**
+   * B2：签发 `/call` WebSocket 短时令牌。
+   * 浏览器先（带 httpOnly 会话 cookie）调本端点拿 token，再用
+   * `wss://host/call?token=<token>` 连接；WS 服务端只令牌里的 botId/sender 为准。
+   * 普通用户只能以自己的 sender 拨号；admin 可为他人签发（与 resolveSender 语义一致）。
+   */
+  r.post('/api/call/token', 'required', (ctx) => {
+    const body = bodyRecord(ctx.body)
+    const botId = reqStr(body, 'botId') ?? ''
+    const sender = resolveSender(ctx, reqStr(body, 'sender'))
+    if (botId === '' || sender === '') {
+      err(ctx.res, 400, 'bad_request', '缺少 botId/sender')
+      return
+    }
+    if (loadBot(d, botId) === null) {
+      err(ctx.res, 400, 'bad_request', '机器人不存在')
+      return
+    }
+    const token = signCallToken(ensureSecret(d.storage), { botId, sender, userId: ownSender(ctx) })
+    json(ctx.res, 200, { data: { token, expiresInMs: CALL_TOKEN_TTL_MS } })
   })
 
   r.post('/api/call/requests/:id/accept', 'required', (ctx) => {
     const call = consumePendingCall(ctx.params['id'] ?? '')
     if (!call) {
       err(ctx.res, 404, 'not_found', '来电请求不存在或已过期')
+      return
+    }
+    // §B3：接到不属于自己的来电 → 403（来电列表已按 sender 裁剪，这里防直接猜 id）。
+    if (!isAdmin(ctx) && call.sender !== ownSender(ctx)) {
+      err(ctx.res, 403, 'forbidden', '无权接听他人的来电')
       return
     }
     json(ctx.res, 200, { data: { call } })

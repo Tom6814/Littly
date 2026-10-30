@@ -15,6 +15,7 @@ import type { LittlyStorage } from '@littly/storage'
 import type { LittlyHub } from '@littly/agents'
 import type { LittlyMemory } from '@littly/memory'
 import { runDiaryTick } from './diary.ts'
+import { runGrowthDailyTick, type GrowthTickLike } from './growth-tick.ts'
 import { tickHeartbeat } from './heartbeat.ts'
 import { processScheduledMessages } from './scheduled.ts'
 import type { SchedulerDeps } from './types.ts'
@@ -64,6 +65,10 @@ export async function tick(deps: SchedulerDeps, now: Date, opts: { skipDiary: bo
   // d) 心声回响（heartbeat）：静默扫描 + 指数退避唤醒
   const hb = await tickHeartbeat(deps, now)
   if (hb.woken > 0) deps.log('[scheduler] 心声回响唤醒 %d/%d', hb.woken, hb.scanned)
+
+  // e) B9：成长系统月度评审（每日一次；仅在月底窗口内真正调用 growthTick）
+  const growthResult = await runGrowthDailyTick(deps, now)
+  if (growthResult.ran) deps.log('[scheduler] 成长月度评审已触发（evaluated=%d）', growthResult.evaluated)
 }
 
 export function apply(ctx: Context, config: Config): void {
@@ -71,6 +76,9 @@ export function apply(ctx: Context, config: Config): void {
     storage: ctx.littlyStorage as LittlyStorage,
     hub: ctx.littlyHub as LittlyHub,
     memory: ctx.littlyMemory as LittlyMemory,
+    // B9：成长服务用 ctx.get 取（不写进 inject）—— growth 未装配时静默降级，
+    // 不让「装不装成长插件」决定调度器能否启动。
+    growth: ctx.get('littlyGrowth') as GrowthTickLike | undefined,
     log: (msg, ...args) => ctx.logger.info(msg, ...args),
   }
   const tickMs = Math.max(5_000, Math.round(config.tickMs) || 60_000)

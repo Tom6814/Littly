@@ -50,7 +50,9 @@ function personaIronRules(rule: PersonaRuleRow | null): string {
 
 // ---- [2] 角色卡 ----
 
-export function buildCharacterLayer(card: CharacterRow | null): string {
+export function buildCharacterLayer(card: CharacterRow | null, toolDirective?: string | undefined): string {
+  // B15：工具清单由 hub 按「本轮真正下发的注册表」动态传入；未传时回退静态快照。
+  const toolUse = toolDirective ?? TOOL_USE_DIRECTIVE
   if (!card) return ''
   if (card.spec === 'mask') {
     return [
@@ -58,7 +60,7 @@ export function buildCharacterLayer(card: CharacterRow | null): string {
       PERSONA_RIGHTS_HINT,
       WECHAT_STYLE_HINT,
       OPERATION_AUTONOMY_HINT,
-      TOOL_USE_DIRECTIVE,
+      toolUse,
       PAREN_NTR_HINT,
     ].filter(Boolean).join('\n\n')
   }
@@ -72,7 +74,7 @@ export function buildCharacterLayer(card: CharacterRow | null): string {
       PERSONA_STYLE_TAGS,
       PERSONA_RIGHTS_HINT,
       OPERATION_AUTONOMY_HINT,
-      TOOL_USE_DIRECTIVE,
+      toolUse,
       PAREN_NTR_HINT,
       PERSONA_IMMERSION_DIRECTIVE,
     ].filter(Boolean).join('\n\n')
@@ -91,7 +93,7 @@ export function buildCharacterLayer(card: CharacterRow | null): string {
   parts.push(PERSONA_RIGHTS_HINT)
   parts.push(WECHAT_STYLE_HINT)
   parts.push(OPERATION_AUTONOMY_HINT)
-  parts.push(TOOL_USE_DIRECTIVE)
+  parts.push(toolUse)
   parts.push(PAREN_NTR_HINT)
   return parts.join('\n\n')
 }
@@ -356,6 +358,8 @@ export interface PersonaContext {
   focusText?: string | undefined
   channel?: string | undefined
   crossChannelHint?: string | undefined
+  /** B15：动态工具使用指令（hub 按注册表生成）；缺省时回退静态快照。 */
+  toolDirective?: string | undefined
 }
 
 export function buildPersonaLayers(ctx: PersonaContext): PersonaLayers {
@@ -376,7 +380,7 @@ export function buildPersonaLayers(ctx: PersonaContext): PersonaLayers {
 
   const isPersona = ctx.character?.spec === 'deepseek_persona'
   const wb = matchWorldbook(ctx.worldEntries, ctx.haystack, ctx.focusText)
-  const characterLayer = [buildCharacterLayer(ctx.character), styleCalibrationFor(ctx.character, ctx.bot.ai_model)]
+  const characterLayer = [buildCharacterLayer(ctx.character, ctx.toolDirective), styleCalibrationFor(ctx.character, ctx.bot.ai_model)]
     .filter(Boolean).join('\n\n')
 
   return {

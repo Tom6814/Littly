@@ -71,6 +71,52 @@ export function err(res: ServerResponse, status: number, code: string, message: 
   json(res, status, { error: { code, message } })
 }
 
+/**
+ * B4：内部错误详情只进服务端日志，HTTP 响应统一脱敏（不再把 SQL/堆栈/路径回显给客户端）。
+ * 由 index.ts 在装配时注入 logger；未注入时静默（绝不把详情写进响应）。
+ */
+let errorReporter: ((error: unknown, detail: { method: string; path: string; userId: string }) => void) | null = null
+
+export function setErrorReporter(
+  reporter: (error: unknown, detail: { method: string; path: string; userId: string }) => void,
+): void {
+  errorReporter = reporter
+}
+
+/** 上报一次内部错误（服务端日志留详情）。 */
+export function reportInternalError(error: unknown, detail: { method: string; path: string; userId: string }): void {
+  try {
+    if (errorReporter !== null) {
+      errorReporter(error, detail)
+      return
+    }
+    // 未注入 logger 时至少进 stderr —— 详情绝不进 HTTP 响应。
+    console.error(
+      `[console-api] internal error ${detail.method} ${detail.path} user=${detail.userId || '-'}:`,
+      error instanceof Error ? error.stack ?? error.message : error,
+    )
+  } catch {
+    // 错误上报本身不得再抛
+  }
+}
+
+/**
+ * B5：后台 async 路由处理器的兜底。
+ * 老代码里大量 `void (async () => { ... })()` 模式：handler 同步返回后，
+ * async IIFE 内部的 reject 无人接管 → Node 默认把未处理 rejection 升级为进程退出。
+ * 所有这类处理器改为 `fire(ctx, (async ...)())`：reject 被捕获 → 记日志 + 500 脱敏信封。
+ */
+export function fire(ctx: ApiRequest, promise: Promise<void>): void {
+  void promise.catch((error: unknown) => {
+    reportInternalError(error, { method: ctx.method, path: ctx.url.pathname, userId: ctx.user?.id ?? '' })
+    if (!ctx.res.headersSent) {
+      err(ctx.res, 500, 'internal', '服务器内部错误，请稍后重试')
+    } else {
+      ctx.res.destroy()
+    }
+  })
+}
+
 /** CORS 响应头：回显 Origin + 允许凭据（dev 模式 Vite 端口与 API 端口不同源）。 */
 function applyCors(req: IncomingMessage, res: ServerResponse): void {
   const origin = req.headers.origin
@@ -174,6 +220,11 @@ export class Router {
   private readonly routes: RouteDef[] = []
   /** 会话解析器由 auth 模块注入（cookie → UserRow | null）。 */
   resolveUser: ((req: IncomingMessage) => UserRow | null) | null = null
+  /**
+   * B3：bot 归属守卫。请求若携带 botId（query 或 JSON body），非 admin 用户必须通过；
+   * 由 registerContentRoutes / registerDataRoutes 等注入具体实现（deps.botOwnedBy）。
+   */
+  botGuard: ((ctx: ApiRequest, botId: string) => boolean) | null = null
 
   add(method: string, path: string, auth: AuthMode, handler: (ctx: ApiRequest) => Promise<void> | void): void {
     this.routes.push({ method: method.toUpperCase(), segments: splitSegments(path), auth, handler })
@@ -290,12 +341,25 @@ export class Router {
       files,
       user,
     }
+    // B3：内容域归属校验 —— 请求里带 botId（query 或 JSON body）时校验归属。
+    if (this.botGuard !== null && matched.auth !== 'public' && user !== null) {
+      const bodyBot = bodyRecord(body)['botId']
+      const botId =
+        ctx.query.get('botId') ??
+        (typeof bodyBot === 'string' && bodyBot !== '' ? bodyBot : null) ??
+        (typeof fields['botId'] === 'string' && fields['botId'] !== '' ? fields['botId'] : null)
+      if (botId !== null && !this.botGuard(ctx, botId)) {
+        err(res, 403, 'forbidden', '无权访问该角色的内容')
+        return
+      }
+    }
     try {
       await matched.handler(ctx)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      // B4：详情只进日志，响应脱敏；B5：同步 throw 与 fire() 覆盖后台 reject。
+      reportInternalError(error, { method, path: url.pathname, userId: user?.id ?? '' })
       if (!res.headersSent) {
-        err(res, 500, 'internal', `服务器内部错误：${message}`)
+        err(res, 500, 'internal', '服务器内部错误，请稍后重试')
       } else {
         res.destroy()
       }
@@ -308,7 +372,19 @@ export class Router {
       kind: 'prefix',
       path: '/api',
       handler: (req, res) => {
-        void this.handle(req, res)
+        // B5：handle() 自身的失败（如 resolveUser/读体异常）也必须就地兜底，不能变成进程级 unhandledRejection。
+        void this.handle(req, res).catch((error: unknown) => {
+          reportInternalError(error, {
+            method: (req.method ?? 'GET').toUpperCase(),
+            path: req.url ?? '',
+            userId: '',
+          })
+          if (!res.headersSent) {
+            err(res, 500, 'internal', '服务器内部错误，请稍后重试')
+          } else {
+            res.destroy()
+          }
+        })
       },
     })
   }

@@ -32,6 +32,8 @@ import { registerChatRoutes } from './routes-chat.ts'
 import { registerDataRoutes } from './routes-data.ts'
 import { registerAdminRoutes } from './routes-admin.ts'
 import { registerBindRoutes } from './routes-bind.ts'
+import { registerOnboardingRoutes } from './routes-onboarding.ts'
+import { registerWechatRoutes, createWechatServiceGetter } from './routes-wechat.ts'
 
 export const name = 'littly-console-api'
 
@@ -75,6 +77,8 @@ export function apply(ctx: Context, _config: Config): void {
   registerDataRoutes(router, deps)
   registerAdminRoutes(router, deps)
   registerBindRoutes(router, deps)
+  registerOnboardingRoutes(router, deps)
+  registerWechatRoutes(router, deps, createWechatServiceGetter(ctx))
   router.get('/api', 'public', (a) => {
     jsonHealth(a)
   })

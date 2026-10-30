@@ -29,7 +29,7 @@ RUN pnpm run build:artifacts
 # 播种脚本会把这份 node_modules 复制到 $DSH_HOME/profiles/chat。
 RUN cd profiles/chat && pnpm install --frozen-lockfile
 
-# --- 控制台前端（MUI + Vite，独立 workspace）---
+# --- 控制台前端（Vue 3 + Vite + @felinic/ui，独立 workspace）---
 FROM node:24-bookworm-slim AS console
 RUN corepack enable
 WORKDIR /app/console

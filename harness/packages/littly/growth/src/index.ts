@@ -21,7 +21,9 @@ import {
   applyChangesToDims,
   parseChanges,
   parseDimensions,
+  parseValueExclusions,
   validateProposalChanges,
+  validateValueExclusions,
   type GrowthChange,
 } from './types.ts'
 import { fmtShanghai, isMonthEndWindow, nextMonthEnd } from './timing.ts'
@@ -103,6 +105,40 @@ export class LittlyGrowth {
   /** 月度 tick（scheduler 调用）。 */
   tick(now: Date = new Date()): Promise<{ evaluated: number; created: number }> {
     return growthTick(this.storage, now)
+  }
+
+  /**
+   * B10：设置当前生效档案的「价值禁区」（不可被成长改写的人格边界词）。
+   * 存 active 档案的 value_exclusions 列（JSON 字符串数组），随版本冻结继承。
+   *
+   * @param botId - bot 行 id
+   * @param input - 禁区词数组（每个 ≤ 40 字，去重，最多 20 条；空数组 = 清除禁区）
+   * @returns 归一化后的禁区列表
+   */
+  setValueExclusions(botId: string, input: unknown): { ok: true; valueExclusions: string[] } | { ok: false; error: string } {
+    if (!Array.isArray(input)) return { ok: false, error: 'exclusions 需为字符串数组' }
+    const normalized: string[] = []
+    for (const raw of input) {
+      if (typeof raw !== 'string') return { ok: false, error: 'exclusions 需为字符串数组' }
+      const word = raw.trim()
+      if (word === '') continue
+      if (word.length > 40) return { ok: false, error: `禁区词过长（≤40 字）：${word.slice(0, 20)}…` }
+      if (!normalized.includes(word)) normalized.push(word)
+    }
+    if (normalized.length > 20) return { ok: false, error: '禁区最多 20 条' }
+    const active = activeProfile(this.storage, botId)
+    if (!active) return { ok: false, error: '尚无成长档案（先生成初始档案）' }
+    this.storage
+      .prepare('UPDATE growth_profiles SET value_exclusions = ? WHERE id = ?')
+      .run(JSON.stringify(normalized), active.id)
+    writeAudit(this.storage, botId, 'value_exclusions', `set ${JSON.stringify(normalized)}`)
+    return { ok: true, valueExclusions: normalized }
+  }
+
+  /** B10：读取当前生效档案的价值禁区。 */
+  getValueExclusions(botId: string): string[] {
+    const active = activeProfile(this.storage, botId)
+    return active ? parseValueExclusions(active.value_exclusions) : []
   }
 
   /** 重新评审：取消当前待审提案 + 立即以 manual 触发重新评审。 */
@@ -214,6 +250,9 @@ export class LittlyGrowth {
 
     const v = validateProposalChanges(baseDims, seedDims, changes, evidenceSet)
     if (!v.ok) return { ok: false, error: `铁律校验未通过：${v.errors.join('；')}` }
+    // B10：审批时重放价值禁区硬校验（编辑稿也不得触碰禁区；空列表 no-op）。
+    const vZone = validateValueExclusions(active.value_exclusions, changes)
+    if (!vZone.ok) return { ok: false, error: `价值禁区校验未通过：${vZone.errors.join('；')}` }
 
     const newDims = applyChangesToDims(baseDims, changes)
     const nextVersion = maxProfileVersion(this.storage, botId) + 1
@@ -305,3 +344,5 @@ export function apply(ctx: Context, _config: Config): void {
 export { getActiveGrowthText, ensureGrowthProfile, runGrowthEvaluation, growthTick, generateGrowthReport }
 export type { EvalOutcome, EvalTrigger }
 export { parseDimensions, parseChanges, parseProposalMeta }
+// B9：调度器（scheduler）接线成长 tick 时需要判断月底窗口/上海日期键。
+export { isMonthEndWindow, shanghaiMonthKey, shanghaiParts, daysInShanghaiMonth, nextMonthEnd, fmtShanghai } from './timing.ts'

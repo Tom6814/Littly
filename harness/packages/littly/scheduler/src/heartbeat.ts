@@ -436,12 +436,15 @@ export async function executeHeartbeatAction(
           audit(deps, botId, 'heartbeat', 'qzone_skip', 'QQ 空间工具未接入')
           break
         }
-        const args: Record<string, unknown> = { content: action.content.trim() }
+        // B8：post_qzone 的工具签名是 { text, photoIds }（见 tools/defs.ts）——
+        // 旧实现传的 { content, imageUrl } 两个字段都不被识别：正文必空 → 工具直接报参数错，
+        // 配图也永远发不出去。这里按工具定义构造参数，配图取相册最新一张的「照片 id」。
+        const args: Record<string, unknown> = { text: action.content.trim() }
         if (action.photo) {
           const photo = deps.storage
-            .prepare('SELECT * FROM photos WHERE bot_id = ? ORDER BY created_at DESC LIMIT 1')
-            .get(botId) as { url: string } | undefined
-          if (photo) args['imageUrl'] = photo.url
+            .prepare('SELECT id, url FROM photos WHERE bot_id = ? ORDER BY created_at DESC LIMIT 1')
+            .get(botId) as { id: string; url: string } | undefined
+          if (photo) args['photoIds'] = [photo.id]
         }
         const res = await deps.hub.tools.dispatch('post_qzone', args, {
           botId,
@@ -449,7 +452,7 @@ export async function executeHeartbeatAction(
           botName: bot.name,
           channelId: 'qqp',
         })
-        audit(deps, botId, 'heartbeat', 'qzone', `${res.ok ? 'ok' : 'fail'} ${detail}`)
+        audit(deps, botId, 'heartbeat', 'qzone', `${res.ok ? 'ok' : 'fail'} ${detail} args=${JSON.stringify(args)}`)
         break
       }
 

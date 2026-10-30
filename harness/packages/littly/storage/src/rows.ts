@@ -14,6 +14,8 @@ export interface UserRow {
 export interface BotRow {
   id: string
   name: string
+  /** B3：bot 归属用户 id（空串 = 仅 admin 可管理；迁移 v2 引入）。 */
+  owner_id: string
   avatar: string
   system_prompt: string
   character_id: string | null

@@ -1,25 +1,27 @@
 /**
  * 数据端点：联系人 / 关系 / 记忆（双池 + 整理）/ 日记 / 相册 / 定时消息。
- * 相册上传写 <cwd>/public/downloads/photos，URL 走公开的 /api/photos/file 路由。
+ * 相册上传写 LITTLY_DATA_DIR/downloads/photos（默认 <cwd>/data/downloads，B11 持久卷），
+ * URL 走公开的 /api/photos/file 路由（保持不变）。
  */
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, basename, extname } from 'node:path'
-import type { ContactRow, ContactRelationRow, DiaryRow, MemoryRow, PhotoRow, ScheduledMessageRow } from '@littly/storage'
+import { downloadsDir, type ContactRow, type ContactRelationRow, type DiaryRow, type MemoryRow, type PhotoRow, type ScheduledMessageRow } from '@littly/storage'
 import { chatComplete } from '@littly/llm'
 import { json, err, bodyRecord, reqStr, reqNum, reqBool } from './http.ts'
 import { contactView, relationView, memoryView, diaryView, photoView, scheduledView, parseJsonArray } from './mapping.ts'
-import { isAdmin, resolveSender, senderAllowed, ownSender, loadBot, queryStr, nowIso } from './deps.ts'
+import { isAdmin, resolveSender, senderAllowed, ownSender, loadBot, queryStr, nowIso, botOwnedBy, requireRowBotAccess, requireBotAccess } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
 /** ⑨ newest-N 硬保护条数（与 memory 包同口径）。 */
 const HARD_PROTECT_COUNT = 5
 
-function savePhotoFile(d: Deps, filename: string, data: Buffer): string {
+function savePhotoFile(filename: string, data: Buffer): string {
   const safeBase = basename(filename).replace(/[^\w.-]/g, '_') || 'photo'
   const ext = extname(safeBase) || '.png'
   const name = `${Date.now()}-${randomUUID().slice(0, 8)}${ext}`
-  const dir = join(d.cwd, 'public', 'downloads', 'photos')
+  // B11：落持久卷（LITTLY_DATA_DIR/downloads/photos），URL 不变。
+  const dir = downloadsDir('photos')
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, name), data)
   return `/api/photos/file/photos/${name}`
@@ -44,6 +46,8 @@ function findContact(d: Deps, botId: string, idOrSender: string): ContactRow | u
 }
 
 export const registerDataRoutes: RegisterFn = (r, d) => {
+  // B3：内容域归属守卫 —— 带 botId 的请求要求 admin 或该 bot 的 owner。
+  r.botGuard = (ctx, botId) => botOwnedBy(ctx, d, botId)
   // ---- 联系人 ----
 
   r.get('/api/contacts', 'required', (ctx) => {
@@ -59,6 +63,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '联系人不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     json(ctx.res, 200, { data: { contact: contactView(row) } })
   })
 
@@ -68,6 +73,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '联系人不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     const body = bodyRecord(ctx.body)
     const columns: string[] = []
     const values: unknown[] = []
@@ -107,6 +113,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '联系人不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     d.storage.prepare('DELETE FROM contacts WHERE id = ?').run(row.id)
     json(ctx.res, 200, { data: { contact: contactView(row) } })
   })
@@ -187,7 +194,15 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 400, 'bad_request', '记忆内容不能为空')
       return
     }
-    const item: { category?: string; content: string; importance?: number; expiresAt?: string | null; provenance?: string } = { content }
+    const item: {
+      category?: string
+      content: string
+      importance?: number
+      expiresAt?: string | null
+      provenance?: string
+      idempotencyKey?: string
+      ifSha256?: string
+    } = { content }
     const category = reqStr(body, 'category', 'type')
     if (category !== undefined) item.category = category
     const importance = reqNum(body, 'importance')
@@ -196,6 +211,10 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
     if (provenance !== undefined) item.provenance = provenance
     const expiresAt = reqStr(body, 'validUntil', 'expiresAt')
     if (expiresAt !== undefined) item.expiresAt = expiresAt
+    const idempotencyKey = reqStr(body, 'idempotencyKey')
+    if (idempotencyKey !== undefined && idempotencyKey !== '') item.idempotencyKey = idempotencyKey
+    const ifSha256 = reqStr(body, 'ifSha256', 'if_sha256')
+    if (ifSha256 !== undefined && ifSha256 !== '') item.ifSha256 = ifSha256
     try {
       const result = await d.memory.remember(botId, sender, item)
       const row = memoryRow(d, result.id)
@@ -211,6 +230,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '记忆不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     if (!senderAllowed(ctx, row.sender)) {
       err(ctx.res, 403, 'forbidden', '只能修改自己会话的记忆')
       return
@@ -245,6 +265,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '记忆不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     if (!senderAllowed(ctx, row.sender)) {
       err(ctx.res, 403, 'forbidden', '只能整理自己会话的记忆')
       return
@@ -263,6 +284,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 400, 'bad_request', '缺少记忆 id 或 botId')
       return
     }
+    if (!requireBotAccess(ctx, d, botId)) return
     const explain = d.memory.explain(botId, id)
     if (explain === null) {
       err(ctx.res, 404, 'not_found', '记忆不存在')
@@ -277,6 +299,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '记忆不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     if (!senderAllowed(ctx, row.sender)) {
       err(ctx.res, 403, 'forbidden', '只能恢复自己会话的记忆')
       return
@@ -332,6 +355,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '日记不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     json(ctx.res, 200, { data: { diary: diaryView(row) } })
   })
 
@@ -341,6 +365,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '日记不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     d.storage.prepare('DELETE FROM diaries WHERE id = ?').run(row.id)
     json(ctx.res, 200, { data: { diary: diaryView(row) } })
   })
@@ -405,7 +430,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 400, 'bad_request', '缺少上传文件')
       return
     }
-    const url = savePhotoFile(d, file.filename, file.data)
+    const url = savePhotoFile(file.filename, file.data)
     const caption = ctx.fields['caption'] ?? ''
     const id = randomUUID()
     d.storage.prepare('INSERT INTO photos (id, bot_id, url, caption, tags, created_at) VALUES (?,?,?,?,?,?)')
@@ -425,6 +450,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '照片不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     const body = bodyRecord(ctx.body)
     const columns: string[] = []
     const values: unknown[] = []
@@ -454,6 +480,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '照片不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     d.storage.prepare('DELETE FROM photos WHERE id = ?').run(row.id)
     json(ctx.res, 200, { data: { photo: photoView(row) } })
   })
@@ -509,6 +536,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '定时消息不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     if (!senderAllowed(ctx, row.sender)) {
       err(ctx.res, 403, 'forbidden', '只能修改自己会话的定时消息')
       return
@@ -557,6 +585,7 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '定时消息不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     if (!senderAllowed(ctx, row.sender)) {
       err(ctx.res, 403, 'forbidden', '只能取消自己会话的定时消息')
       return

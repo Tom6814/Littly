@@ -44,6 +44,7 @@ import { summarizeCall } from './summary.ts'
 import { consumePendingCall, listPendingCalls, type PendingCall } from './pending.ts'
 import { buildCallSystemPrompt } from './call-prompt.ts'
 import { END_CALL_TOOL, RECALL_CONTEXT_TOOL, executeRecallContext, isEndCallTool } from './call-tools.ts'
+import { verifyCallToken } from './call-token.ts'
 
 const REPLY_MAX_TOKENS = 400
 
@@ -131,13 +132,25 @@ async function handleConnection(
   req: IncomingMessage,
 ): Promise<void> {
   const url = new URL(req.url || '/', 'http://localhost')
-  const botId = url.searchParams.get('botId') || ''
-  const sender = url.searchParams.get('sender') || ''
-  if (!botId || !sender) {
-    sendJson(ws, { type: 'error', message: '缺少 botId/sender' })
-    ws.close()
+  // §B2 握手鉴权：只信短时签名令牌（POST /api/call/token 签发），不信任 URL 自报身份。
+  const secret = deps.storage.getSetting('platform.secret') ?? ''
+  const token = url.searchParams.get('token') || ''
+  const payload = verifyCallToken(secret, token)
+  if (payload === null) {
+    sendJson(ws, { type: 'error', message: '通话鉴权失败：缺少或无效的通话令牌（请先调用 /api/call/token）' })
+    ws.close(4401, 'unauthorized')
     return
   }
+  // URL 上的 botId/sender 只在「与令牌一致」时被接受，防止伪造他人身份。
+  const claimedBot = url.searchParams.get('botId')
+  const claimedSender = url.searchParams.get('sender')
+  if ((claimedBot !== null && claimedBot !== payload.botId) || (claimedSender !== null && claimedSender !== payload.sender)) {
+    sendJson(ws, { type: 'error', message: '通话鉴权失败：连接参数与令牌不一致' })
+    ws.close(4403, 'forbidden')
+    return
+  }
+  const botId = payload.botId
+  const sender = payload.sender
   const bot = deps.storage.prepare('SELECT * FROM bots WHERE id = ?').get(botId) as BotRow | undefined
   if (!bot) {
     sendJson(ws, { type: 'error', message: '角色不存在' })

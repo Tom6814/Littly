@@ -350,4 +350,17 @@ CREATE TABLE memory_write_receipts (
 );
 `,
   },
+  {
+    // B3：内容域归属校验 —— bots 加 owner_id；升级时把现有 bot 归给最早的 admin
+    // （单用户本地库升级后 admin 仍能管理一切；多用户场景下新 bot 由创建者拥有）。
+    version: 2,
+    sql: `
+ALTER TABLE bots ADD COLUMN owner_id TEXT NOT NULL DEFAULT '';
+UPDATE bots
+   SET owner_id = (SELECT id FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1)
+ WHERE owner_id = ''
+   AND EXISTS (SELECT 1 FROM users WHERE role = 'admin');
+CREATE INDEX IF NOT EXISTS idx_bots_owner ON bots(owner_id);
+`,
+  },
 ]

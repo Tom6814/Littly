@@ -12152,6 +12152,9 @@ importers:
       '@littly/agents':
         specifier: workspace:*
         version: link:../agents
+      '@littly/growth':
+        specifier: workspace:*
+        version: link:../growth
       '@littly/llm':
         specifier: workspace:*
         version: link:../llm

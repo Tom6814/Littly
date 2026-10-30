@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import type { BotRow } from '@littly/storage'
 import { promoteContact, tryHandleBinding } from './binding.ts'
 import { sendQQText, type QqC2CMessage, type QqDeps } from './client.ts'
+import { rememberQqEvent } from './event-context.ts'
 
 /**
  * 出站投递地址解析：sender 归一化为 userId 时从 channel_identities(qq) 拿权威 openid；
@@ -41,6 +42,9 @@ export async function handleQQMessage(deps: QqDeps, bot: BotRow, d: QqC2CMessage
   const openid = d.author?.user_openid ?? ''
   const text = (d.content ?? '').trim()
   if (!openid || !text) return
+
+  // §B7：记住本次入站的 event_id —— 主链路出站时带上它命中 60 分钟被动回复窗口
+  rememberQqEvent(bot.id, openid, d.event_id)
 
   const binding = await tryHandleBinding(deps.storage, { channel: 'qq', externalId: openid, text })
   if (binding.handled) {

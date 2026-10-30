@@ -37,6 +37,8 @@ export interface BuildPromptOptions {
   historyDigest?: string | undefined
   growthText?: string | undefined
   crossChannelHint?: string | undefined
+  /** B15：动态工具使用指令（由 hub 按实际下发的工具注册表生成）。 */
+  toolDirective?: string | undefined
 }
 
 export class LittlyPersona {
@@ -107,6 +109,7 @@ export class LittlyPersona {
       focusText: opts.focusText,
       channel: opts.channel,
       crossChannelHint: opts.crossChannelHint,
+      toolDirective: opts.toolDirective,
     }
   }
 
@@ -129,3 +132,6 @@ export function apply(ctx: Context, _config: Config): void {
   ctx.provide('littlyPersona', persona)
   ctx.logger.info('littly persona ready')
 }
+
+// B15：工具使用指令按注册表动态生成（hub 建 prompt 时调用）。
+export { buildToolUseDirective, TOOL_USE_DIRECTIVE, type ToolDirectiveEntry } from './pack.ts'

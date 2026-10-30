@@ -1,953 +1,530 @@
-/** 各领域的类型化 API 封装。页面只调用这里的函数，不直接 fetch。 */
-import { http, pickArray, pickRecord, asStr, asNum, asBool, firstOf, isRecord, downloadFile, ApiError } from './client';
+/**
+ * 端点清单 + 类型化封装 —— 只读盘点自 console-api/src/routes-*.ts（2026-10-31）。
+ * 页面只调用这里的函数，不直接 fetch。onboarding / wechat 两族按 SPEC §2/§3
+ * 契约先写好，后端未就绪时上层自动降级（mock 或 404 探测）。
+ *
+ * 盘点台账（全部 93 个 handler 的分组）：
+ *   auth      POST /api/auth/register|login|logout, GET /api/auth/session
+ *   bots      GET/POST /api/bots, GET/PATCH/DELETE /api/bots/:id,
+ *             GET/PUT /api/bots/:id/channels
+ *   chat      POST /api/chat, /api/chat/buffer[/flush], /api/chat/regenerate,
+ *             /api/chat/edit, GET /api/messages, DELETE /api/messages/:id,
+ *             POST /api/messages/:id/restore, GET /api/conversations,
+ *             GET /api/stream (SSE), /api/stream helpers
+ *   content   GET/POST/PATCH/DELETE /api/characters(+/import-png, /:id/export-png,
+ *             /:id/avatar, /presets), /api/world-entries(+/test)
+ *   data      contacts, relations, memories(+/explain,restore,consolidate),
+ *             diaries(+/write), photos, scheduled-messages
+ *   admin     persona-rules, settings/ai, settings/platform, growth(+/proposals),
+ *             plugins(+/install,remove,enable,mcp,tools), bili/status,qr,cmd,
+ *             debug/system-prompt, debug/audit, stats/activity, search, seed
+ *   bind      POST /api/bind/:channel/code, GET /api/bind/status,
+ *             POST /api/bind/unbind
+ *   onboarding (契约，bugfix 实现中) GET /api/onboarding, POST /api/onboarding/test-model,
+ *             POST /api/onboarding/complete
+ *   wechat     (契约，wechat 实现中) POST /api/wechat/qr, GET /api/wechat/qr/:sessionId,
+ *             GET /api/wechat/status, POST /api/wechat/friend-qr, POST /api/wechat/logout
+ */
+import { ApiError, asBool, asNum, asStr, firstOf, http, isRecord, pickArray, pickRecord } from './client'
 import type {
-  AuditEntry,
-  Bot,
-  BotChannels,
-  BiliQrState,
-  BiliStatus,
-  BufferState,
-  ChatMessage,
-  ChatMessagePiece,
-  Character,
-  Contact,
-  Diary,
-  GrowthData,
-  Memory,
-  MemoryExplain,
-  BindIdentity,
+  ActivityStats,
+  AiSettings,
   BindCode,
-  PersonaRules,
-  Photo,
+  BindStatusItem,
+  Bot,
+  BufferStatus,
+  ChannelConfig,
+  Character,
+  ChatMessage,
+  ChatResponse,
+  Conversation,
+  OnboardingState,
+  PlatformSettings,
   PluginsData,
-  PromptViewData,
-  Relation,
-  ScheduledMessage,
-  ToolCallEvent,
+  TestModelResult,
   User,
-  WorldEntry,
-} from './types';
+  WechatQrPoll,
+  WechatQrSession,
+  WechatStatus,
+} from './types'
 
-/* ---------------- 通用窄化 ---------------- */
+/* ---------------- 窄化助手 ---------------- */
 
 function toUser(v: unknown): User | undefined {
-  if (!isRecord(v)) return undefined;
-  const id = asStr(firstOf(v, 'id', 'userId', 'uid'));
-  const username = asStr(firstOf(v, 'username', 'name'));
-  if (!id && !username) return undefined;
-  return { id: id ?? username ?? '', username: username ?? id ?? '', role: asStr(v.role) };
+  if (!isRecord(v)) return undefined
+  const id = asStr(firstOf(v, 'id', 'userId', 'uid'))
+  const username = asStr(firstOf(v, 'username', 'name'))
+  if (!id && !username) return undefined
+  return { id: id ?? username ?? '', username: username ?? id ?? '', role: asStr(v.role) }
+}
+
+function toMessage(v: unknown): ChatMessage | undefined {
+  if (!isRecord(v)) return undefined
+  const id = asStr(v.id)
+  if (!id) return undefined
+  const pieces = pickArray(v, 'pieces').filter(isRecord).map((p) => ({
+    type: asStr(p.type) ?? 'text',
+    text: asStr(p.text),
+    url: asStr(p.url),
+    name: asStr(p.name),
+  }))
+  return {
+    id,
+    role: asStr(v.role) ?? 'user',
+    sender: asStr(v.sender) ?? '',
+    botId: asStr(firstOf(v, 'botId', 'bot_id')) ?? '',
+    createdAt: asStr(firstOf(v, 'createdAt', 'created_at')) ?? '',
+    text: asStr(v.text) ?? asStr(v.content) ?? '',
+    pieces,
+    replyType: asStr(v.replyType),
+    reasoning: asStr(v.reasoning),
+    deliveryStatus: asStr(v.deliveryStatus),
+    bufferStatus: asStr(v.bufferStatus),
+    bufferFireAt: asStr(v.bufferFireAt),
+  }
 }
 
 function toBot(v: unknown): Bot | undefined {
-  if (!isRecord(v)) return undefined;
-  const id = asStr(firstOf(v, 'id', 'botId'));
-  const name = asStr(firstOf(v, 'name', 'botName'));
-  if (!id && !name) return undefined;
-  // settings 可以在 settings 键下，也可以把各配置组平铺在顶层
-  const explicit = pickRecord(v, 'settings');
-  const settings = explicit ?? (() => {
-    const out: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) {
-      if (isRecord(val) && !['card', 'data', 'user'].includes(k)) out[k] = val;
-    }
-    return out;
-  })();
+  if (!isRecord(v)) return undefined
+  const id = asStr(firstOf(v, 'id', 'botId'))
+  const name = asStr(firstOf(v, 'name', 'botName'))
+  if (!id && !name) return undefined
   return {
     id: id ?? name ?? '',
     name: name ?? id ?? '',
     avatarUrl: asStr(firstOf(v, 'avatarUrl', 'avatar')),
-    createdAt: asStr(v.createdAt),
-    settings,
-  };
-}
-
-/* ---------------- 消息规范化 ---------------- */
-
-function toPiece(rec: Record<string, unknown>): ChatMessagePiece {
-  const kind = (asStr(firstOf(rec, 'type', 'kind')) ?? '').toLowerCase();
-  const url = asStr(firstOf(rec, 'url', 'audioUrl', 'audio_url', 'imageUrl', 'image_url', 'fileUrl', 'file_url'));
-  const text = asStr(firstOf(rec, 'text', 'content', 'transcript', 'originalText', 'caption'));
-  const name = asStr(firstOf(rec, 'name', 'toolName', 'tool', 'fileName', 'title'));
-  const statusRaw = (asStr(firstOf(rec, 'status', 'state')) ?? '').toLowerCase();
-  const status: ChatMessagePiece['status'] =
-    statusRaw === 'running' || statusRaw === 'pending' || statusRaw === 'start'
-      ? 'running'
-      : statusRaw === 'failed' || statusRaw === 'error'
-        ? 'failed'
-        : statusRaw === 'done' || statusRaw === 'ok'
-          ? 'done'
-          : undefined;
-
-  let type: ChatMessagePiece['type'] = 'unknown';
-  if (kind.startsWith('text')) type = 'text';
-  else if (kind.includes('voice') || kind.includes('audio')) type = 'voice';
-  else if (kind.includes('image') || kind.includes('photo')) type = 'image';
-  else if (kind.includes('file') || kind.includes('doc')) type = 'file';
-  else if (kind.includes('tool')) type = 'tool_call';
-  else if (url && !text) type = 'image';
-  else type = 'text';
-  return { type, text, url, name, status };
-}
-
-function piecesOf(raw: Record<string, unknown>): ChatMessagePiece[] {
-  const arr = firstOf(raw, 'pieces', 'parts', 'segments', 'attachments');
-  if (Array.isArray(arr) && arr.length > 0) {
-    return arr
-      .filter(isRecord)
-      .map(toPiece)
-      .filter((p) => p.type !== 'text' || !!p.text || !!p.url);
+    createdAt: asStr(firstOf(v, 'createdAt', 'created_at')),
+    settings: pickRecord(v, 'settings'),
   }
-  // 顶层字段探测：语音 / 图片 / 文件 / 工具
-  const out: ChatMessagePiece[] = [];
-  const audioUrl = asStr(firstOf(raw, 'audioUrl', 'audio_url', 'voiceUrl'));
-  if (audioUrl) {
-    out.push({ type: 'voice', url: audioUrl, text: asStr(firstOf(raw, 'text', 'content', 'originalText')) });
-  }
-  const imageUrl = asStr(firstOf(raw, 'imageUrl', 'image_url', 'photoUrl'));
-  if (imageUrl) out.push({ type: 'image', url: imageUrl, text: asStr(raw.caption) });
-  const fileUrl = asStr(firstOf(raw, 'fileUrl', 'file_url'));
-  if (fileUrl) out.push({ type: 'file', url: fileUrl, name: asStr(firstOf(raw, 'fileName', 'file_name')) ?? '文件' });
-  const toolName = asStr(firstOf(raw, 'toolName', 'tool_name', 'tool'));
-  if (toolName) out.push({ type: 'tool_call', name: toolName, status: 'done' });
-
-  const text = asStr(firstOf(raw, 'text', 'content', 'body', 'message'));
-  if (out.length === 0 || (text && !out.some((p) => p.type === 'voice'))) {
-    out.unshift({ type: 'text', text: text ?? '' });
-  }
-  return out.length > 0 ? out : [{ type: 'text', text: '' }];
 }
 
-export function normalizeMessage(raw: unknown, idx = 0): ChatMessage {
-  if (!isRecord(raw)) return { id: `msg-${idx}`, pieces: [{ type: 'text', text: '' }] };
-  const id = asStr(firstOf(raw, 'id', 'messageId', 'msgId')) ?? `msg-${idx}`;
-  const role = asStr(firstOf(raw, 'role', 'senderRole', 'from')) ?? undefined;
-  const sender = asStr(firstOf(raw, 'sender', 'senderId', 'contactId', 'fromId'));
-  return {
-    id,
-    role,
-    sender,
-    botId: asStr(raw.botId),
-    createdAt: asStr(firstOf(raw, 'createdAt', 'created_at', 'time', 'timestamp', 'sentAt')),
-    pieces: piecesOf(raw),
-  };
-}
+/* ---------------- auth ---------------- */
 
-export function normalizeMessages(data: unknown): ChatMessage[] {
-  return pickArray<Record<string, unknown>>(data, 'messages', 'items', 'list')
-    .map((m, i) => normalizeMessage(m, i));
-}
-
-/* ---------------- 鉴权 ---------------- */
-
-export const auth = {
+export const authApi = {
+  /** GET /api/auth/session → 当前用户；未登录 401。 */
   async session(): Promise<User | null> {
-    // 没登录是**正常状态**，不是错误。
-    // 这里必须把 401 吞成 null —— 否则 RequireAuth 会走 isError 分支，
-    // 页面变成「无法确认登录状态：未登录」+ 一个重试按钮，永远到不了登录页。
-    // （/api/auth/* 路径不触发 client 的 401 自动跳登录，所以得在这里兜住。）
-    try {
-      const data = await http.get<unknown>('/api/auth/session');
-      const user = pickRecord(data, 'user');
-      return toUser(user ?? data) ?? null;
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) return null;
-      throw e;
-    }
+    const out = await http.get<unknown>('/api/auth/session', undefined, {
+      silentUnauthorized: true,
+      allowAnyStatus: true,
+    })
+    // 非 2xx（未登录）：{__status, __body} → 视为未登录。
+    if (isRecord(out) && typeof out.__status === 'number') return null
+    // 成功信封已解包为 { user }；也兼容裸 user 对象。
+    const rec = isRecord(out) ? out : {}
+    return toUser(rec.user ?? out) ?? null
   },
   async login(username: string, password: string): Promise<User> {
-    const data = await http.post<unknown>('/api/auth/login', { username, password });
-    const user = toUser(pickRecord(data, 'user') ?? data);
-    if (!user) throw new Error('登录响应异常');
-    return user;
+    const out = await http.post<unknown>('/api/auth/login', { username, password })
+    const user = toUser(isRecord(out) ? (out.user ?? out) : out)
+    if (!user) throw new ApiError(500, 'bad_response', '登录响应格式异常')
+    return user
   },
   async register(username: string, password: string): Promise<User> {
-    const data = await http.post<unknown>('/api/auth/register', { username, password });
-    const user = toUser(pickRecord(data, 'user') ?? data);
-    if (!user) throw new Error('注册响应异常');
-    return user;
+    const out = await http.post<unknown>('/api/auth/register', { username, password })
+    const user = toUser(isRecord(out) ? (out.user ?? out) : out)
+    if (!user) throw new ApiError(500, 'bad_response', '注册响应格式异常')
+    return user
   },
-  logout(): Promise<unknown> {
-    return http.post('/api/auth/logout');
+  async logout(): Promise<void> {
+    await http.post('/api/auth/logout')
   },
-};
+}
 
-/* ---------------- 机器人 ---------------- */
+/* ---------------- onboarding ---------------- */
 
-export const bots = {
-  async list(): Promise<{ bots: Bot[]; current?: string }> {
-    const data = await http.get<unknown>('/api/bots');
-    const rec = isRecord(data) ? data : {};
-    const list = pickArray<unknown>(rec, 'bots', 'items', 'list')
+export const onboardingApi = {
+  /** GET /api/onboarding → {completed, steps:{model,persona,wechat}}。 */
+  async get(): Promise<OnboardingState> {
+    const out = await http.get<unknown>('/api/onboarding', undefined, {
+      silentUnauthorized: true,
+      allowAnyStatus: true,
+    })
+    if (isRecord(out) && typeof out.__status === 'number') {
+      throw new ApiError(out.__status as number, 'onboarding_unavailable', '引导接口暂不可用')
+    }
+    const rec = isRecord(out) ? out : {}
+    const steps = pickRecord(rec, 'steps') ?? {}
+    return {
+      completed: asBool(rec.completed) ?? false,
+      steps: {
+        model: asBool(steps.model),
+        persona: asBool(steps.persona),
+        wechat: asBool(steps.wechat),
+      },
+      source: 'api',
+    }
+  },
+  /** POST /api/onboarding/test-model → {ok, latencyMs, error?}。 */
+  async testModel(input: { baseUrl: string; apiKey: string; model: string }): Promise<TestModelResult> {
+    const out = await http.post<unknown>('/api/onboarding/test-model', input, {
+      allowAnyStatus: true,
+    })
+    const rec = isRecord(out) ? (pickRecord(out.__body, 'data') ?? out) : {}
+    return {
+      ok: asBool(rec.ok) ?? asBool(pickRecord(rec, 'data')?.ok) ?? false,
+      latencyMs: asNum(rec.latencyMs ?? pickRecord(rec, 'data')?.latencyMs),
+      error: asStr(rec.error ?? pickRecord(rec, 'data')?.error),
+      model: asStr(rec.model),
+    }
+  },
+  /** POST /api/onboarding/complete → 写 global_settings.onboarding。 */
+  async complete(): Promise<void> {
+    await http.post('/api/onboarding/complete')
+  },
+}
+
+/* ---------------- bots ---------------- */
+
+export const botsApi = {
+  async list(): Promise<Bot[]> {
+    const out = await http.get<unknown>('/api/bots')
+    const rec = isRecord(out) ? out : {}
+    return pickArray(rec, 'bots')
       .map(toBot)
-      .filter((b): b is Bot => !!b);
-    const current = asStr(firstOf(rec, 'current', 'currentId', 'currentBotId', 'currentBot'));
-    return { bots: list, current };
-  },
-  async create(name: string): Promise<Bot | undefined> {
-    const data = await http.post<unknown>('/api/bots', { name });
-    return toBot(pickRecord(data, 'bot') ?? data);
+      .filter((b): b is Bot => b !== undefined)
   },
   async get(id: string): Promise<Bot | undefined> {
-    const data = await http.get<unknown>(`/api/bots/${encodeURIComponent(id)}`);
-    return toBot(pickRecord(data, 'bot') ?? data);
+    const out = await http.get<unknown>(`/api/bots/${encodeURIComponent(id)}`)
+    const rec = isRecord(out) ? out : {}
+    return toBot(rec.bot ?? rec)
   },
-  async update(id: string, patch: Record<string, unknown>): Promise<unknown> {
-    return http.patch(`/api/bots/${encodeURIComponent(id)}`, patch);
+  async channels(id: string): Promise<Record<string, ChannelConfig>> {
+    const out = await http.get<unknown>(`/api/bots/${encodeURIComponent(id)}/channels`)
+    const rec = pickRecord(out, 'channels') ?? (isRecord(out) ? out : {})
+    const result: Record<string, ChannelConfig> = {}
+    for (const [k, v] of Object.entries(rec)) {
+      if (isRecord(v)) result[k] = v as ChannelConfig
+    }
+    return result
   },
-  async remove(id: string): Promise<unknown> {
-    return http.del(`/api/bots/${encodeURIComponent(id)}`);
+  async saveChannels(id: string, channels: Record<string, unknown>): Promise<void> {
+    await http.put(`/api/bots/${encodeURIComponent(id)}/channels`, { channels })
   },
-  async channels(id: string): Promise<BotChannels> {
-    const data = await http.get<unknown>(`/api/bots/${encodeURIComponent(id)}/channels`);
-    const rec = isRecord(data) ? data : {};
-    const inner = pickRecord(rec, 'channels');
-    return (inner ?? rec) as BotChannels;
+  async patch(id: string, patch: Record<string, unknown>): Promise<Bot | undefined> {
+    const out = await http.patch<unknown>(`/api/bots/${encodeURIComponent(id)}`, { settings: patch })
+    const rec = isRecord(out) ? out : {}
+    return toBot(rec.bot ?? rec)
   },
-  async putChannels(id: string, channels: BotChannels): Promise<unknown> {
-    return http.put(`/api/bots/${encodeURIComponent(id)}/channels`, { channels });
-  },
-};
-
-/* ---------------- 角色卡 ---------------- */
-
-function toCharacter(v: unknown): Character | undefined {
-  if (!isRecord(v)) return undefined;
-  const id = asStr(firstOf(v, 'id', 'characterId'));
-  const name = asStr(firstOf(v, 'name', 'characterName'));
-  if (!id && !name) return undefined;
-  const card = pickRecord(v, 'card', 'charaCard', 'data');
-  return {
-    id: id ?? name ?? '',
-    name: name ?? id ?? '',
-    card,
-    mask: asStr(firstOf(v, 'mask', 'maskText')),
-    deepseekPersonaTags: pickArray<string>(v, 'deepseekPersonaTags', 'personaTags', 'tags'),
-    avatarUrl: asStr(firstOf(v, 'avatarUrl', 'avatar')),
-    preset: asBool(firstOf(v, 'preset', 'isPreset')),
-    createdAt: asStr(v.createdAt),
-  };
 }
 
-export const characters = {
+/* ---------------- chat ---------------- */
+
+function toChatResponse(v: unknown): ChatResponse {
+  const rec = isRecord(v) ? v : {}
+  const messages = pickArray(rec, 'messages')
+    .map(toMessage)
+    .filter((m): m is ChatMessage => m !== undefined)
+  return {
+    messages,
+    reply: asStr(rec.reply) ?? '',
+    toolCalls: pickArray(rec, 'toolCalls'),
+    thinkingLength: asNum(rec.thinkingLength) ?? 0,
+    silent: asBool(rec.silent) ?? false,
+  }
+}
+
+export const chatApi = {
+  async send(input: { botId: string; text: string; sender?: string }): Promise<ChatResponse> {
+    const out = await http.post<unknown>('/api/chat', input)
+    return toChatResponse(out)
+  },
+  async regenerate(input: { botId: string; sender?: string }): Promise<ChatResponse> {
+    const out = await http.post<unknown>('/api/chat/regenerate', input)
+    return toChatResponse(out)
+  },
+  async edit(input: { botId: string; messageId: string; text?: string; sender?: string }): Promise<ChatResponse> {
+    const out = await http.post<unknown>('/api/chat/edit', input)
+    return toChatResponse(out)
+  },
+  async messages(input: { botId: string; sender?: string; limit?: number }): Promise<ChatMessage[]> {
+    const out = await http.get<unknown>('/api/messages', input)
+    const rec = isRecord(out) ? out : {}
+    return pickArray(rec, 'messages')
+      .map(toMessage)
+      .filter((m): m is ChatMessage => m !== undefined)
+  },
+  async conversations(botId: string): Promise<Conversation[]> {
+    const out = await http.get<unknown>('/api/conversations', { botId })
+    const rec = isRecord(out) ? out : {}
+    return pickArray(rec, 'conversations').filter(isRecord).map((c) => ({
+      sender: asStr(c.sender) ?? '',
+      name: asStr(c.name) ?? asStr(c.sender) ?? '',
+      isOwner: asBool(c.isOwner) ?? false,
+      messageCount: asNum(c.messageCount) ?? 0,
+      lastMessage: toMessage(c.lastMessage) ?? ({} as ChatMessage),
+      lastAt: asStr(c.lastAt) ?? '',
+    }))
+  },
+  async removeMessage(id: string): Promise<void> {
+    await http.del(`/api/messages/${encodeURIComponent(id)}`)
+  },
+  async restoreMessage(id: string): Promise<void> {
+    await http.post(`/api/messages/${encodeURIComponent(id)}/restore`)
+  },
+  async buffer(input: { botId: string; sender?: string }): Promise<BufferStatus> {
+    const out = await http.get<unknown>('/api/chat/buffer', input)
+    const rec = isRecord(out) ? out : {}
+    return {
+      buffered: asBool(rec.buffered) ?? false,
+      fireAt: asStr(rec.fireAt),
+      count: asNum(rec.count) ?? 0,
+    }
+  },
+  async flushBuffer(input: { botId: string; sender?: string }): Promise<ChatResponse> {
+    const out = await http.post<unknown>('/api/chat/buffer/flush', input)
+    return toChatResponse(out)
+  },
+  /** SSE 流地址（EventSource 同源走 Cookie）。 */
+  streamUrl(input: { botId: string; sender: string }): string {
+    const qs = new URLSearchParams({ botId: input.botId, sender: input.sender })
+    return `/api/stream?${qs.toString()}`
+  },
+}
+
+/* ---------------- settings（模型 / 语音 / 通用） ---------------- */
+
+export const settingsApi = {
+  /** 出参：{baseURL, apiKey(打码), apiKeySet, chatModel, growthModel, webSearch, embedding, image} */
+  async getAi(): Promise<AiSettings> {
+    const out = await http.get<unknown>('/api/settings/ai')
+    return (pickRecord(out, 'settings', 'ai') ?? (isRecord(out) ? out : {})) as AiSettings
+  },
+  /** 入参用后端字段名；打码的 apiKey 传回不会覆盖原值。 */
+  async saveAi(settings: AiSettings): Promise<void> {
+    await http.put('/api/settings/ai', settings)
+  },
+  async getPlatform(): Promise<PlatformSettings> {
+    const out = await http.get<unknown>('/api/settings/platform')
+    return (pickRecord(out, 'settings', 'platform') ?? (isRecord(out) ? out : {})) as PlatformSettings
+  },
+  async savePlatform(settings: PlatformSettings): Promise<void> {
+    await http.put('/api/settings/platform', settings)
+  },
+}
+
+/* ---------------- characters（/her/character） ---------------- */
+
+export const charactersApi = {
   async list(): Promise<Character[]> {
-    const data = await http.get<unknown>('/api/characters');
-    return pickArray<unknown>(data, 'characters', 'items', 'list')
-      .map(toCharacter)
-      .filter((c): c is Character => !!c);
+    const out = await http.get<unknown>('/api/characters')
+    const rec = isRecord(out) ? out : {}
+    return pickArray(rec, 'characters').filter(isRecord).map((c) => ({
+      id: asStr(c.id) ?? '',
+      name: asStr(c.name) ?? '',
+      avatarUrl: asStr(firstOf(c, 'avatarUrl', 'avatar')),
+      description: asStr(c.description),
+      persona: asStr(c.persona),
+      scenario: asStr(c.scenario),
+      createdAt: asStr(c.createdAt),
+      ...c,
+    }))
   },
-  async create(body: Record<string, unknown>): Promise<Character | undefined> {
-    const data = await http.post<unknown>('/api/characters', body);
-    return toCharacter(pickRecord(data, 'character') ?? data);
+  async create(payload: Record<string, unknown>): Promise<Character | undefined> {
+    const out = await http.post<unknown>('/api/characters', payload)
+    const rec = isRecord(out) ? out : {}
+    const c = pickRecord(rec, 'character') ?? rec
+    return isRecord(c) ? ({ ...c, id: asStr(c.id) ?? '', name: asStr(c.name) ?? '' } as Character) : undefined
   },
-  async update(id: string, patch: Record<string, unknown>): Promise<unknown> {
-    return http.patch(`/api/characters/${encodeURIComponent(id)}`, patch);
+  async update(id: string, payload: Record<string, unknown>): Promise<void> {
+    await http.patch(`/api/characters/${encodeURIComponent(id)}`, payload)
   },
-  async remove(id: string): Promise<unknown> {
-    return http.del(`/api/characters/${encodeURIComponent(id)}`);
+  async remove(id: string): Promise<void> {
+    await http.del(`/api/characters/${encodeURIComponent(id)}`)
   },
+  /** 导入角色卡 PNG（admin；字段名 file）。 */
   async importPng(file: File): Promise<Character | undefined> {
-    const fd = new FormData();
-    fd.append('file', file);
-    const data = await http.upload<unknown>('/api/characters/import-png', fd);
-    return toCharacter(pickRecord(data, 'character') ?? data);
+    const fd = new FormData()
+    fd.append('file', file)
+    const out = await http.upload<unknown>('/api/characters/import-png', fd)
+    const rec = pickRecord(out, 'character') ?? (isRecord(out) ? out : {})
+    return isRecord(rec) ? ({ ...rec, id: asStr(rec.id) ?? '', name: asStr(rec.name) ?? '' } as Character) : undefined
   },
-  exportPng(id: string): Promise<void> {
-    return downloadFile(`/api/characters/${encodeURIComponent(id)}/export-png`, `${id}.png`);
+  /** 上传头像（admin；字段名 file）。 */
+  async uploadAvatar(id: string, file: File): Promise<string> {
+    const fd = new FormData()
+    fd.append('file', file)
+    const out = await http.upload<unknown>(`/api/characters/${encodeURIComponent(id)}/avatar`, fd)
+    const rec = isRecord(out) ? out : {}
+    return asStr(rec.avatarUrl) ?? asStr(rec.url) ?? ''
   },
-  async uploadAvatar(id: string, file: File): Promise<{ avatarUrl?: string }> {
-    const fd = new FormData();
-    fd.append('file', file);
-    const data = await http.upload<unknown>(`/api/characters/${encodeURIComponent(id)}/avatar`, fd);
-    return { avatarUrl: asStr(firstOf(isRecord(data) ? data : {}, 'avatarUrl', 'url')) };
+  /** 导出角色卡 PNG 的直链（同源 Cookie 下载）。 */
+  exportUrl(id: string): string {
+    return `/api/characters/${encodeURIComponent(id)}/export-png`
   },
-};
-
-/* ---------------- 世界书 ---------------- */
-
-function toEntry(v: unknown): WorldEntry | undefined {
-  if (!isRecord(v)) return undefined;
-  const id = asStr(firstOf(v, 'id', 'entryId'));
-  if (!id) return undefined;
-  const keys = pickArray<string>(v, 'keys', 'keywords', 'primaryKeys');
-  const secondKeys = pickArray<string>(v, 'secondKeys', 'secondaryKeys', 'secondary_keys');
-  return {
-    id,
-    botId: asStr(v.botId),
-    keys,
-    secondKeys,
-    logic: asStr(firstOf(v, 'logic', 'matchLogic')) ?? 'AND_ANY',
-    probability: asNum(firstOf(v, 'probability', 'triggerProbability')) ?? 100,
-    priority: asNum(v.priority) ?? 0,
-    position: asStr(v.position) ?? 'before',
-    constant: asBool(firstOf(v, 'constant', 'isConstant')) ?? false,
-    enabled: asBool(v.enabled) ?? true,
-    content: asStr(firstOf(v, 'content', 'text')),
-    comment: asStr(v.comment),
-  };
+  async presets(): Promise<Record<string, unknown>[]> {
+    const out = await http.get<unknown>('/api/characters/presets')
+    return pickArray(out, 'presets', 'characters').filter(isRecord)
+  },
 }
 
-export const worldbook = {
-  async list(botId: string): Promise<WorldEntry[]> {
-    const data = await http.get<unknown>('/api/world-entries', { botId });
-    return pickArray<unknown>(data, 'entries', 'items', 'list')
-      .map(toEntry)
-      .filter((e): e is WorldEntry => !!e);
-  },
-  async create(body: Record<string, unknown>): Promise<WorldEntry | undefined> {
-    const data = await http.post<unknown>('/api/world-entries', body);
-    return toEntry(pickRecord(data, 'entry') ?? data);
-  },
-  async update(id: string, patch: Record<string, unknown>): Promise<unknown> {
-    return http.patch(`/api/world-entries/${encodeURIComponent(id)}`, patch);
-  },
-  async remove(id: string): Promise<unknown> {
-    return http.del(`/api/world-entries/${encodeURIComponent(id)}`);
-  },
-  async test(botId: string, text: string): Promise<{ matchedIds: string[]; raw: unknown }> {
-    const data = await http.post<unknown>('/api/world-entries/test', { botId, text });
-    const rec = isRecord(data) ? data : {};
-    const rows = pickArray<unknown>(rec, 'matches', 'matched', 'results', 'hits');
-    const matchedIds = rows
-      .map((r) => (isRecord(r) ? asStr(firstOf(r, 'id', 'entryId')) ?? '' : asStr(r) ?? ''))
-      .filter((s) => s !== '');
-    return { matchedIds, raw: data };
-  },
-};
+/* ---------------- persona-rules（铁律，required 可读写） ---------------- */
 
-/* ---------------- 联系人与关系 ---------------- */
-
-function toContact(v: unknown): Contact | undefined {
-  if (!isRecord(v)) return undefined;
-  const id = asStr(firstOf(v, 'id', 'contactId'));
-  const name = asStr(firstOf(v, 'name', 'nickname', 'displayName'));
-  if (!id && !name) return undefined;
-  return {
-    id: id ?? name ?? '',
-    name: name ?? id ?? '',
-    botId: asStr(v.botId),
-    avatarUrl: asStr(firstOf(v, 'avatarUrl', 'avatar')),
-    profile: pickRecord(v, 'profile', 'meta'),
-    lastActiveAt: asStr(firstOf(v, 'lastActiveAt', 'lastSeenAt')),
-  };
-}
-
-export const contacts = {
-  async list(botId: string): Promise<Contact[]> {
-    const data = await http.get<unknown>('/api/contacts', { botId });
-    return pickArray<unknown>(data, 'contacts', 'items', 'list')
-      .map(toContact)
-      .filter((c): c is Contact => !!c);
-  },
-  async get(id: string): Promise<Contact | undefined> {
-    const data = await http.get<unknown>(`/api/contacts/${encodeURIComponent(id)}`);
-    return toContact(pickRecord(data, 'contact') ?? data);
-  },
-  async update(id: string, patch: Record<string, unknown>): Promise<unknown> {
-    return http.patch(`/api/contacts/${encodeURIComponent(id)}`, patch);
-  },
-  async remove(id: string): Promise<unknown> {
-    return http.del(`/api/contacts/${encodeURIComponent(id)}`);
-  },
-};
-
-function toRelation(v: unknown): Relation {
-  const rec = isRecord(v) ? v : {};
-  return {
-    id: asStr(rec.id),
-    botId: asStr(rec.botId),
-    fromContactId: asStr(firstOf(rec, 'fromContactId', 'from', 'sourceId')),
-    toContactId: asStr(firstOf(rec, 'toContactId', 'to', 'targetId')),
-    fromName: asStr(firstOf(rec, 'fromName', 'sourceName')),
-    toName: asStr(firstOf(rec, 'toName', 'targetName')),
-    type: asStr(firstOf(rec, 'type', 'relation', 'kind')),
-    description: asStr(firstOf(rec, 'description', 'desc', 'note')),
-  };
-}
-
-export const relations = {
-  async list(botId: string): Promise<Relation[]> {
-    const data = await http.get<unknown>('/api/relations', { botId });
-    return pickArray<unknown>(data, 'relations', 'items', 'list').map(toRelation);
-  },
-  async create(botId: string, body: Record<string, unknown>): Promise<unknown> {
-    return http.post('/api/relations', body, { botId });
-  },
-};
-
-/* ---------------- 记忆 ---------------- */
-
-function toMemory(v: unknown): Memory | undefined {
-  if (!isRecord(v)) return undefined;
-  const id = asStr(firstOf(v, 'id', 'memoryId'));
-  if (!id) return undefined;
-  return {
-    ...(asBool(v['protected']) ? { protected: true } : {}),
-    id,
-    botId: asStr(v.botId),
-    sender: asStr(firstOf(v, 'sender', 'contactId', 'owner')),
-    category: asStr(firstOf(v, 'category', 'type')),
-    importance: asNum(v.importance),
-    eventTime: asStr(firstOf(v, 'eventTime', 'event_time', 'happenedAt')),
-    provenance: asStr(firstOf(v, 'provenance', 'source')),
-    volatility: asStr(firstOf(v, 'volatility', 'volatilityLevel')),
-    content: asStr(firstOf(v, 'content', 'text', 'event')),
-    tags: pickArray<string>(v, 'tags', 'keywords'),
-    supersededBy: asStr(firstOf(v, 'supersededBy', 'superseded_by')),
-    supersedes: asStr(firstOf(v, 'supersedes', 'supersedesId')),
-    validUntil: asStr(firstOf(v, 'validUntil', 'valid_until')),
-    deletedAt: asStr(firstOf(v, 'deletedAt', 'deleted_at')),
-    createdAt: asStr(v.createdAt),
-  };
-}
-
-export const memories = {
-  async list(params: { botId: string; sender?: string; includeDeleted?: boolean }): Promise<Memory[]> {
-    const data = await http.get<unknown>('/api/memories', {
-      botId: params.botId,
-      sender: params.sender,
-      includeDeleted: params.includeDeleted,
-    });
-    return pickArray<unknown>(data, 'memories', 'items', 'list')
-      .map(toMemory)
-      .filter((m): m is Memory => !!m);
-  },
-  async create(body: Record<string, unknown>): Promise<unknown> {
-    return http.post('/api/memories', body);
-  },
-  async update(id: string, patch: Record<string, unknown>): Promise<unknown> {
-    return http.patch(`/api/memories/${encodeURIComponent(id)}`, patch);
-  },
-  async remove(id: string): Promise<unknown> {
-    return http.del(`/api/memories/${encodeURIComponent(id)}`);
-  },
-  async restore(id: string): Promise<unknown> {
-    return http.post(`/api/memories/${encodeURIComponent(id)}/restore`);
-  },
-  async explain(id: string, botId: string): Promise<MemoryExplain | undefined> {
-    const data = await http.get<unknown>(`/api/memories/${encodeURIComponent(id)}/explain`, { botId });
-    const rec = isRecord(data) ? data : {};
-    const mem = toMemory(rec['memory']);
-    if (!mem) return undefined;
-    const timing = isRecord(rec['timing']) ? rec['timing'] : {};
-    const prov = isRecord(rec['provenance']) ? rec['provenance'] : {};
-    const tomb = isRecord(rec['tombstone']) ? rec['tombstone'] : {};
-    const retr = isRecord(rec['retrieval']) ? rec['retrieval'] : {};
-    const signals = isRecord(retr['signals']) ? retr['signals'] : {};
+export const personaApi = {
+  async get(botId?: string): Promise<{ content: string; enabled: boolean }> {
+    const out = await http.get<unknown>('/api/persona-rules', botId ? { botId } : undefined)
+    const rec = isRecord(out) ? out : {}
     return {
-      memory: mem,
-      timing: {
-        eventTime: asStr(timing['eventTime']) ?? '',
-        eventTimeRaw: asStr(timing['eventTimeRaw']) ?? '',
-        recordedAt: asStr(timing['recordedAt']) ?? '',
-        lastVerified: asStr(timing['lastVerified']),
-        effectiveTime: asStr(timing['effectiveTime']) ?? '',
-        volatility: asStr(timing['volatility']) ?? 'stable',
-        halfLifeDays: asNum(timing['halfLifeDays']) ?? 30,
-      },
-      provenance: { kind: asStr(prov['kind']) ?? 'unknown', note: asStr(prov['note']) ?? '' },
-      tombstone: {
-        deleted: asBool(tomb['deleted']) ?? false,
-        deletedAt: asStr(tomb['deletedAt']),
-        deletedReason: asStr(tomb['deletedReason']) ?? '',
-        supersededBy: asStr(tomb['supersededBy']),
-        supersededByContent: asStr(tomb['supersededByContent']),
-        supersededFrom: pickArray<unknown>(tomb, 'supersededFrom').map((x) => {
-          const r = isRecord(x) ? x : {};
-          return { id: asStr(r['id']) ?? '', content: asStr(r['content']) ?? '' };
-        }),
-      },
-      retrieval: {
-        score: asNum(retr['score']) ?? 0,
-        matchedBy: asStr(retr['matchedBy']) ?? 'lexical',
-        signals: {
-          relevance: asNum(signals['relevance']) ?? 0,
-          importance: asNum(signals['importance']) ?? 0,
-          recency: asNum(signals['recency']) ?? 0,
-        },
-      },
-      protected: asBool(rec['protected']) ?? false,
-    };
+      content: asStr(rec.content) ?? asStr(rec.rules) ?? '',
+      enabled: asBool(rec.enabled) ?? true,
+    }
   },
-  async consolidate(botId: string, sender: string, dryRun: boolean): Promise<unknown> {
-    return http.post('/api/memories/consolidate', { botId, sender, dryRun });
+  async save(botId: string, content: string): Promise<void> {
+    await http.put('/api/persona-rules', { botId, content })
   },
-};
-
-/* ---------------- 日记 ---------------- */
-
-function toDiary(v: unknown): Diary | undefined {
-  if (!isRecord(v)) return undefined;
-  const id = asStr(firstOf(v, 'id', 'diaryId'));
-  if (!id) return undefined;
-  return {
-    id,
-    botId: asStr(v.botId),
-    date: asStr(firstOf(v, 'date', 'day', 'createdAt')),
-    content: asStr(firstOf(v, 'content', 'text', 'body')),
-    mood: asStr(v.mood),
-    createdAt: asStr(v.createdAt),
-  };
 }
 
-export const diary = {
-  async list(botId: string): Promise<Diary[]> {
-    const data = await http.get<unknown>('/api/diaries', { botId });
-    return pickArray<unknown>(data, 'diaries', 'items', 'list')
-      .map(toDiary)
-      .filter((d): d is Diary => !!d);
-  },
-  async get(id: string): Promise<Diary | undefined> {
-    const data = await http.get<unknown>(`/api/diaries/${encodeURIComponent(id)}`);
-    return toDiary(pickRecord(data, 'diary') ?? data);
-  },
-  async remove(id: string): Promise<unknown> {
-    return http.del(`/api/diaries/${encodeURIComponent(id)}`);
-  },
-  async write(botId: string): Promise<unknown> {
-    return http.post('/api/diaries/write', { botId });
-  },
-};
+/* ---------------- plugins / debug / overview ---------------- */
 
-/* ---------------- 相册 ---------------- */
-
-function toPhoto(v: unknown): Photo | undefined {
-  if (!isRecord(v)) return undefined;
-  const id = asStr(firstOf(v, 'id', 'photoId'));
-  if (!id) return undefined;
-  return {
-    id,
-    botId: asStr(v.botId),
-    url: asStr(firstOf(v, 'url', 'imageUrl', 'photoUrl')),
-    caption: asStr(firstOf(v, 'caption', 'description')),
-    tags: pickArray<string>(v, 'tags'),
-    createdAt: asStr(v.createdAt),
-  };
-}
-
-export const photos = {
-  async list(botId: string): Promise<Photo[]> {
-    const data = await http.get<unknown>('/api/photos', { botId });
-    return pickArray<unknown>(data, 'photos', 'items', 'list')
-      .map(toPhoto)
-      .filter((p): p is Photo => !!p);
+export const systemApi = {
+  async plugins(): Promise<PluginsData> {
+    const out = await http.get<unknown>('/api/plugins')
+    return (isRecord(out) ? out : {}) as PluginsData
   },
-  async upload(botId: string, file: File, caption?: string): Promise<unknown> {
-    const fd = new FormData();
-    fd.append('file', file);
-    if (caption) fd.append('caption', caption);
-    return http.upload('/api/photos', fd, { botId });
+  async setPluginEnabled(input: { id?: string; name?: string; enabled: boolean }): Promise<void> {
+    await http.post('/api/plugins/enable', input)
   },
-  async update(id: string, botId: string, patch: Record<string, unknown>): Promise<unknown> {
-    return http.patch(`/api/photos/${encodeURIComponent(id)}`, patch, { botId });
-  },
-  async remove(id: string, botId: string): Promise<unknown> {
-    return http.del(`/api/photos/${encodeURIComponent(id)}`, { botId });
-  },
-};
-
-/* ---------------- 定时消息 ---------------- */
-
-function toScheduled(v: unknown): ScheduledMessage | undefined {
-  if (!isRecord(v)) return undefined;
-  const id = asStr(firstOf(v, 'id', 'scheduledId', 'jobId'));
-  if (!id) return undefined;
-  return {
-    id,
-    botId: asStr(v.botId),
-    fireAt: asStr(firstOf(v, 'fireAt', 'fire_at', 'scheduledAt')),
-    prompt: asStr(firstOf(v, 'prompt', 'text', 'content')),
-    origin: asStr(firstOf(v, 'origin', 'source', 'createdBy')),
-    status: asStr(firstOf(v, 'status', 'state')),
-    strictness: asStr(v.strictness),
-    createdAt: asStr(v.createdAt),
-  };
-}
-
-export const scheduled = {
-  async list(botId: string): Promise<ScheduledMessage[]> {
-    const data = await http.get<unknown>('/api/scheduled-messages', { botId });
-    return pickArray<unknown>(data, 'scheduledMessages', 'messages', 'items', 'list')
-      .map(toScheduled)
-      .filter((s): s is ScheduledMessage => !!s);
-  },
-  async create(body: Record<string, unknown>): Promise<unknown> {
-    return http.post('/api/scheduled-messages', body);
-  },
-  async update(id: string, patch: Record<string, unknown>): Promise<unknown> {
-    return http.patch(`/api/scheduled-messages/${encodeURIComponent(id)}`, patch);
-  },
-  async remove(id: string): Promise<unknown> {
-    return http.del(`/api/scheduled-messages/${encodeURIComponent(id)}`);
-  },
-};
-
-/* ---------------- 铁律 ---------------- */
-
-export const rules = {
-  async get(botId: string): Promise<PersonaRules> {
-    const data = await http.get<unknown>('/api/persona-rules', { botId });
-    const rec = isRecord(data) ? data : {};
-    return {
-      content: asStr(firstOf(rec, 'content', 'text', 'rules')) ?? '',
-      enabled: asBool(firstOf(rec, 'enabled', 'isEnabled')) ?? true,
-    };
-  },
-  async put(botId: string, body: PersonaRules): Promise<unknown> {
-    return http.put('/api/persona-rules', body, { botId });
-  },
-};
-
-/* ---------------- 全局设置 ---------------- */
-
-export const settings = {
-  async getAi(): Promise<Record<string, unknown>> {
-    const data = await http.get<unknown>('/api/settings/ai');
-    return isRecord(data) ? data : {};
-  },
-  async putAi(body: Record<string, unknown>): Promise<unknown> {
-    return http.put('/api/settings/ai', body);
-  },
-  async getPlatform(): Promise<Record<string, unknown>> {
-    const data = await http.get<unknown>('/api/settings/platform');
-    return isRecord(data) ? data : {};
-  },
-  async putPlatform(body: Record<string, unknown>): Promise<unknown> {
-    return http.put('/api/settings/platform', body);
-  },
-};
-
-/* ---------------- 聊天 ---------------- */
-
-export const chat = {
-  async send(botId: string, sender: string, text: string): Promise<ChatMessage[]> {
-    const data = await http.post<unknown>('/api/chat', { botId, sender, text });
-    return normalizeMessages(data);
-  },
-  async startBuffer(botId: string, text: string): Promise<BufferState> {
-    const data = await http.post<unknown>('/api/chat/buffer', { botId, text });
-    const rec = isRecord(data) ? data : {};
-    return { fireAt: asStr(rec.fireAt), buffered: asNum(rec.buffered), count: asNum(rec.count) };
-  },
-  async getBuffer(botId: string, sender?: string): Promise<BufferState> {
-    const data = await http.get<unknown>('/api/chat/buffer', { botId, sender });
-    const rec = isRecord(data) ? data : {};
-    return { fireAt: asStr(rec.fireAt), buffered: asNum(rec.buffered), count: asNum(rec.count) };
-  },
-  async flushBuffer(botId: string, sender: string): Promise<ChatMessage[]> {
-    const data = await http.post<unknown>('/api/chat/buffer/flush', { botId, sender });
-    return normalizeMessages(data);
-  },
-  async listMessages(botId: string, sender?: string, limit?: number): Promise<ChatMessage[]> {
-    const data = await http.get<unknown>('/api/messages', { botId, sender, limit });
-    return normalizeMessages(data);
-  },
-  async listConversations(botId: string): Promise<unknown[]> {
-    const data = await http.get<unknown>('/api/conversations', { botId });
-    return pickArray<unknown>(data, 'conversations', 'items', 'list');
-  },
-  async edit(body: { botId: string; sender: string; messageId: string; text: string }): Promise<unknown> {
-    return http.post('/api/chat/edit', body);
-  },
-  async regenerate(botId: string, sender: string): Promise<unknown> {
-    return http.post('/api/chat/regenerate', { botId, sender });
-  },
-  async remove(id: string): Promise<unknown> {
-    return http.del(`/api/messages/${encodeURIComponent(id)}`);
-  },
-};
-
-/* ---------------- 成长 ---------------- */
-
-function toGrowth(data: unknown): GrowthData {
-  const rec = isRecord(data) ? data : {};
-  const profileRec = pickRecord(rec, 'profile') ?? rec;
-  const dims = pickArray<unknown>(profileRec, 'dimensions', 'dims', 'axes');
-  const dimensions = dims
-    .filter(isRecord)
-    .map((d) => ({
-      name: asStr(firstOf(d, 'name', 'dimension', 'key')) ?? '未知维度',
-      level: asNum(firstOf(d, 'level', 'value', 'rank')) ?? 0,
-      max: asNum(firstOf(d, 'max', 'maxLevel')),
-      description: asStr(firstOf(d, 'description', 'desc', 'note')),
-    }));
-  return {
-    profile: {
-      dimensions,
-      summary: asStr(firstOf(profileRec, 'summary', 'description')),
-      report: asStr(firstOf(profileRec, 'report', 'growthReport')),
-      version: asNum(firstOf(profileRec, 'version', 'profileVersion')),
-    },
-    versions: pickArray<unknown>(rec, 'versions', 'history', 'versionHistory')
+  async activity(botId?: string): Promise<ActivityStats> {
+    const out = await http.get<unknown>('/api/stats/activity', botId ? { botId } : undefined)
+    const rec = isRecord(out) ? out : {}
+    const toolCalls = pickArray(rec, 'toolCalls')
       .filter(isRecord)
-      .map((v) => ({
-        version: asNum(firstOf(v, 'version', 'v')),
-        createdAt: asStr(firstOf(v, 'createdAt', 'time')),
-        summary: asStr(firstOf(v, 'summary', 'note', 'description')),
-        author: asStr(firstOf(v, 'author', 'by')),
-      })),
-    proposals: pickArray<unknown>(rec, 'proposals', 'pendingProposals', 'pending')
-      .filter(isRecord)
-      .map((p) => ({
-        id: asStr(firstOf(p, 'id', 'proposalId')) ?? '',
-        kind: asStr(firstOf(p, 'kind', 'type')),
-        title: asStr(firstOf(p, 'title', 'name')),
-        summary: asStr(firstOf(p, 'summary', 'description', 'reason')),
-        evidence: pickArray<string>(p, 'evidence', 'evidenceChain'),
-        payload: pickRecord(p, 'payload', 'changes', 'diff'),
-        status: asStr(firstOf(p, 'status', 'state')),
-        createdAt: asStr(p.createdAt),
+      .map((t) => ({
+        name: asStr(t.name) ?? asStr(t.action) ?? '',
+        count: asNum(t.count) ?? asNum(t.c) ?? 0,
       }))
-      .filter((p) => p.id !== ''),
-    window: (() => {
-      const w = pickRecord(rec, 'window', 'reviewWindow', 'nextReview');
-      if (!w) return undefined;
-      return {
-        nextAt: asStr(firstOf(w, 'nextAt', 'next', 'nextReviewAt')),
-        lastAt: asStr(firstOf(w, 'lastAt', 'last', 'lastReviewAt')),
-        reason: asStr(w.reason),
-      };
-    })(),
-  };
+    return {
+      daily: pickArray(rec, 'daily')
+        .filter(isRecord)
+        .map((d) => ({ date: asStr(d.date) ?? '', messages: asNum(d.messages) ?? 0 })),
+      totals: pickRecord(rec, 'totals') ?? {},
+      toolCalls,
+    }
+  },
+  /** GET /api/debug/system-prompt?botId=（必填 botId，否则 400）。 */
+  async systemPrompt(botId?: string): Promise<Record<string, unknown>> {
+    const out = await http.get<unknown>('/api/debug/system-prompt', botId ? { botId } : undefined)
+    return pickRecord(out) ?? {}
+  },
+  /** GET /api/debug/audit?botId= */
+  async audit(botId?: string): Promise<Record<string, unknown>[]> {
+    const out = await http.get<unknown>('/api/debug/audit', botId ? { botId } : undefined)
+    const rec = isRecord(out) ? out : {}
+    return pickArray(rec, 'entries', 'audit', 'logs').filter(isRecord)
+  },
+  async seed(): Promise<void> {
+    await http.post('/api/seed')
+  },
 }
 
-export const growth = {
-  async get(botId: string): Promise<GrowthData> {
-    const data = await http.get<unknown>('/api/growth', { botId });
-    return toGrowth(data);
-  },
-  async evaluate(botId: string): Promise<unknown> {
-    return http.post('/api/growth', { action: 'evaluate', botId });
-  },
-  async rollback(botId: string, version?: number): Promise<unknown> {
-    return http.post('/api/growth', { action: 'rollback', botId, version });
-  },
-  async decide(proposalId: string, decision: string, extra?: Record<string, unknown>): Promise<unknown> {
-    return http.post(`/api/growth/proposals/${encodeURIComponent(proposalId)}`, { decision, ...extra });
-  },
-};
+/* ---------------- channels ---------------- */
 
-/* ---------------- 插件 ---------------- */
-
-export const plugins = {
-  async get(): Promise<PluginsData> {
-    const data = await http.get<unknown>('/api/plugins');
-    const rec = isRecord(data) ? data : {};
-    return {
-      mcp: pickArray<unknown>(rec, 'mcp', 'mcpServers', 'servers')
-        .filter(isRecord)
-        .map((s) => ({
-          name: asStr(firstOf(s, 'name', 'serverName')) ?? '',
-          transport: asStr(firstOf(s, 'transport', 'type')),
-          command: asStr(s.command),
-          args: pickArray<string>(s, 'args', 'argv'),
-          url: asStr(s.url),
-          status: asStr(firstOf(s, 'status', 'state', 'health')),
-          tools: asNum(firstOf(s, 'tools', 'toolCount')),
-        }))
-        .filter((s) => s.name !== ''),
-      skills: pickArray<unknown>(rec, 'skills', 'skillList')
-        .filter(isRecord)
-        .map((s) => ({
-          name: asStr(firstOf(s, 'name', 'skill')) ?? '',
-          description: asStr(firstOf(s, 'description', 'desc')),
-          source: asStr(s.source),
-        })),
-      tools: pickArray<unknown>(rec, 'tools', 'inventory', 'toolInventory')
-        .filter(isRecord)
-        .map((t) => ({
-          name: asStr(firstOf(t, 'name', 'tool')) ?? '',
-          namespace: asStr(firstOf(t, 'namespace', 'source', 'server')),
-          source: asStr(t.source),
-          description: asStr(firstOf(t, 'description', 'desc')),
-          enabledBots: pickArray<string>(t, 'enabledBots', 'enabled_bots', 'bots'),
-        }))
-        .filter((t) => t.name !== ''),
-      dsh: pickArray<unknown>(rec, 'dsh', 'dshPlugins', 'plugins')
-        .filter(isRecord)
-        .map((p) => ({
-          name: asStr(firstOf(p, 'name', 'plugin')) ?? '',
-          version: asStr(p.version),
-          description: asStr(firstOf(p, 'description', 'desc')),
-          enabled: asBool(p.enabled),
-        })),
-      installed: pickArray<unknown>(rec, 'installed', 'installedPlugins')
-        .filter(isRecord)
-        .map((p) => ({
-          id: asStr(firstOf(p, 'id', 'entryId')),
-          name: asStr(firstOf(p, 'name', 'moduleName', 'packageName')) ?? '',
-          title: asStr(firstOf(p, 'title', 'displayName')),
-          description: asStr(firstOf(p, 'description', 'desc')),
-          enabled: asBool(p.enabled),
-          phase: asStr(p.phase),
-        }))
-        .filter((p) => p.name !== ''),
-      bundles: pickArray<unknown>(rec, 'bundles', 'installable')
-        .filter(isRecord)
-        .map((b) => ({
-          name: asStr(firstOf(b, 'name', 'bundle')) ?? '',
-          official: asBool(b.official),
-          availability: asStr(b.availability),
-          installTarget: asStr(firstOf(b, 'installTarget', 'spec')),
-          version: asStr(b.version),
-        }))
-        .filter((b) => b.name !== ''),
-    };
-  },
-  async addMcp(body: Record<string, unknown>): Promise<unknown> {
-    return http.post('/api/plugins/mcp', body);
-  },
-  async removeMcp(name: string): Promise<unknown> {
-    return http.del(`/api/plugins/mcp/${encodeURIComponent(name)}`);
-  },
-  async setToolEnabled(name: string, botId: string, enabled: boolean): Promise<unknown> {
-    return http.patch('/api/plugins/tools', { name, botId, enabled });
-  },
-  /** 按包名/来源一键安装 dsh 插件（语义与 dsh 官方 plugin manager 一致） */
-  async installPlugin(spec: string): Promise<{ ok?: boolean; message?: string; restartRequired?: boolean }> {
-    const data = await http.post<unknown>('/api/plugins/install', { spec });
-    const rec = isRecord(data) ? data : {};
-    return {
-      ok: asBool(rec.ok),
-      message: asStr(rec.message),
-      restartRequired: asBool(rec.restartRequired),
-    };
-  },
-  async removePlugin(name: string): Promise<unknown> {
-    return http.post('/api/plugins/remove', { name });
-  },
-  async setPluginEnabled(input: { id?: string; name?: string; enabled: boolean }): Promise<unknown> {
-    return http.post('/api/plugins/enable', input);
-  },
-};
-
-/* ---------------- Bilibili ---------------- */
-
-export const bili = {
-  async status(): Promise<BiliStatus> {
-    const data = await http.get<unknown>('/api/bili/status');
-    const rec = isRecord(data) ? data : {};
-    return {
-      connected: asBool(rec['connected']) ?? true,
-      logined: asBool(firstOf(rec, 'logined', 'loggedIn', 'isLogin')) ?? false,
-      username: asStr(firstOf(rec, 'username', 'uname', 'nickname')),
-      mid: asStr(firstOf(rec, 'mid', 'uid')) ?? undefined,
-      error: asStr(rec['error']),
-      hint: asStr(rec['hint']),
-    };
-  },
-  async qrStart(): Promise<BiliQrState> {
-    const data = await http.post<unknown>('/api/bili/qr/start');
-    const rec = isRecord(data) ? data : {};
-    return {
-      status: asStr(firstOf(rec, 'status', 'state')),
-      qrImage: asStr(firstOf(rec, 'qrImage', 'qr image', 'qrcodeImage', 'image')),
-      qrUrl: asStr(firstOf(rec, 'qrUrl', 'url', 'qrcodeUrl')),
-      sessionId: asStr(firstOf(rec, 'sessionId', 'session_id')),
-      message: asStr(rec.message),
-    };
-  },
-  async qrStatus(sessionId?: string): Promise<BiliQrState> {
-    const data = await http.get<unknown>('/api/bili/qr/status', sessionId ? { sessionId } : undefined);
-    const rec = isRecord(data) ? data : {};
-    return {
-      status: asStr(firstOf(rec, 'status', 'state', 'code')),
-      qrImage: asStr(firstOf(rec, 'qrImage', 'qrcodeImage', 'image')),
-      qrUrl: asStr(firstOf(rec, 'qrUrl', 'url')),
-      message: asStr(firstOf(rec, 'message', 'msg')),
-    };
-  },
-  async cmd(argv: string[]): Promise<{ output?: string }> {
-    const data = await http.post<unknown>('/api/bili/cmd', { argv });
-    const rec = isRecord(data) ? data : {};
-    return { output: asStr(firstOf(rec, 'output', 'stdout', 'result', 'text')) };
-  },
-};
-
-/* ---------------- 调试 ---------------- */
-
-export const debug = {
-  async systemPrompt(botId: string, sender?: string): Promise<PromptViewData> {
-    const data = await http.get<unknown>('/api/debug/system-prompt', { botId, sender });
-    const rec = isRecord(data) ? data : {};
-    const layers = pickArray<unknown>(rec, 'layers', 'sections')
-      .filter(isRecord)
-      .map((l) => {
-        const content = asStr(firstOf(l, 'content', 'text', 'body')) ?? '';
-        return {
-          name: asStr(firstOf(l, 'name', 'layer', 'title')) ?? '未命名层',
-          source: asStr(firstOf(l, 'source', 'origin', 'from')),
-          content,
-          chars: asNum(firstOf(l, 'chars', 'length')) ?? content.length,
-        };
-      });
-    return {
-      layers,
-      totalChars: asNum(firstOf(rec, 'totalChars', 'total', 'totalLength')) ?? layers.reduce((a, l) => a + l.chars, 0),
-      compiled: asStr(firstOf(rec, 'compiled', 'full', 'final')),
-    };
-  },
-  async audit(botId: string, category?: string): Promise<AuditEntry[]> {
-    const data = await http.get<unknown>('/api/debug/audit', { botId, category });
-    return pickArray<unknown>(data, 'entries', 'items', 'list', 'logs')
-      .filter(isRecord)
-      .map((e) => ({
-        id: asStr(firstOf(e, 'id', 'entryId')),
-        time: asStr(firstOf(e, 'time', 'createdAt', 'timestamp')),
-        category: asStr(firstOf(e, 'category', 'type')),
-        botId: asStr(e.botId),
-        summary: asStr(firstOf(e, 'summary', 'title', 'message')),
-        detail: asStr(firstOf(e, 'detail', 'content', 'body')),
-      }));
-  },
-};
-
-/* ---------------- 工具调用事件（SSE 用） ---------------- */
-
-export function normalizeToolCall(raw: unknown, idx = 0): ToolCallEvent | undefined {
-  if (!isRecord(raw)) return undefined;
-  const name = asStr(firstOf(raw, 'name', 'toolName', 'tool', 'tool_name'));
-  if (!name) return undefined;
-  const statusRaw = (asStr(firstOf(raw, 'status', 'state', 'phase')) ?? 'running').toLowerCase();
-  const status: ToolCallEvent['status'] =
-    statusRaw.includes('fail') || statusRaw.includes('error')
-      ? 'failed'
-      : statusRaw.includes('done') || statusRaw.includes('finish') || statusRaw.includes('ok') || statusRaw.includes('end')
-        ? 'done'
-        : 'running';
-  return { id: asStr(firstOf(raw, 'id', 'callId')) ?? `tool-${idx}`, name, status };
+export interface BindIdentity {
+  channel: string
+  externalId: string
+  createdAt: string
 }
 
-/* ---------------- 账号绑定 ---------------- */
+export const channelsApi = {
+  async bindCode(channel: string, botId?: string): Promise<BindCode> {
+    const out = await http.post<unknown>(`/api/bind/${encodeURIComponent(channel)}/code`, botId ? { botId } : undefined)
+    const rec = pickRecord(out, 'code', 'bind') ?? (isRecord(out) ? out : {})
+    return { channel, code: asStr(rec.code) ?? '', ...rec } as BindCode
+  },
+  /** {identities:[{channel, externalId, createdAt}], pending:[{kind,token,expires_at}]} */
+  async bindStatus(): Promise<{ identities: BindIdentity[]; pending: BindStatusItem[] }> {
+    const out = await http.get<unknown>('/api/bind/status')
+    const rec = isRecord(out) ? out : {}
+    const identities = pickArray(rec, 'identities').filter(isRecord).map((b) => ({
+      channel: asStr(b.channel) ?? '',
+      externalId: asStr(b.externalId) ?? '',
+      createdAt: asStr(b.createdAt) ?? '',
+    }))
+    const pending = pickArray(rec, 'pending').filter(isRecord).map((b) => ({
+      kind: asStr(b.kind) ?? '',
+      token: asStr(b.token) ?? '',
+      expiresAt: asStr(b.expiresAt) ?? asStr(b.expires_at) ?? '',
+    }))
+    return { identities, pending }
+  },
+  async unbind(channel: string, externalId: string): Promise<void> {
+    await http.post('/api/bind/unbind', { channel, externalId })
+  },
+}
 
-export const bind = {
-  async status(): Promise<{ identities: BindIdentity[] }> {
-    const data = await http.get<unknown>('/api/bind/status');
-    const rec = isRecord(data) ? data : {};
+/* ---------------- wechat（契约，后端实现中） ---------------- */
+
+export const wechatApi = {
+  async qr(): Promise<WechatQrSession> {
+    const out = await http.post<unknown>('/api/wechat/qr')
+    const rec = isRecord(out) ? out : {}
     return {
-      identities: pickArray<unknown>(rec, 'identities')
-        .filter(isRecord)
-        .map((i) => ({
-          channel: asStr(i.channel) ?? '',
-          externalId: asStr(firstOf(i, 'externalId', 'external_id')) ?? '',
-          createdAt: asStr(firstOf(i, 'createdAt', 'created_at')),
-        }))
-        .filter((i) => i.channel !== ''),
-    };
+      sessionId: asStr(rec.sessionId) ?? asStr(rec.session_id) ?? '',
+      qrDataUrl: asStr(rec.qrDataUrl) ?? asStr(rec.qr_data_url) ?? '',
+      expiresAt: asStr(rec.expiresAt),
+    }
   },
-  async createCode(channel: string): Promise<BindCode | undefined> {
-    const data = await http.post<unknown>(`/api/bind/${encodeURIComponent(channel)}/code`);
-    const rec = isRecord(data) ? data : {};
-    const code = asStr(rec.code);
-    if (!code) return undefined;
+  async qrStatus(sessionId: string): Promise<WechatQrPoll> {
+    const out = await http.get<unknown>(`/api/wechat/qr/${encodeURIComponent(sessionId)}`)
+    const rec = isRecord(out) ? out : {}
     return {
-      channel: asStr(rec.channel) ?? channel,
-      kind: asStr(rec.kind) ?? '',
-      code,
-      expiresAt: asStr(rec.expiresAt) ?? '',
-      instruction: asStr(rec.instruction),
-    };
+      status: asStr(rec.status) ?? 'wait',
+      qrDataUrl: asStr(rec.qrDataUrl),
+      expiresAt: asStr(rec.expiresAt),
+      error: asStr(rec.error),
+      ilinkBotId: asStr(rec.ilinkBotId),
+      ilinkUserId: asStr(rec.ilinkUserId),
+    }
   },
-  async unbind(channel: string, externalId: string): Promise<unknown> {
-    return http.post('/api/bind/unbind', { channel, externalId });
+  async status(): Promise<WechatStatus> {
+    const out = await http.get<unknown>('/api/wechat/status')
+    const rec = isRecord(out) ? out : {}
+    return {
+      bound: asBool(rec.bound) ?? false,
+      botId: asStr(rec.botId),
+      ilinkBotId: asStr(rec.ilinkBotId),
+      ilinkUserId: asStr(rec.ilinkUserId),
+      nickname: asStr(rec.nickname),
+      status: asStr(rec.status),
+      windowFresh: asBool(rec.windowFresh),
+      lastInboundAt: asNum(rec.lastInboundAt),
+      friendQrDataUrl: asStr(rec.friendQrDataUrl),
+      friendQrExpiresAt: asStr(rec.friendQrExpiresAt),
+      note: asStr(rec.note),
+      error: asStr(rec.error),
+    }
   },
-};
+  async friendQr(): Promise<{ qrDataUrl: string; expiresAt?: string; note?: string; kind?: string }> {
+    const out = await http.post<unknown>('/api/wechat/friend-qr')
+    const rec = isRecord(out) ? out : {}
+    return {
+      qrDataUrl: asStr(rec.qrDataUrl) ?? '',
+      expiresAt: asStr(rec.expiresAt),
+      note: asStr(rec.note),
+      kind: asStr(rec.kind),
+    }
+  },
+  async logout(): Promise<void> {
+    await http.post('/api/wechat/logout')
+  },
+}
+
+/* ---------------- Bilibili sidecar ---------------- */
+
+export const biliApi = {
+  async status(): Promise<Record<string, unknown>> {
+    const out = await http.get<unknown>('/api/bili/status')
+    return pickRecord(out) ?? {}
+  },
+  async qrStart(): Promise<Record<string, unknown>> {
+    const out = await http.post<unknown>('/api/bili/qr/start')
+    return pickRecord(out) ?? {}
+  },
+  async qrStatus(sessionId: string): Promise<Record<string, unknown>> {
+    const out = await http.get<unknown>('/api/bili/qr/status', { sessionId })
+    return pickRecord(out) ?? {}
+  },
+  async command(argv: string[]): Promise<Record<string, unknown>> {
+    const out = await http.post<unknown>('/api/bili/cmd', { argv })
+    return pickRecord(out) ?? {}
+  },
+}

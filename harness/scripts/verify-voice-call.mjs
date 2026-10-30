@@ -37,6 +37,7 @@ import {
 } from '../packages/littly/voice-call/src/call-tools.ts'
 import { summarizeCall, clampFireAt, parseFireAt } from '../packages/littly/voice-call/src/summary.ts'
 import { createVoiceCallService, CALL_PATH } from '../packages/littly/voice-call/src/call-server.ts'
+import { signCallToken, verifyCallToken, CALL_TOKEN_TTL_MS } from '../packages/littly/voice-call/src/call-token.ts'
 // 仓库根没有 ws 依赖；语音通话包声明了 ws@8.21.3，pnpm 会给它建这个软链。
 import WebSocket from '../packages/littly/voice-call/node_modules/ws/index.js'
 
@@ -206,8 +207,22 @@ const persona = {
   buildPrompt: () => ({ system: '', phi: null, layers: {} }),
 }
 const hub = { tools: { dispatch: async () => ({ ok: true, result: '{}' }) } }
+// B2：/call 握手必须先拿服务端签名的短时令牌（POST /api/call/token 下发）。
+// 测试直接复用同一份 HMAC 逻辑签发。
+const CALL_SECRET = 'test-call-secret-0123456789abcdef'
+storage.setSetting('platform.secret', CALL_SECRET)
+const tokenFor = (botId, sender, exp) => signCallToken(CALL_SECRET, { botId, sender, userId: 'user-1', ...(exp !== undefined ? { exp } : {}) })
+const forgedToken = signCallToken('wrong-secret-xxxxxxxxxxxxxxxx', { botId: 'b1', sender: 'u1', userId: 'user-1' })
 const service = createVoiceCallService({ storage, persona, memory: stubMemory, hub, log: () => {} })
 ok(CALL_PATH === '/call', '升级路径 = /call')
+
+console.log('== 通话令牌（B2）==')
+ok(verifyCallToken(CALL_SECRET, tokenFor('b1', 'u1'))?.botId === 'b1', '令牌可验签并解出 botId')
+ok(verifyCallToken(CALL_SECRET, forgedToken) === null, '错误密钥签发的令牌 → 拒绝')
+ok(verifyCallToken(CALL_SECRET, tokenFor('b1', 'u1', Date.now() - 1)) === null, '过期令牌 → 拒绝')
+ok(verifyCallToken('', tokenFor('b1', 'u1')) === null, '空密钥 → 拒绝')
+ok(verifyCallToken(CALL_SECRET, 'garbage') === null, '坏格式令牌 → 拒绝')
+ok(CALL_TOKEN_TTL_MS === 120_000, '令牌 TTL = 120s')
 const httpServer = createServer((req, res) => { res.writeHead(404); res.end() })
 httpServer.on('upgrade', (req, socket, head) => { service.handleUpgrade(req, socket, head) })
 await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
@@ -219,29 +234,47 @@ const firstMessage = (ws) => new Promise((resolve, reject) => {
   ws.once('error', (err) => { clearTimeout(timer); reject(err) })
 })
 
-// 1) 缺 botId → 协议错误
+// 1) 无令牌 → 鉴权失败（修复前这里能直接连上）
 {
-  const client = new WebSocket(`ws://127.0.0.1:${httpPort}/call?sender=u1`)
+  const client = new WebSocket(`ws://127.0.0.1:${httpPort}/call?botId=b1&sender=u1`)
   const msg = await firstMessage(client)
-  ok(msg.type === 'error' && msg.message === '缺少 botId/sender', '缺 botId → {type:error, 缺少 botId/sender}')
+  ok(msg.type === 'error' && msg.message.includes('通话鉴权失败'), '无令牌 → 拒绝连接（通话鉴权失败）')
   client.close()
 }
-// 2) 角色不存在 → 协议错误
+// 2) 伪造签名 / 过期令牌 → 拒绝
 {
-  const client = new WebSocket(`ws://127.0.0.1:${httpPort}/call?botId=nope&sender=u1`)
+  const client = new WebSocket(`ws://127.0.0.1:${httpPort}/call?token=${encodeURIComponent(forgedToken)}`)
+  const msg = await firstMessage(client)
+  ok(msg.type === 'error' && msg.message.includes('通话鉴权失败'), '伪造令牌 → 拒绝连接')
+  client.close()
+  const expired = new WebSocket(`ws://127.0.0.1:${httpPort}/call?token=${encodeURIComponent(tokenFor('b1', 'u1', Date.now() - 1000))}`)
+  const msg2 = await firstMessage(expired)
+  ok(msg2.type === 'error' && msg2.message.includes('通话鉴权失败'), '过期令牌 → 拒绝连接')
+  expired.close()
+}
+// 3) 令牌与 URL 自报 botId 不一致 → 拒绝（防伪造他人身份）
+{
+  const client = new WebSocket(`ws://127.0.0.1:${httpPort}/call?botId=someone-else&token=${encodeURIComponent(tokenFor('b1', 'u1'))}`)
+  const msg = await firstMessage(client)
+  ok(msg.type === 'error' && msg.message.includes('与令牌不一致'), 'URL botId 与令牌不一致 → 拒绝')
+  client.close()
+}
+// 4) 令牌合法但角色不存在 → 协议错误
+{
+  const client = new WebSocket(`ws://127.0.0.1:${httpPort}/call?token=${encodeURIComponent(tokenFor('nope', 'u1'))}`)
   const msg = await firstMessage(client)
   ok(msg.type === 'error' && msg.message === '角色不存在', '角色不存在 → {type:error, 角色不存在}')
   client.close()
 }
-// 3) 正常握手 → ready → stop → call_end（并落一张通话卡片）
+// 5) 正常握手 → ready → stop → call_end（并落一张通话卡片）
 {
-  const client = new WebSocket(`ws://127.0.0.1:${httpPort}/call?botId=b2&sender=u1`)
+  const client = new WebSocket(`ws://127.0.0.1:${httpPort}/call?token=${encodeURIComponent(tokenFor('b2', 'u1'))}`)
   const msg = await firstMessage(client)
   ok(msg.type === 'error' && msg.message.includes('Deepgram API Key 未配置'), '未配 Deepgram Key → 明确报错')
   client.close()
 }
 {
-  const client = new WebSocket(`ws://127.0.0.1:${httpPort}/call?botId=b1&sender=u1`)
+  const client = new WebSocket(`ws://127.0.0.1:${httpPort}/call?token=${encodeURIComponent(tokenFor('b1', 'u1'))}`)
   const ready = await firstMessage(client)
   ok(ready.type === 'ready', '握手成功 → {type:ready}')
   const ended = new Promise((resolve, reject) => {

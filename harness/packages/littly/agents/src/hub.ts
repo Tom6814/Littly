@@ -9,7 +9,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { LittlyStorage, MessageRow } from '@littly/storage'
-import type { LittlyPersona } from '@littly/persona'
+import { buildToolUseDirective, type LittlyPersona } from '@littly/persona'
 import type { LittlyMemory } from '@littly/memory'
 import { chatComplete, type ChatMessage } from '@littly/llm'
 import { runVoicePipeline } from '@littly/voice'
@@ -244,10 +244,11 @@ export class LittlyHub {
     const ids = claimed.map((r) => r.id)
     if (ids.length === 0) return { flushed: false }
     // 认领后二次验证：批次被新入站推到未来 → 退回 pending 退出
+    // 注意：这里必须 .all() —— 曾漏掉导致整批 flush 在认领后抛 TypeError（缓冲主链路必崩）。
     const rows = this.storage.prepare(
       `SELECT * FROM messages WHERE id IN (${ids.map(() => '?').join(',')}) ORDER BY created_at ASC`,
       ...ids,
-    ) as unknown as MessageRow[]
+    ).all() as unknown as MessageRow[]
     if (rows.some((r) => (r.buffer_fire_at && new Date(r.buffer_fire_at).getTime() > Date.now()))) {
       this.storage.prepare(`UPDATE messages SET buffer_status = 'pending' WHERE id IN (${ids.map(() => '?').join(',')})`, ...ids).run()
       return { flushed: false }
@@ -330,6 +331,15 @@ export class LittlyHub {
     void this.memory.maybeUpdateHistoryDigest(req.botId, req.sender, orderedHistory.length).catch(() => {})
     const digest = this.memory.getHistoryDigest(req.botId, req.sender)
 
+    // B15：工具清单动态生成提示词段 —— 与随后真正下发给模型的 tools 同源
+    // （按角色停用过滤，含 dsh 插件/MCP 工具），避免提示词教模型调用不存在的工具。
+    const promptDisabled = getDisabledTools(this.storage, req.botId)
+    const promptBuiltin = this.tools.collectTools().filter((t) => !promptDisabled.has(t.function.name))
+    const promptDsh = (this.dshTools?.list(new Set(promptBuiltin.map((t) => t.function.name))) ?? [])
+      .filter((t) => !promptDisabled.has(t.function.name))
+    const toolDirective = buildToolUseDirective(
+      [...promptBuiltin, ...promptDsh].map((t) => ({ name: t.function.name, description: t.function.description })),
+    )
     const built = this.persona.buildPrompt({
       botId: req.botId,
       sender: req.sender,
@@ -339,6 +349,7 @@ export class LittlyHub {
       currentMemories,
       historyDigest: digest?.summary || undefined,
       crossChannelHint,
+      toolDirective,
       // §[2.4] 成长档案注入（无档案时 undefined，fail-open）
       growthText: getActiveGrowthText(this.storage, req.botId),
     })
@@ -443,7 +454,8 @@ export class LittlyHub {
         }
       }
 
-      finalReply = res.content || ''
+      // 空白正文视为沉默（T-B：沉默 = 不落库；只有空格的"回复"不能当成消息发出去）
+      finalReply = (res.content || '').trim() === '' ? '' : (res.content || '')
       break
     }
 
@@ -529,7 +541,7 @@ export class LittlyHub {
         ? 'voice'
         : artifacts.some((a) => a?.type === 'image') ? 'image' : artifacts.some((a) => a?.type === 'file') ? 'file' : 'text'
       this.storage.prepare("INSERT INTO messages (id, bot_id, sender, role, content, reply_type, reasoning, channel_id, delivery_status, voice_url, voice_original_text, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
-        .run(savedMessageId, req.botId, req.sender, 'assistant', finalReply, replyType, lastThinking || null, req.channelId ?? '', 'sent', voiceUrl ?? '', voiceText ?? '', new Date().toISOString())
+        .run(savedMessageId, req.botId, req.sender, 'assistant', finalReply, replyType, lastThinking || '', req.channelId ?? '', 'sent', voiceUrl ?? '', voiceText ?? '', new Date().toISOString())
     }
 
     // --- 5. 拟人化分片 + 渠道投递 ---
@@ -541,6 +553,11 @@ export class LittlyHub {
     if (finalReply && currentChannel !== 'web' && req.channelId) {
       try {
         const sender0 = this.senders.get(req.channelId)
+        // B16：渠道未注册（插件没装/没启用）→ 消息没有真正投递出去，必须标 failed，
+        // 不能沿用 INSERT 时的 'sent'（否则控制台/统计会把未送达当已送达）。
+        if (sender0 === undefined && savedMessageId) {
+          this.storage.prepare("UPDATE messages SET delivery_status = 'failed' WHERE id = ?").run(savedMessageId)
+        }
         if (sender0) {
           const delays = pieceDelays(pieces.length, humanizeCfg)
           let sent = 0

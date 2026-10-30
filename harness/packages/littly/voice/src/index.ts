@@ -5,7 +5,7 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { LittlyStorage } from '@littly/storage'
+import { downloadsDir, type LittlyStorage } from '@littly/storage'
 import { chatComplete } from '@littly/llm'
 import { fishTTS, normalizeEmotion, type FishLatency } from './fish-tts.ts'
 
@@ -160,8 +160,9 @@ function extractJson(raw: string): Record<string, unknown> | null {
 }
 
 // ── 3. 存盘 ──
-export function saveAudioFile(buf: Buffer, cwd: string): string {
-  const dir = join(cwd, 'public', 'downloads', 'audio')
+export function saveAudioFile(buf: Buffer, _cwd: string): string {
+  // B11：落持久卷（LITTLY_DATA_DIR/downloads/audio），URL 不变。
+  const dir = join(downloadsDir(), 'audio')
   mkdirSync(dir, { recursive: true })
   const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp3`
   writeFileSync(join(dir, filename), buf)

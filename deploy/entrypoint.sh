@@ -10,6 +10,9 @@ echo "[littly] webserver bind: ${DSH_WEB_HOST}:${PORT:-3000}"
 # 拿不到 entrypoint 的 export（docker exec 里 DSH_WEB_HOST 也是空的）。
 # HEALTHCHECK 读这个文件才能探到真正在监听的那个地址。
 echo "$DSH_WEB_HOST" > /tmp/littly-web-host
+# B11：上传/生成文件（相册/文档/语音/头像）落持久卷 —— 与 SQLite 同卷，容器重建不丢。
+export LITTLY_DATA_DIR="${LITTLY_DATA_DIR:-/app/data}"
+
 # profile 播种：DSH_HOME 在持久卷上，首启没有 profile 目录时 dsh --profile 会直接失败。
 # 从镜像里的 profiles/<name> 复制到 $DSH_HOME/profiles/<name>（幂等，不覆盖用户改动）。
 node scripts/seed-profile.mjs --profile "${LITTLY_PROFILE:-chat}" || \

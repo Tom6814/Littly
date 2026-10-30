@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { BotRow } from '@littly/storage'
+import { downloadsDir, type BotRow } from '@littly/storage'
 import { promoteContact, tryHandleBinding } from './binding.ts'
 import { callBotAction, type OneBotEnvelope, type SnowlumaDeps } from './client.ts'
 
@@ -68,7 +68,8 @@ function extFor(contentType: string | null): string {
 }
 
 async function importPhotos(deps: SnowlumaDeps, bot: BotRow, sender: string, urls: string[]): Promise<void> {
-  const dir = join(process.cwd(), 'public', 'downloads', 'photos')
+  // B11：落持久卷（LITTLY_DATA_DIR/downloads/photos），URL 不变。
+  const dir = join(downloadsDir(), 'photos')
   mkdirSync(dir, { recursive: true })
   for (const url of urls.slice(0, 9)) {
     try {

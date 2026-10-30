@@ -17,15 +17,20 @@
   → 三铁律服务端硬校验（证据 ≥2 条 / 单维 ≤±1 级 / 总位移 ≤6 级 / 价值禁区）→ 待审提案 → 人工批准。
   角色卡永远只读；人格以档案形式按月漂移。
 - **主动性双线**：预约/承诺线（履约等级 1/2/3）+ 心声回响线（静默扫描 + 指数退避唤醒）。
-- **五个渠道**：SnowLuma（QQ 账号，OneBot v11）· Telegram · 微信 iLink（+ 桥接 Webhook HMAC 验签）
+- **五个渠道**：SnowLuma（QQ 账号，OneBot v11）· Telegram · **微信 iLink（扫码绑定 + 名片二维码：
+  控制台出码 → 手机微信扫码确认 → 她就在微信里；照 openilink-hub/iLink 协议自研，不依赖外部 hub）**
   · QQ 官方 · Discord。绑定一次，全渠道同一条会话线。
 - **实时语音通话**：同端口 `/call` WebSocket —— 浏览器 PCM → Deepgram 流式 STT → 角色快速回复
   → Fish 流式 TTS → 通话卡片 → 挂断后自动「回响」总结（记忆 + 待办）。
 - **她自己的 B 站**：`bili` 元工具走 sidecar（子命令白名单 + 写操作默认预演 + 限频 + 审计），
   harness 同时挂上 bili 的 MCP 服务器；原始 MCP 工具由收敛门挡在元工具后面。
 - **社区 dsh 插件可直接接入**：装完的插件注册的工具对她可见可调（dsh-bridge）。
-- **控制台**：聊天页 + 15 个面板（概览 / 角色卡 / 世界书 / 成长 / 联系人 / 记忆 / 日记 / 相册 /
-  主动消息 / 铁律 / 设置 ×2 / 调试 / 插件管理 / Bilibili），含 SSE 实时推送（思考态 / 工具阶段 / 沉默终止态）。
+- **首启引导（onboarding）**：全新部署打开控制台 → 5 步向导：她是谁 → 模型连接（真实测连通 + 延迟）
+  → 人格 → 接入微信（可跳过）→ 完成；状态存 `global_settings.onboarding`，管理员可一键重置重走。
+- **控制台（重写）**：Vue 3.5 + Vite + Tailwind 4 + [@felinic/ui](https://github.com/felinics/ui) 设计系统，
+  22 条真 URL 路由按使用逻辑分五组——**对话 / 她（角色卡·世界书·铁律·成长·相册·日记）/ 记忆 / 主动 /
+  连接（微信·Telegram·QQ·Discord·Bilibili·联系人·账号绑定）/ 系统（概览·设置·插件·调试）**；
+  含 SSE 实时推送（思考态 / 工具阶段 / 沉默终止态）。
 
 ## 结构
 
@@ -33,7 +38,7 @@
 |---|---|
 | `harness/` | 基座：[DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) fork（vendor 于固定 commit），继承插件系统 / MCP / skills / 定时任务 / LLM 适配器 |
 | `harness/packages/littly/` | 业务插件（从旧项目逐行移植）：`storage` `persona` `memory` `agents` `tools` `voice` `voice-call` `growth` `scheduler` `console-api` `mcp` `bili` + 渠道 `channel-snowluma` `channel-telegram` `channel-wechat-ilink` `channel-qq-official` `channel-discord` |
-| `console/` | React 19 + MUI v7 控制台（Vite + 真 URL 路由） |
+| `console/` | Vue 3.5 + Vite + Tailwind 4 + `@felinic/ui` 控制台（真 URL 路由，五组导航 + 首启引导；`packages/ui` 为 vendored 设计系统） |
 | `sidecars/bili/` | bili-cli（bili-agent）HTTP wrapper sidecar —— AI 自己的 bilibili 账号 |
 | `deploy/` | 容器编排（harness + SnowLuma + bili sidecar） |
 | `docs/` | [宪法](docs/PRINCIPLES.md) · [移植指南](docs/PORTING-GUIDE.md) · [部署与验收](docs/DEPLOY.md) · [SnowLuma 契约](docs/SNOWLUMA-CONTRACT.md) · [bilibili 接入](docs/BILI-INTEGRATION.md) |
@@ -45,6 +50,7 @@
 docker build -f deploy/Dockerfile -t littly-harness .
 docker run -d -p 3000:3000 -v littly-data:/app/data littly-harness
 # → http://localhost:3000/ ，注册第一个账号即管理员
+# 打开即进入「首启引导」：填模型 → 确认她是谁 → 可选扫码接微信 → 完成；
 # 首次打开控制台会自动播种：bot「小璃」+ 完整铁律 + 演示角色卡 + 三条世界书，
 # 不用先去后台点任何东西就能直接开聊。
 ```
@@ -54,8 +60,12 @@ docker run -d -p 3000:3000 -v littly-data:/app/data littly-harness
 ## 验收
 
 ```sh
-cd harness && pnpm run build:artifacts      # 构建门禁
-for s in scripts/verify-*.mjs; do node "$s"; done   # 行为断言
+cd harness && pnpm run build:artifacts      # 构建门禁（7 gate）
+for s in scripts/verify-*.mjs; do node "$s"; done   # 行为断言（含 verify-wechat / 主链路）
+
+# 控制台（Vue3）
+cd console && pnpm install && pnpm run build   # 产物 dist/，由 console-api 托管
+cd console && pnpm run dev                     # 5173，/api 代理到 3000
 ```
 
 15 个脚本、615 条行为断言 + 61 条端到端 + 15 条扫码链路，覆盖记忆 v2、成长三铁律、

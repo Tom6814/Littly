@@ -25,6 +25,8 @@ services:
       DSH_HOME: /app/data/dsh-home
       # 业务库落在持久卷（容器重建不丢库）
       LITTLY_DB_FILE: /app/data/littly.db
+      # B11：上传/生成文件（相册/文档/语音/头像）与 SQLite 同卷，重建容器不丢
+      LITTLY_DATA_DIR: /app/data
       # bilibili sidecar（MCP/元工具共用同一份账号状态）
       BILI_SIDECAR_URL: http://bili:3010
       BILI_SIDECAR_TOKEN: ${BILI_SIDECAR_TOKEN:-}

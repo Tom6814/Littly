@@ -45,17 +45,24 @@ if [ "$READY" = "1" ]; then
   echo "--- compose 栈内 e2e（先注册管理员，首个用户即 admin）---"
   curl -s -o /dev/null -w "register=%{http_code}\n" -X POST "http://127.0.0.1:3100/api/auth/register" \
     -H 'content-type: application/json' -d '{"username":"owner","password":"owner-pass-123"}'
-  if LITTLY_E2E_USER=owner LITTLY_E2E_PASS=owner-pass-123 node "$HERE/scripts/verify-e2e.mjs" 3100; then
+  if LITTLY_E2E_USER=owner LITTLY_E2E_PASS=owner-pass-123 node "$HERE/verify-e2e.mjs" 3100; then
     echo ">>> compose 栈内 e2e：通过"
   else
     echo ">>> compose 栈内 e2e：失败"; FAIL=1
   fi
   echo
   echo "--- compose 网络内 bili 扫码链路（harness → http://bili:3010）---"
-  if node "$HERE/scripts/verify-bili-sidecar.mjs" 3100; then
+  if node "$HERE/verify-bili-sidecar.mjs" 3100; then
     echo ">>> 扫码链路：通过"
   else
     echo ">>> 扫码链路：失败"; FAIL=1
+  fi
+  echo
+  echo "--- 微信 iLink mock 套件（绑定/收发/窗口）---"
+  if node "$HERE/verify-wechat.mjs"; then
+    echo ">>> 微信 mock：通过"
+  else
+    echo ">>> 微信 mock：失败"; FAIL=1
   fi
 fi
 

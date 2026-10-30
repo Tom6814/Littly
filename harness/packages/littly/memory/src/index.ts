@@ -42,6 +42,14 @@ function markProtected(rows: MemoryRow[]): MemoryHit[] {
   return rows.map((r) => (protectedIds.has(r.id) ? { ...r, protected: true } : { ...r }))
 }
 
+/** B14：把 remember 的 expiresAt 归一化为 valid_until（非法/空 → null）。 */
+export function normalizeValidUntil(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined || raw.trim() === '') return null
+  const ms = Date.parse(raw)
+  if (Number.isNaN(ms)) return null
+  return new Date(ms).toISOString()
+}
+
 export class LittlyMemory {
   private readonly ctx: Context
   private readonly storage: LittlyStorage
@@ -210,8 +218,10 @@ export class LittlyMemory {
       return drift ? { ...receipt, drift } : receipt
     }
     const id = randomUUID()
+    // B14：expiresAt → valid_until（有时效的事实到期后不再进上下文，但永不物理删除）。
+    const validUntil = normalizeValidUntil(item.expiresAt)
     this.storage.prepare(
-      'INSERT INTO memories (id, bot_id, contact_id, sender, category, content, importance, event_time, event_time_raw, recorded_at, provenance, volatility, tags, derived_from, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO memories (id, bot_id, contact_id, sender, category, content, importance, event_time, event_time_raw, recorded_at, provenance, volatility, tags, derived_from, created_at, valid_until) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     ).run(
       id, botId, null, sender,
       item.category ?? 'fact',
@@ -221,6 +231,7 @@ export class LittlyMemory {
       item.provenance ?? 'observed',
       item.category === 'thought' ? 'state' : 'stable',
       '[]', '[]', now,
+      validUntil,
     )
     // 预嵌入 fire-and-forget；失败由检索懒回填兜底
     void (async () => {
@@ -307,11 +318,23 @@ export class LittlyMemory {
     let compressed = 0
     let kept = 0
     const now = new Date().toISOString()
+    // B14：归属硬校验 —— 只允许操作本次 (bot_id, sender) 范围内的记忆行，
+    // 模型幻觉出的 id（包括其他 bot / 其他联系人的记忆）一律忽略，绝不按裸 id 改库。
+    const ownedIds = new Set(input.map((m) => m.id))
     for (const op of ops) {
       if (op.op === 'DELETE' && op.id && !hardIds.has(op.id)) {
-        this.storage.prepare('UPDATE memories SET deleted_at = ?, deleted_reason = ? WHERE id = ? AND deleted_at IS NULL').run(now, op.reason ?? '整理淡忘', op.id)
+        if (!ownedIds.has(op.id)) {
+          kept++
+          continue
+        }
+        this.storage.prepare('UPDATE memories SET deleted_at = ?, deleted_reason = ? WHERE id = ? AND bot_id = ? AND sender = ? AND deleted_at IS NULL')
+          .run(now, op.reason ?? '整理淡忘', op.id, botId, sender)
         deleted++
       } else if (op.op === 'COMPRESS' && op.ids?.length && op.mergedContent && !op.ids.some((x) => hardIds.has(x))) {
+        if (!op.ids.every((x) => ownedIds.has(x))) {
+          kept++
+          continue
+        }
         const sources = this.all<MemoryRow>(`SELECT * FROM memories WHERE id IN (${op.ids.map(() => '?').join(',')})`, ...op.ids)
         if (sources.length >= 2) {
           const id = randomUUID()
@@ -320,7 +343,8 @@ export class LittlyMemory {
           ).run(id, botId, null, sender, 'profile', op.mergedContent, Math.min(5, Math.max(1, op.mergedImportance ?? 2)), now, '', now, 'inferred', 'stable', '[]', JSON.stringify(op.ids), now)
           for (const s of sources) {
             // v2：被合并者进入取代链（supersede），淡忘原因记录取代目标
-            this.storage.prepare('UPDATE memories SET deleted_at = ?, deleted_reason = ?, superseded_by = ?, consolidated = 1 WHERE id = ?').run(now, '已合并', id, s.id)
+            this.storage.prepare('UPDATE memories SET deleted_at = ?, deleted_reason = ?, superseded_by = ?, consolidated = 1 WHERE id = ? AND bot_id = ? AND sender = ?')
+              .run(now, '已合并', id, s.id, botId, sender)
           }
           compressed++
         }

@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { BotRow, LittlyStorage } from '@littly/storage'
+import { downloadsDir, type BotRow, type LittlyStorage } from '@littly/storage'
 import { promoteContact, tryHandleBinding } from './binding.ts'
 import { sendDiscordText, type DiscordAuthor, type DiscordDeps, type DiscordMessage } from './client.ts'
 
@@ -97,7 +97,8 @@ function extFor(contentType: string | null): string {
 }
 
 async function importPhotos(deps: DiscordDeps, bot: BotRow, sender: string, urls: string[]): Promise<void> {
-  const dir = join(process.cwd(), 'public', 'downloads', 'photos')
+  // B11：落持久卷（LITTLY_DATA_DIR/downloads/photos），URL 不变。
+  const dir = join(downloadsDir(), 'photos')
   mkdirSync(dir, { recursive: true })
   for (const url of urls.slice(0, MAX_IMPORT_IMAGES)) {
     try {
@@ -117,6 +118,21 @@ async function importPhotos(deps: DiscordDeps, bot: BotRow, sender: string, urls
 }
 
 /**
+ * B6：Discord 语义判 DM。
+ *
+ * 旧实现用 `msg.channel_type !== 1` 判私聊 —— 但 Gateway 的 MESSAGE_CREATE
+ * payload 里 `channel_type` 并不保证存在（只有 REST 的 Channel 对象有），
+ * 于是 `undefined !== 1` 恒成立 → 所有私聊消息被当群聊丢掉。
+ * 正确语义：**没有 guild_id 就是私聊**（Discord 文档：DM 消息不带 guild_id）。
+ * 若事件显式带了 channel_type，则以它为准（1 = DM），兼容 REST 形状的 fixture。
+ */
+export function isDirectMessage(msg: Pick<DiscordMessage, 'guild_id' | 'channel_type'>): boolean {
+  if (typeof msg.guild_id === 'string' && msg.guild_id !== '') return false
+  if (typeof msg.channel_type === 'number') return msg.channel_type === 1
+  return true
+}
+
+/**
  * 入站主入口：MESSAGE_CREATE → 绑定拦截 → 联系人 → 缓冲入队。
  * @param deps - 插件依赖（存储 / hub / 日志）。
  * @param bot - bot 行。
@@ -125,8 +141,8 @@ async function importPhotos(deps: DiscordDeps, bot: BotRow, sender: string, urls
 export async function handleDiscordMessage(deps: DiscordDeps, bot: BotRow, msg: DiscordMessage): Promise<void> {
   const author = msg.author
   if (!author?.id || author.bot) return
-  // 只处理私聊（DM）；群聊忽略（拟真陪伴以单聊为主）
-  if (msg.channel_type !== 1) return
+  // 只处理私聊（DM）；群聊忽略（拟真陪伴以单聊为主）。B6：无 guild_id 即 DM。
+  if (!isDirectMessage(msg)) return
   const { text, images } = extractDiscordContent(msg)
   if (!text && images.length === 0) return
   const userId = author.id

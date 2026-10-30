@@ -19,6 +19,7 @@ import {
   parseDimensions,
   parseChanges,
   validateProposalChanges,
+  validateValueExclusions,
 } from './types.ts'
 import { isMonthEndWindow, nextMonthEnd, shanghaiMonthKey, fmtShanghai } from './timing.ts'
 import {
@@ -250,10 +251,15 @@ export async function runGrowthEvaluation(
   const seed = firstProfile(storage, botId)
   const seedDims = seed && seed.version !== active.version ? parseDimensions(seed.dimensions) : null
   const v1 = validateProposalChanges(baseDims, seedDims, changes, validEvidenceIds)
-  let kept = changes.filter((c) => !v1.errors.some((err) => err.includes(c.dimension)))
+  // B10：价值禁区硬校验（空列表 = 明确 no-op）—— 触碰禁区的维度整条剔除。
+  const vZone = validateValueExclusions(active.value_exclusions, changes)
+  const allErrors = [...v1.errors, ...vZone.errors]
+  let kept = changes.filter(
+    (c) => !allErrors.some((err) => err.includes(c.dimension)),
+  )
   if (kept.length === 0) {
-    writeAudit(storage, botId, 'evaluate_invalid', `errors=${v1.errors.join('; ')}`)
-    return { status: 'adversarial-rejected', reason: `全部变更未通过铁律校验: ${v1.errors.join('; ')}` }
+    writeAudit(storage, botId, 'evaluate_invalid', `errors=${allErrors.join('; ')}`)
+    return { status: 'adversarial-rejected', reason: `全部变更未通过铁律校验: ${allErrors.join('; ')}` }
   }
 
   // --- 事实审计（§幻觉治理）：对照对话原文逐条核实证据，失真证据剔除 ---

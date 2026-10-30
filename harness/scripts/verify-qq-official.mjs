@@ -253,7 +253,34 @@ ok(sendCall?.url === `${QQ_API}/v2/users/OPENID-2/messages`, '发送地址 = /v2
 ok(sendCall?.init?.headers?.Authorization === 'QQBot TOKEN-1', 'Authorization = QQBot <access_token>')
 const sendBody = lastSendBody()
 ok(sendBody?.content === '你好呀' && sendBody?.msg_type === 0, '发送体 = content + msg_type 0')
-ok(!('event_id' in (sendBody ?? {})), '主动推送不带 event_id（旧实现一致）')
+// B7：主链路出站现在会自动带最近入站 event_id（OPENID-2 之前发过 EVT-1）——
+// 修复前这里恒为主动推送，4 条/月配额用光就发不出去。
+ok(sendBody?.event_id === 'EVT-1', 'B7：主链路回复自动带最近入站 event_id（被动回复窗口）')
+
+// B7：TTL 60 分钟 —— 过期后回退为主动推送；不同 (bot,openid) 互不串
+{
+  const { rememberQqEvent, recallQqEvent, QQ_EVENT_TTL_MS, clearQqEvents } = await import(
+    '../packages/littly/channel-qq-official/src/event-context.ts'
+  )
+  clearQqEvents()
+  rememberQqEvent('b1', 'o1', 'E1', 1000)
+  ok(recallQqEvent('b1', 'o1', 1000) === 'E1', 'B7：同 (bot,openid) 取回 event_id')
+  ok(recallQqEvent('b1', 'o1', 1000 + QQ_EVENT_TTL_MS) === 'E1', 'B7：TTL 边界内仍有效')
+  ok(recallQqEvent('b1', 'o1', 1000 + QQ_EVENT_TTL_MS + 1) === undefined, 'B7：超过 60 分钟 → 过期回退主动推送')
+  ok(recallQqEvent('b2', 'o1', 1000) === undefined, 'B7：按 botId 隔离')
+  ok(recallQqEvent('b1', 'o2', 1000) === undefined, 'B7：按 openid 隔离')
+  rememberQqEvent('b1', 'o1', 'E2', 2000)
+  ok(recallQqEvent('b1', 'o1', 2000) === 'E2', 'B7：新入站覆盖旧 event_id')
+  rememberQqEvent('b1', 'o1', undefined, 3000)
+  ok(recallQqEvent('b1', 'o1', 3000) === 'E2', 'B7：无 event_id 的入站不清空已有上下文')
+  ok(QQ_EVENT_TTL_MS === 60 * 60 * 1000, 'B7：TTL = 60 分钟（QQ 被动回复窗口）')
+  clearQqEvents()
+  // 清空后主链路回退为主动推送
+  const plain = await sendQqText(deps, 'bot-qq', 'qq_OPENID-2', '清空后')
+  ok(plain.ok === true, 'B7：清空上下文后仍可发送')
+  const plainBody = lastSendBody()
+  ok(!('event_id' in (plainBody ?? {})), 'B7：无上下文时走主动推送（不带 event_id）')
+}
 ok(tokenCalls === 1, 'access_token 复用缓存（只换一次）')
 const cachedToken = storage.prepare('SELECT qq_access_token, qq_token_expires_at FROM bots WHERE id = ?').get('bot-qq')
 ok(cachedToken?.qq_access_token === 'TOKEN-1', 'access_token 落库缓存')

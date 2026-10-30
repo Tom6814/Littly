@@ -10,7 +10,7 @@ import type { LittlyMcpManager } from '@littly/mcp'
 import type { PluginManager } from '@deepseek-ai/dsh-plugin-manager'
 import type { SkillRegistry } from '@deepseek-ai/dsh-skill'
 import type { SessionManager } from './auth.ts'
-import type { Router, ApiRequest } from './http.ts'
+import { err, type Router, type ApiRequest } from './http.ts'
 
 export interface Deps {
   storage: LittlyStorage
@@ -70,4 +70,36 @@ export function loadBot(d: Deps, botId: string | undefined): BotRow | null {
 
 export function nowIso(): string {
   return new Date().toISOString()
+}
+
+/**
+ * B3：内容域归属 —— admin 或 bot.owner_id === 当前用户。
+ * 空 owner（旧库/播种 bot）视为「仅 admin 可管理」，不把无主资源开放给任意注册用户。
+ */
+export function botOwnedBy(ctx: ApiRequest, d: Deps, botId: string): boolean {
+  if (isAdmin(ctx)) return true
+  const user = ctx.user
+  if (user === null || botId === '') return false
+  const row = d.storage.prepare('SELECT owner_id FROM bots WHERE id = ?').get(botId) as { owner_id?: string } | undefined
+  return row !== undefined && typeof row.owner_id === 'string' && row.owner_id !== '' && row.owner_id === user.id
+}
+
+/** 校验 bot 归属；无权限时回 403 并返回 false。 */
+export function requireBotAccess(ctx: ApiRequest, d: Deps, botId: string): boolean {
+  if (botOwnedBy(ctx, d, botId)) return true
+  err(ctx.res, 403, 'forbidden', '无权访问该角色')
+  return false
+}
+
+/**
+ * B3：按资源行上的 bot_id 做归属校验。
+ * 行没有 bot_id（字符卡级资源）时只允许 admin —— 避免无主资源对任意注册用户开放。
+ */
+export function requireRowBotAccess(ctx: ApiRequest, d: Deps, botId: string | null | undefined): boolean {
+  if (botId === undefined || botId === null || botId === '') {
+    if (isAdmin(ctx)) return true
+    err(ctx.res, 403, 'forbidden', '无权访问该角色的内容')
+    return false
+  }
+  return requireBotAccess(ctx, d, botId)
 }
