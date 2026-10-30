@@ -12,6 +12,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { LittlyStorage } from '@littly/storage'
+import { promoteContact as promoteContactShared } from '@littly/agents'
 
 /** 绑定码有效期（毫秒）。 */
 export const BIND_TTL_MS = 10 * 60 * 1000
@@ -159,12 +160,7 @@ export async function tryHandleBinding(storage: LittlyStorage, ctx: BindingConte
  * @param channel - 渠道键（discord）。
  * @param externalId - 渠道外部 id（discord user id）。
  */
+/** 正常消息路径的晋升（实现收敛到 @littly/agents 的共享 promoteContact）。 */
 export function promoteContact(storage: LittlyStorage, botId: string, channel: string, externalId: string): void {
-  const identity = storage
-    .prepare('SELECT user_id FROM channel_identities WHERE channel = ? AND external_id = ?')
-    .get(channel, externalId) as { user_id: string } | undefined
-  if (!identity) return
-  storage
-    .prepare('UPDATE contacts SET user_id = ? WHERE bot_id = ? AND user_id IS NULL AND (sender = ? OR external_id = ?)')
-    .run(identity.user_id, botId, externalId, externalId)
+  promoteContactShared(storage, botId, channel, externalId)
 }

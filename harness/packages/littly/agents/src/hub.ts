@@ -17,6 +17,7 @@ import { getActiveGrowthText } from '@littly/growth'
 import { createToolRegistry, extractTextToolCall, getDisabledTools, type ChannelBridge, type ToolExecCtx, type ToolExecResult } from '@littly/tools'
 import { HUMANIZE_CHAT_STYLE, pieceDelays, sleep, splitHumanized, type HumanizeConfig } from './humanize.ts'
 import { fixParenPerson, looksCrisis, looksGarbled, stripThinkingText } from './postprocess.ts'
+import { resolveContact } from './contacts.ts'
 import { historyCharBudget, resolveHistoryTake, trimHistoryByBudget } from './history.ts'
 import type { DshToolBridge } from './dsh-bridge.ts'
 
@@ -191,10 +192,13 @@ export class LittlyHub {
   enqueueBufferedMessage(input: { botId: string; sender: string; text: string; channelId: string }): { messageId: string; fireAt: string } {
     const now = new Date()
     const fireAt = new Date(now.getTime() + BUFFER_MIN_MS + Math.random() * BUFFER_RANGE_MS)
-    // 确保联系人行存在（channel 适配器可先行 upsert 更详细信息；这里兜底）
-    this.storage.prepare(
-      "INSERT INTO contacts (id, bot_id, sender, name, channel, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM contacts WHERE bot_id = ? AND sender = ?)",
-    ).run(randomUUID(), input.botId, input.sender, input.sender, input.channelId, now.toISOString(), now.toISOString(), input.botId, input.sender)
+    // 确保联系人行存在且已按用户身份关联（channel 适配器可先行 upsert 更详细信息；这里兜底）。
+    // 旧实现的 bug：name 写成 sender（用户 UUID/邮箱）且 user_id/is_owner 为空 → 界面出现「陌生新联系人」。
+    try {
+      resolveContact(this.storage, input.botId, input.sender, { channel: input.channelId })
+    } catch (error) {
+      this.log('resolveContact 失败（不阻断入站）: %s', String(error))
+    }
     const id = randomUUID()
     this.storage.prepare(
       "INSERT INTO messages (id, bot_id, sender, role, content, reply_type, buffer_status, buffer_fire_at, channel_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -280,6 +284,12 @@ export class LittlyHub {
     const isBuffered = !!req.bufferedBatchIds?.length
     const bot = this.storage.prepare('SELECT * FROM bots WHERE id = ?').get(req.botId) as never as { [k: string]: unknown } | undefined
     if (!bot) throw new Error('bot not found')
+    // web/直接调用 runTurn 的路径也必须保证联系人存在且已关联（跨平台同一用户=同一联系人）。
+    try {
+      resolveContact(this.storage, req.botId, req.sender, { channel: req.channelId ?? '' })
+    } catch (error) {
+      this.log('resolveContact 失败（不阻断对话）: %s', String(error))
+    }
     const botRow = bot as unknown as {
       name: unknown
       ai_max_history: number; ai_temperature: number; ai_model: string; ai_humanize_enabled: number; ai_humanize_wechat: number;

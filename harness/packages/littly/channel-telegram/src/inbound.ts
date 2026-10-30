@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import type { LittlyStorage, BotRow } from '@littly/storage'
 import type { LittlyHub } from '@littly/agents'
 import { promoteContact, tryHandleBinding } from './binding.ts'
+import { resolveContact } from '@littly/agents'
 import { senderFromTgUser, tgDisplayName, tgSendMessage, type TgMessage } from './telegram.ts'
 
 export interface TgChannelDeps {
@@ -78,6 +79,11 @@ export async function handleTelegramMessage(deps: TgChannelDeps, bot: BotRow, ms
       .run(randomUUID(), bot.id, sender, name, privateExternal, 'tg', tgHandle, now, now)
   }
   promoteContact(deps.storage, bot.id, 'tg', String(from.id))
+  resolveContact(deps.storage, bot.id, sender, {
+    channel: 'tg',
+    externalId: privateExternal !== '' ? privateExternal : String(from.id),
+    ...(name !== '' ? { name } : {}),
+  })
 
   // §buffer — 落库即入缓冲；hub 自行调度到期合并投递（旧项目的手动 waiter 由 hub 取代）
   deps.hub.enqueueBufferedMessage({ botId: bot.id, sender, text, channelId: 'tg' })

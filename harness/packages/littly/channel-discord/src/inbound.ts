@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { downloadsDir, type BotRow, type LittlyStorage } from '@littly/storage'
 import { promoteContact, tryHandleBinding } from './binding.ts'
 import { sendDiscordText, type DiscordAuthor, type DiscordDeps, type DiscordMessage } from './client.ts'
+import { resolveContact } from '@littly/agents'
 
 /** 单条消息最多收录进相册的图片数（旧 importImages 的 slice(0, 5)）。 */
 const MAX_IMPORT_IMAGES = 5
@@ -80,11 +81,13 @@ export function upsertDiscordContact(
     deps.storage
       .prepare('UPDATE contacts SET name = ?, channel = ?, external_id = ?, updated_at = ? WHERE id = ?')
       .run(displayName, 'discord', externalId, now, existing.id)
+    resolveContact(deps.storage, bot.id, sender, { channel: 'discord', externalId: dmChannelId })
     return
   }
   deps.storage
     .prepare('INSERT INTO contacts (id, bot_id, sender, name, external_id, channel, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
     .run(randomUUID(), bot.id, sender, displayName, dmChannelId, 'discord', now, now)
+  resolveContact(deps.storage, bot.id, sender, { channel: 'discord', externalId: dmChannelId })
 }
 
 // --- 图片入库（fire-and-forget，best effort） ---

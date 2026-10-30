@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto'
 import type { BotRow, LittlyStorage } from '@littly/storage'
 import type { LittlyHub } from '@littly/agents'
 import { promoteContact, tryHandleBinding } from './binding.ts'
+import { resolveContact } from '@littly/agents'
 import { ILinkClient, type ILinkCredentials } from './ilink-client.ts'
 import { getContextTokenState, getCredentials, hasFreshContextToken } from './ilink-store.ts'
 
@@ -90,6 +91,7 @@ export async function processWechatMessage(
       .run(randomUUID(), bot.id, sender, fromUser, fromUser, WECHAT_CHANNEL_ID, now, now)
   }
   promoteContact(deps.storage, bot.id, WECHAT_CHANNEL_ID, fromUser)
+  resolveContact(deps.storage, bot.id, sender, { channel: WECHAT_CHANNEL_ID, externalId: fromUser })
 
   // 4) 分发：默认缓冲（hub 到期后 runTurn channelId='wechat'）；direct 模式立即 runTurn
   if (deps.dispatch !== undefined) {

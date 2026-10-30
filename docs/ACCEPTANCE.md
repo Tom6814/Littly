@@ -418,3 +418,16 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 | 前端 | 新页面 `/channels/email`（连接组「邮箱」）：未绑定表单（地址/IMAP/SMTP/TLS/授权码/发件人名 + 服务商提示）+ 测试连接（IMAP/SMTP 分开结果）；已绑定状态卡 + 收件箱预览（10 封，点开正文/附件）+ 搜索 + 写开关 + 发测试邮件 + 解绑；onboarding「给她账号」新增「邮箱」卡 |
 | 验证 | `verify-mail` **111/0**（fake IMAP/SMTP，不联网）；`build:artifacts` 7/7；`verify-e2e` **98/0**（+4）；3000 真机：保存假配置 → status 掩码 → test 返回可读失败（ENOTFOUND）→ cmd list 502 可读错误 → 删除清理 |
 | 限制 | 真实收发需用户自己的 IMAP/SMTP 授权码；本任务用注入 fake 完成协议层验证 |
+
+### 11.6 修复：联系人身份关联（跨平台同一用户 = 同一联系人，2026-10-31）
+
+用户反馈：聊天过程中会自动创建一个「跟我没有关联」的新联系人（独立、陌生）。
+
+| 根因 | 修复 |
+|---|---|
+| `hub.enqueueBufferedMessage` 兜底建联系人时 `name=sender`（UUID/邮箱）且 `user_id/is_owner` 空 | 新建 `agents/src/contacts.ts` 统一权威实现 `resolveContact()`：`users.id` 命中 → `user_id=sender`、`name=username`、`is_owner=(bots.owner_id===sender)`；否则用 `channel_identities(channel, external_id)` 反查；`name` 绝不用裸 id |
+| 各渠道 inbound 建联系人只写 sender/external_id/channel，不写 `user_id`；旧 `promoteContact` 只按 `sender=external_id` 匹配，web 场景永远补不上 | 四个渠道（qq/wechat/discord/telegram）inbound 全部接入；`promoteContact` 兼容 `sender=用户id`/`sender=外部id`/`external_id=外部id` 三种匹配，补 user_id/name/is_owner |
+| 存量库有 `user_id` 空行（如 goldwhale），`is_owner` 不一致 | `repairContacts()` 幂等修复（不删行/不改消息），agents 启动时执行一次；日志 `[contacts] repaired N`，第二次 0 变更 |
+| 群聊 external_id 会污染私聊投递地址 | `resolveContact({persistExternal:false})`：群聊只建联系人、不落投递地址 |
+
+验证：`verify-contacts` **52/0**（web 首聊、跨平台只一行、未绑定→绑定补齐、不同 bot 隔离、repair 幂等、不误伤）；`build:artifacts` 7/7；`verify-e2e` **96/0**（+2 contacts 断言）；3000 真机：新建角色 → web 首聊 → 联系人行为 `name=tori / sender=用户id / channel=web / is_owner=1 / user_id=用户id`（不再是 UUID 陌生人）；存量 goldwhale 行已被 repair 补齐 `user_id`。

@@ -172,6 +172,11 @@ if (botIdQ) {
   const hist = await api(`/api/messages?botId=${encodeURIComponent(botIdQ)}&sender=${encodeURIComponent(myId)}`)
   const texts = (hist.json?.data?.messages ?? []).map((m) => m.text ?? m.content ?? '')
   ok(texts.includes(probe), '以登录用户身份发的消息进了历史')
+  // 联系人身份关联：web 首聊后联系人应关联到登录用户（user_id=用户id、name=username，不是 UUID）
+  const contacts = await api(`/api/contacts?botId=${encodeURIComponent(botIdQ)}`)
+  const mine = (contacts.json?.data?.contacts ?? []).find((c) => c.id === myId)
+  ok(contacts.status === 200 && mine?.userId === myId, 'web 首聊后联系人 user_id 关联到登录用户（不再是无关联新联系人）')
+  ok(mine?.name === username && mine?.name !== myId, '联系人 name = username（不是用户 UUID/邮箱）')
 } else {
   console.log('  （跳过：库里没有 bot）')
 }

@@ -18,6 +18,7 @@ import { downloadsDir, type BotRow, type LittlyStorage } from '@littly/storage'
 import type { LittlyHub } from '@littly/agents'
 import type { InboundMessage } from './adapters/base.ts'
 import { promoteContact, tryHandleBinding } from './binding.ts'
+import { resolveContact } from '@littly/agents'
 import type { QqChannelKind, QqChannelManager } from './manager.ts'
 
 /** 入站处理依赖。 */
@@ -152,6 +153,14 @@ export async function handleInboundMessage(deps: QqInboundDeps, bot: BotRow, kin
       .run(randomUUID(), bot.id, sender, name, privateExternal, meta.identityChannel, now, now)
   }
   promoteContact(deps.storage, bot.id, meta.identityChannel, externalId)
+  // 兜底：确保 user_id/name/is_owner 与用户身份一致（跨平台同一用户=同一联系人）
+  resolveContact(deps.storage, bot.id, sender, {
+    channel: meta.identityChannel,
+    externalId,
+    // 群聊的 external_id 绝不落库（投递地址只由私聊落库，避免污染私聊目标）
+    persistExternal: message.kind === 'private',
+    ...(message.senderName !== '' ? { name: message.senderName } : {}),
+  })
   deps.manager.noteInbound(bot.id, sender, {
     kind: message.kind,
     externalId: message.kind === 'group' ? message.externalId : externalId,
