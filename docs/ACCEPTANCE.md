@@ -352,3 +352,15 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 | 下线 | `channel-snowluma`、`channel-qq-official`、`verify-qq-official.mjs`、supervisor 实验包全部删除；bots 表 `qq_*`/`snowluma_*` 列保留兼容 |
 | 前端 | `/channels/qq` 双 Tab（SnowLuma / 官方 QQBot）＋ onboarding「给她账号」QQ 卡联动 |
 | 验证 | `verify-channel-qq` **66/0**；`build:artifacts` 7/7；`verify-e2e` **71/0**（+4 QQ）；onboarding 19/0；其余脚本不回归；3000 实测 `/api/qq/status` 200、`/channels/qq` 200 |
+
+### 11.1 账号绑定并入渠道页（2026-10-31）
+
+用户要求去掉独立 `/bind` 页面，把账号绑定并入各渠道页：
+
+| 项 | 内容 |
+|---|---|
+| 新组件 | `components/AccountBindSection.vue`（channel/title?/hint?）：10 分钟绑定码、复制、instruction、已绑列表、解绑确认 |
+| 接入 | ChannelConfigPage（TG/Discord）复用；WechatPage 加 `channel=wechat`；QqPage 两个 Tab 均用 `qqp`（channel-qq 只消费 `qqp_code`，`qq_code` 保留历史兼容） |
+| 删除 | `/bind` 路由、导航「账号绑定」项、`pages/bind/` 目录（api 迁到 `api/bind.ts`） |
+| 顺手修复 | ChannelConfigPage 曾把 `telegram` 直接当绑定 key → 后端 400；现映射 `telegram → tg`，绑定码可用 |
+| 验证 | console build ✓ / typecheck 0 / check-icons ✓；3115 scratch 逐渠道绑定码接口 200/400 符合预期；3000 `GET /api/bind/status` 200 |
