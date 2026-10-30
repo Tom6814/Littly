@@ -157,6 +157,23 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 
 `scripts/verify-seed.mjs`（40 项）逐条锁定。
 
+## 6.8 编排与健康检查（真跑 compose 才暴露的两个坑）
+
+之前只对 `docker-compose.yml` 做了 YAML 结构校验。装上 compose 插件**真跑**之后，
+连着挖出两个真缺陷：
+
+| 坑 | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| compose 默认起不来 | `docker compose up` 直接报 `service "littly" depends on undefined service "bili": invalid compose project` | `littly` 依赖 `bili`，而 `bili` 带 `profiles: ["bili"]` —— 默认 profile 集合里它根本不存在 | 依赖改成可选（`required: false` + `condition: service_started`）：默认 `up` 只起 harness，bili 缺席时优雅降级；`--profile bili` 才一起起 |
+| 容器永远 unhealthy | 每个容器都显示 unhealthy，编排里 `depends_on: service_healthy` 永远等不到 | 镜像的 HEALTHCHECK 探 `127.0.0.1`，但 dsh 拒绝 0.0.0.0 通配绑定、entrypoint 让它绑容器自身 IP（实测 172.18.0.3:3000） | entrypoint 把实际绑定地址写到 `/tmp/littly-web-host`；HEALTHCHECK 读它（读不到就退回网卡地址探测），探的才是真正在监听的地址 |
+
+验证：
+
+- `docker compose config` 三档全过：default / `--profile bili` / `--profile bili --profile qq`
+- compose 栈真起（harness + bili sidecar 同网络）：harness 走 compose 网络内的
+  `http://bili:3010`，扫码链路 15 项全过（二维码解出来校验 PNG 魔数）
+- 容器健康检查从 unhealthy 变成 healthy（容器验收脚本新增这一条断言，120s 内等不到就判失败）
+
 ## 7. 部署级验证（真实容器）
 
 `scripts/verify-container.sh` 起真实容器后逐项断言：
