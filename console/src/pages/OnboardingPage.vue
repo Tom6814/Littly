@@ -1,22 +1,47 @@
 <script setup lang="ts">
 /**
  * 首次引导向导（5 步，全屏）：
- *   1 她是谁 → 2 模型连接（真实测试）→ 3 人格 → 4 接入微信（可跳过）→ 5 完成
+ *   1 她是谁 → 2 模型连接（真实测试）→ 3 人格 → 4 给她账号（平台卡片，可跳过）→ 5 完成
  * 关键写操作都走后端：模型设置 /api/settings/ai、角色卡 /api/characters、
  * 完成态 /api/onboarding/complete（契约接口未就绪时本地降级，不阻塞流程）。
+ * 第 4 步「给她账号」把她的各平台账号接进来：
+ *   微信/Bilibili/X 内联快速配置；Telegram/QQ/Discord 跳到 /channels/<x>?from=onboarding。
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  Badge,
   Button,
   CalloutBanner,
   FieldStack,
   Input,
+  SegmentedControl,
   Spinner,
+  SurfaceCard,
   Textarea,
 } from '@felinic/ui'
-import { BookHeart, Check, Heart, SkipForward } from 'lucide-vue-next'
-import { charactersApi, personaApi, settingsApi, wechatApi } from '@/api/endpoints'
+import {
+  BookHeart,
+  Bot,
+  Check,
+  Gamepad2,
+  Heart,
+  MessageCircle,
+  Send,
+  SkipForward,
+  Tv,
+  Twitter,
+} from 'lucide-vue-next'
+import {
+  biliApi,
+  botsApi,
+  channelsApi,
+  charactersApi,
+  personaApi,
+  settingsApi,
+  wechatApi,
+  xApi,
+} from '@/api/endpoints'
 import { ApiError } from '@/api/client'
 import { useBots } from '@/stores/bots'
 import { useOnboardingStore } from '@/stores/onboarding'
@@ -26,7 +51,7 @@ const onboarding = useOnboardingStore()
 const bots = useBots()
 
 const step = ref(1)
-const STEP_LABELS = ['她是谁', '模型连接', '人格', '接入微信', '完成'] as const
+const STEP_LABELS = ['她是谁', '模型连接', '人格', '给她账号', '完成'] as const
 
 const saving = ref(false)
 const error = ref('')
@@ -59,7 +84,33 @@ const persona = reactive({
 const presets = ref<Array<{ id: string; name: string; data: Record<string, unknown> }>>([])
 const rules = ref('')
 
-/* ---------------- 步骤 4：微信 ---------------- */
+/* ---------------- 步骤 4：给她账号 ---------------- */
+type PlatformId = 'wechat' | 'bilibili' | 'telegram' | 'qq' | 'discord' | 'x'
+
+interface PlatformView {
+  id: PlatformId
+  name: string
+  icon: typeof MessageCircle
+  statusText: string
+  badgeVariant: 'success' | 'info' | 'warning' | 'outline'
+  actionLabel: string
+  actionDisabled: boolean
+  /** 已接好（徽标 success）时不再提供配置动作。 */
+  connected: boolean
+}
+
+const accounts = reactive({
+  loading: false,
+  loaded: false,
+  wechat: { bound: false, nickname: '' },
+  bili: { connected: false, logined: false, username: '' },
+  bindings: [] as Array<{ channel: string; externalId: string }>,
+  channels: {} as Record<string, { enabled: boolean; hasToken: boolean }>,
+  x: { available: true, configured: false, username: '' },
+})
+/** 当前展开的内联快速配置（一次只开一个）。 */
+const quickPanel = ref<'' | PlatformId>('')
+
 const wechat = reactive({
   loading: false,
   bound: false,
@@ -70,13 +121,33 @@ const wechat = reactive({
   pollTimer: 0 as number | ReturnType<typeof setInterval>,
 })
 
+const bili = reactive({
+  loading: false,
+  qrDataUrl: '',
+  sessionId: '',
+  status: '' as string,
+  message: '',
+  pollTimer: 0 as number | ReturnType<typeof setInterval>,
+})
+
+const xForm = reactive({
+  mode: 'cookie' as 'cookie' | 'token',
+  cookie: '',
+  authToken: '',
+  ct0: '',
+  proxy: '',
+  saving: false,
+  probing: false,
+  error: '',
+})
+
 /* ---------------- 生命周期 ---------------- */
 onMounted(async () => {
   void bots.bootstrap()
   void loadRules()
   void loadPresets()
   void loadModelSettings()
-  void loadWechatStatus()
+  void loadAccounts()
 })
 
 async function loadRules(): Promise<void> {
@@ -122,9 +193,162 @@ async function loadWechatStatus(): Promise<void> {
     const status = await wechatApi.status()
     wechat.bound = status.bound
     wechat.nickname = status.nickname ?? ''
+    accounts.wechat.bound = status.bound
+    accounts.wechat.nickname = status.nickname ?? ''
   } catch {
     /* 接口未就绪（wechat 实现中） */
   }
+}
+
+/** 拉齐六个平台的现状（任一接口失败只影响该平台，不阻塞整页）。 */
+async function loadAccounts(): Promise<void> {
+  accounts.loading = true
+  const botId = bots.state.currentBotId ?? ''
+  await Promise.all([
+    loadWechatStatus(),
+    (async () => {
+      try {
+        const out = await biliApi.status()
+        accounts.bili.connected = out.connected === true
+        accounts.bili.logined = out.logined === true
+        accounts.bili.username = String(out.username ?? '')
+      } catch {
+        /* B站 sidecar 未连接：保持未配置 */
+      }
+    })(),
+    (async () => {
+      try {
+        const out = await channelsApi.bindStatus()
+        accounts.bindings = out.identities
+      } catch {
+        accounts.bindings = []
+      }
+    })(),
+    (async () => {
+      if (botId === '') return
+      try {
+        const channels = await botsApi.channels(botId)
+        const next: Record<string, { enabled: boolean; hasToken: boolean }> = {}
+        for (const key of ['telegram', 'qq', 'discord']) {
+          const cfg = (channels[key] ?? {}) as Record<string, unknown>
+          next[key] = { enabled: cfg.enabled === true, hasToken: cfg.hasToken === true }
+        }
+        accounts.channels = next
+      } catch {
+        accounts.channels = {}
+      }
+    })(),
+    (async () => {
+      try {
+        const out = await xApi.status()
+        accounts.x.available = out.available
+        accounts.x.configured = out.configured
+        accounts.x.username = out.username
+      } catch {
+        accounts.x.available = false
+      }
+    })(),
+  ])
+  accounts.loading = false
+  accounts.loaded = true
+}
+
+/** 某个渠道是否已绑定（bind/status 的 identities）。 */
+function boundTo(channel: string): boolean {
+  return accounts.bindings.some((b) => b.channel === channel)
+}
+
+/** 渠道在 bot 配置里是否已填好并启用（尚未完成绑定时的「已配置」态）。 */
+function configuredChannel(channel: string): boolean {
+  return accounts.channels[channel]?.enabled === true || accounts.channels[channel]?.hasToken === true
+}
+
+const platforms = computed<PlatformView[]>(() => {
+  const list: PlatformView[] = []
+  // 微信
+  list.push({
+    id: 'wechat',
+    name: '微信',
+    icon: MessageCircle,
+    statusText: accounts.wechat.bound ? '已绑定' : '未配置',
+    badgeVariant: accounts.wechat.bound ? 'success' : 'outline',
+    actionLabel: accounts.wechat.bound ? '已绑定' : quickPanel.value === 'wechat' ? '收起' : '扫码绑定',
+    actionDisabled: accounts.wechat.bound,
+    connected: accounts.wechat.bound,
+  })
+  // Bilibili
+  list.push({
+    id: 'bilibili',
+    name: 'Bilibili',
+    icon: Tv,
+    statusText: !accounts.bili.connected ? 'sidecar 未连接' : accounts.bili.logined ? '已登录' : '未登录',
+    badgeVariant: accounts.bili.logined ? 'success' : accounts.bili.connected ? 'warning' : 'outline',
+    actionLabel: accounts.bili.logined ? '已登录' : quickPanel.value === 'bilibili' ? '收起' : '扫码登录',
+    actionDisabled: accounts.bili.logined || !accounts.bili.connected,
+    connected: accounts.bili.logined,
+  })
+  // Telegram / QQ / Discord —— 跳转控制台对应页面完成配置
+  const jumpPlatforms: Array<{ id: PlatformId; name: string; icon: typeof MessageCircle }> = [
+    { id: 'telegram', name: 'Telegram', icon: Send },
+    { id: 'qq', name: 'QQ', icon: Bot },
+    { id: 'discord', name: 'Discord', icon: Gamepad2 },
+  ]
+  for (const p of jumpPlatforms) {
+    const bound = boundTo(p.id)
+    const configured = configuredChannel(p.id)
+    list.push({
+      id: p.id,
+      name: p.name,
+      icon: p.icon,
+      statusText: bound ? '已绑定' : configured ? '已配置·待绑定' : '未配置',
+      badgeVariant: bound ? 'success' : configured ? 'info' : 'outline',
+      actionLabel: bound ? '已绑定' : '去配置',
+      actionDisabled: bound,
+      connected: bound,
+    })
+  }
+  // X
+  list.push({
+    id: 'x',
+    name: 'X',
+    icon: Twitter,
+    statusText: !accounts.x.available
+      ? '接口未就绪'
+      : accounts.x.configured
+        ? accounts.x.username
+          ? `已登录 @${accounts.x.username}`
+          : '已配置·待验证'
+        : '未配置',
+    badgeVariant: accounts.x.configured ? 'success' : accounts.x.available ? 'outline' : 'warning',
+    actionLabel: accounts.x.configured ? '更换账号' : '登录 X',
+    actionDisabled: !accounts.x.available,
+    connected: false,
+  })
+  return list
+})
+
+/** 平台卡片动作：内联配置（微信/B站/X）或跳到控制台对应渠道页。 */
+function onPlatformAction(platform: PlatformView): void {
+  error.value = ''
+  if (platform.id === 'wechat') {
+    quickPanel.value = quickPanel.value === 'wechat' ? '' : 'wechat'
+    if (quickPanel.value === 'wechat' && wechat.qrDataUrl === '') void startWechatBind()
+    return
+  }
+  if (platform.id === 'bilibili') {
+    quickPanel.value = quickPanel.value === 'bilibili' ? '' : 'bilibili'
+    if (quickPanel.value === 'bilibili' && bili.qrDataUrl === '') void startBiliQr()
+    return
+  }
+  if (platform.id === 'x') {
+    quickPanel.value = quickPanel.value === 'x' ? '' : 'x'
+    return
+  }
+  void router.push(`/channels/${platform.id}?from=onboarding`)
+}
+
+function connectedPlatformNames(): string {
+  return platforms.value.filter((p) => p.connected).map((p) => p.name).join('、')
 }
 
 /* ---------------- 导航 ---------------- */
@@ -257,7 +481,10 @@ async function startWechatBind(): Promise<void> {
     stopWechatPoll()
     wechat.pollTimer = setInterval(() => void pollWechat(session.sessionId), 2000)
   } catch (e) {
-    error.value = `微信绑定接口暂不可用：${e instanceof Error ? e.message : '未知错误'}（可先跳过）`
+    error.value =
+      e instanceof ApiError && e.status === 403
+        ? '需要管理员权限才能绑定微信。'
+        : `微信绑定接口暂不可用：${e instanceof Error ? e.message : '未知错误'}（可先跳过）`
   } finally {
     wechat.loading = false
   }
@@ -271,6 +498,7 @@ async function pollWechat(sessionId: string): Promise<void> {
     if (out.status === 'confirmed') {
       stopWechatPoll()
       wechat.bound = true
+      accounts.wechat.bound = true
       onboarding.markStep('wechat', true)
       await loadWechatStatus()
     } else if (out.status === 'expired') {
@@ -289,11 +517,124 @@ function stopWechatPoll(): void {
   }
 }
 
-function skipWechat(): void {
+/* ---------------- 步骤 4：Bilibili 内联扫码 ---------------- */
+async function startBiliQr(): Promise<void> {
+  bili.loading = true
+  error.value = ''
+  try {
+    const out = (await biliApi.qrStart()) as Record<string, unknown>
+    bili.sessionId = typeof out.sessionId === 'string' ? out.sessionId : ''
+    bili.qrDataUrl = typeof out.qrImage === 'string' ? out.qrImage : ''
+    bili.status = typeof out.status === 'string' ? out.status : ''
+    bili.message = typeof out.message === 'string' ? out.message : ''
+    stopBiliPoll()
+    if (bili.sessionId !== '') {
+      bili.pollTimer = setInterval(() => void pollBili(bili.sessionId), 2000)
+    }
+  } catch (e) {
+    error.value =
+      e instanceof ApiError && e.status === 403
+        ? '需要管理员权限才能登录 Bilibili。'
+        : `Bilibili sidecar 暂不可用：${e instanceof Error ? e.message : '未知错误'}（可先跳过）`
+  } finally {
+    bili.loading = false
+  }
+}
+
+async function pollBili(sessionId: string): Promise<void> {
+  if (sessionId === '') return
+  try {
+    const out = (await biliApi.qrStatus(sessionId)) as Record<string, unknown>
+    bili.status = typeof out.status === 'string' ? out.status : bili.status
+    if (typeof out.qrImage === 'string' && out.qrImage !== '') bili.qrDataUrl = out.qrImage
+    bili.message = typeof out.message === 'string' ? out.message : bili.message
+    if (bili.status === 'success' || bili.status === 'confirmed' || bili.status === 'logined') {
+      stopBiliPoll()
+      accounts.bili.logined = true
+      await loadAccounts()
+    } else if (bili.status === 'expired' || bili.status === 'failed') {
+      stopBiliPoll()
+    }
+  } catch {
+    stopBiliPoll()
+  }
+}
+
+function stopBiliPoll(): void {
+  if (bili.pollTimer) {
+    clearInterval(bili.pollTimer as ReturnType<typeof setInterval>)
+    bili.pollTimer = 0
+  }
+}
+
+/* ---------------- 步骤 4：X 内联登录 ---------------- */
+async function submitXLogin(): Promise<void> {
+  xForm.error = ''
+  const authToken = xForm.authToken.trim()
+  const ct0 = xForm.ct0.trim()
+  const cookie = xForm.cookie.trim()
+  if (xForm.mode === 'cookie' && cookie === '') {
+    xForm.error = '请粘贴浏览器里 X 的完整 cookie'
+    return
+  }
+  if (xForm.mode === 'token' && (authToken === '' || ct0 === '')) {
+    xForm.error = '请同时填写 auth_token 与 ct0'
+    return
+  }
+  xForm.saving = true
+  try {
+    await xApi.login({
+      ...(xForm.mode === 'cookie' ? { cookie } : { authToken, ct0 }),
+      ...(xForm.proxy.trim() !== '' ? { proxy: xForm.proxy.trim() } : {}),
+    })
+    xForm.cookie = ''
+    xForm.authToken = ''
+    xForm.ct0 = ''
+    await probeX()
+  } catch (e) {
+    xForm.error =
+      e instanceof ApiError && e.status === 403
+        ? '需要管理员权限才能保存 X 凭据。'
+        : e instanceof Error
+          ? e.message
+          : '保存 X 凭据失败'
+  } finally {
+    xForm.saving = false
+  }
+}
+
+async function probeX(): Promise<void> {
+  xForm.probing = true
+  xForm.error = ''
+  try {
+    const out = await xApi.probe()
+    if (out.ok) {
+      accounts.x.configured = true
+      accounts.x.username = out.username ?? accounts.x.username
+      await loadAccounts()
+    } else {
+      xForm.error = out.error ?? '验证失败：凭据可能已过期'
+    }
+  } catch (e) {
+    xForm.error = e instanceof Error ? e.message : '验证失败'
+  } finally {
+    xForm.probing = false
+  }
+}
+
+/* ---------------- 步骤 4：跳过 ---------------- */
+function stopAccountPolls(): void {
   stopWechatPoll()
-  onboarding.markStep('wechat', false)
+  stopBiliPoll()
+}
+
+function skipAccounts(): void {
+  stopAccountPolls()
+  onboarding.markStep('wechat', accounts.wechat.bound)
   step.value = 5
 }
+
+onBeforeUnmount(() => stopAccountPolls())
 
 /* ---------------- 步骤 5：完成 ---------------- */
 const summary = computed(() => [
@@ -301,14 +642,14 @@ const summary = computed(() => [
   { label: '模型', value: model.model || '未设置' },
   { label: '人格', value: persona.characterName || about.name },
   {
-    label: '微信',
-    value: wechat.bound ? `已绑定${wechat.nickname ? `（${wechat.nickname}）` : ''}` : '未绑定（可稍后接入）',
+    label: '账号',
+    value: connectedPlatformNames() || '未接入（可稍后在「连接」里配置）',
   },
 ])
 
 async function finish(): Promise<void> {
   saving.value = true
-  stopWechatPoll()
+  stopAccountPolls()
   try {
     await onboarding.complete()
     await router.replace('/chat')
@@ -461,38 +802,69 @@ function onPresetChange(e: Event): void {
         </div>
       </div>
 
-      <!-- 步骤 4：接入微信 -->
-      <div v-else-if="step === 4" class="space-y-6">
+      <!-- 步骤 4：给她账号 -->
+      <div v-else-if="step === 4" data-testid="onboarding-accounts" class="space-y-6">
         <p class="text-control text-muted-foreground">
-          绑定后，她会出现在你的微信里。今晚可以先跳过，之后在「连接 → 微信」随时绑定。
+          把她的账号接进来，她才能真正活在你的世界里。可以随时跳过，之后在「连接」里配置。
         </p>
-        <div class="rounded-md bg-section-card p-3">
+
+        <div v-if="accounts.loading" class="flex items-center gap-2 py-4 text-label text-muted-foreground">
+          <Spinner class="size-4" />
+          正在读取各平台状态…
+        </div>
+
+        <div v-else data-testid="accounts-grid" class="grid gap-3 sm:grid-cols-2">
+          <SurfaceCard
+            v-for="platform in platforms"
+            :key="platform.id"
+            padding="row"
+            class="flex flex-col gap-2.5"
+          >
+            <div class="flex items-center gap-2">
+              <component :is="platform.icon" class="size-4 shrink-0 text-foreground" />
+              <span class="text-control font-medium text-foreground">{{ platform.name }}</span>
+              <Badge :variant="platform.badgeVariant" size="sm" class="ml-auto">
+                {{ platform.statusText }}
+              </Badge>
+            </div>
+            <div class="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                :disabled="platform.actionDisabled"
+                @click="onPlatformAction(platform)"
+              >
+                {{ platform.actionLabel }}
+              </Button>
+              <span
+                v-if="platform.id === 'telegram' || platform.id === 'qq' || platform.id === 'discord'"
+                class="text-caption text-muted-foreground"
+              >
+                在控制台里完成配置
+              </span>
+            </div>
+          </SurfaceCard>
+        </div>
+
+        <!-- 内联快速配置：微信 -->
+        <SurfaceCard v-if="quickPanel === 'wechat'" data-testid="accounts-wechat-panel" padding="lg" class="space-y-3">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <div class="text-label font-medium text-foreground">
-                {{ wechat.bound ? `已绑定${wechat.nickname ? `：${wechat.nickname}` : ''}` : '微信' }}
-              </div>
-              <div class="mt-0.5 text-caption text-muted-foreground">
-                {{ wechat.bound ? '她会用微信和你聊天。' : '扫码后即可用微信找她。' }}
-              </div>
+              <div class="text-label font-medium text-foreground">微信扫码绑定</div>
+              <div class="mt-0.5 text-caption text-muted-foreground">用手机微信扫码，确认后她就会出现在你的微信里。</div>
             </div>
-            <Button
-              v-if="!wechat.bound"
-              variant="outline"
-              size="sm"
-              :disabled="wechat.loading"
-              @click="startWechatBind"
-            >
-              <Spinner v-if="wechat.loading" class="size-4" />
+            <Button variant="ghost" size="sm" @click="quickPanel = ''">收起</Button>
+          </div>
+          <div v-if="!wechat.qrDataUrl" class="flex items-center gap-3">
+            <Button variant="outline" size="sm" :loading="wechat.loading" @click="startWechatBind">
               生成二维码
             </Button>
           </div>
-
-          <div v-if="wechat.qrDataUrl && !wechat.bound" class="mt-4 flex flex-col items-center gap-3">
+          <div v-else class="flex flex-col items-center gap-3">
             <img
               :src="wechat.qrDataUrl"
               alt="微信绑定二维码"
-              class="size-48 rounded-md border border-border bg-card object-contain p-2"
+              class="size-44 rounded-md border border-border bg-card object-contain p-2"
             />
             <div class="text-label text-muted-foreground">
               {{
@@ -502,19 +874,97 @@ function onPresetChange(e: Event): void {
                     ? '已扫码，请在手机上确认'
                     : wechat.status === 'confirmed'
                       ? '绑定成功'
-                      : '二维码已过期，正在刷新…'
+                      : '二维码已刷新，请用新码扫码'
               }}
             </div>
+            <Button variant="ghost" size="sm" :loading="wechat.loading" @click="startWechatBind">
+              刷新二维码
+            </Button>
           </div>
-        </div>
+        </SurfaceCard>
 
-        <div class="flex items-center justify-between gap-3">
-          <Button variant="ghost" @click="skipWechat">
-            <SkipForward class="size-4" />
-            暂时跳过
-          </Button>
-          <Button :disabled="!wechat.bound" @click="step = 5">继续</Button>
-        </div>
+        <!-- 内联快速配置：Bilibili -->
+        <SurfaceCard v-if="quickPanel === 'bilibili'" data-testid="accounts-bili-panel" padding="lg" class="space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-label font-medium text-foreground">Bilibili 扫码登录</div>
+              <div class="mt-0.5 text-caption text-muted-foreground">需要本机 Bilibili sidecar 正在运行。</div>
+            </div>
+            <Button variant="ghost" size="sm" @click="quickPanel = ''">收起</Button>
+          </div>
+          <div v-if="!bili.qrDataUrl" class="flex items-center gap-3">
+            <Button variant="outline" size="sm" :loading="bili.loading" @click="startBiliQr">获取登录二维码</Button>
+          </div>
+          <div v-else class="flex flex-col items-center gap-3">
+            <img
+              :src="bili.qrDataUrl"
+              alt="Bilibili 登录二维码"
+              class="size-44 rounded-md border border-border bg-card object-contain p-2"
+            />
+            <div class="text-label text-muted-foreground">{{ bili.message || bili.status }}</div>
+            <Button variant="ghost" size="sm" :loading="bili.loading" @click="startBiliQr">刷新二维码</Button>
+          </div>
+        </SurfaceCard>
+
+        <!-- 内联快速配置：X -->
+        <SurfaceCard v-if="quickPanel === 'x'" data-testid="accounts-x-panel" padding="lg" class="space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-label font-medium text-foreground">登录你的 X 账号</div>
+              <div class="mt-0.5 text-caption text-muted-foreground">
+                凭据只保存在后端，不会回传到页面；建议用完整 cookie。
+              </div>
+            </div>
+            <Button variant="ghost" size="sm" @click="quickPanel = ''">收起</Button>
+          </div>
+          <CalloutBanner v-if="!accounts.x.available" tone="warning" size="sm" description="X 后端接口尚未就绪；保存/验证按钮暂不可用。" />
+          <CalloutBanner v-if="xForm.error" tone="destructive" size="sm" :description="xForm.error" />
+          <SegmentedControl
+            :model-value="xForm.mode"
+            :items="[
+              { value: 'cookie', label: '完整 cookie' },
+              { value: 'token', label: 'auth_token + ct0' },
+            ]"
+            aria-label="X 凭据方式"
+            @update:model-value="(v: string | number) => (xForm.mode = v as 'cookie' | 'token')"
+          />
+          <div class="space-y-3">
+            <FieldStack v-if="xForm.mode === 'cookie'" label="Cookie" for="ob-x-cookie">
+              <Textarea
+                id="ob-x-cookie"
+                v-model="xForm.cookie"
+                :rows="3"
+                placeholder="auth_token=…; ct0=…; …"
+                :disabled="!accounts.x.available"
+              />
+            </FieldStack>
+            <template v-else>
+              <FieldStack label="auth_token" for="ob-x-auth">
+                <Input id="ob-x-auth" v-model="xForm.authToken" type="password" placeholder="auth_token" :disabled="!accounts.x.available" />
+              </FieldStack>
+              <FieldStack label="ct0" for="ob-x-ct0">
+                <Input id="ob-x-ct0" v-model="xForm.ct0" type="password" placeholder="ct0" :disabled="!accounts.x.available" />
+              </FieldStack>
+            </template>
+            <FieldStack label="代理（可选）" for="ob-x-proxy">
+              <Input id="ob-x-proxy" v-model="xForm.proxy" placeholder="http://127.0.0.1:7890" :disabled="!accounts.x.available" />
+            </FieldStack>
+          </div>
+          <div class="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              :loading="xForm.saving"
+              :disabled="!accounts.x.available"
+              @click="submitXLogin"
+            >
+              保存并验证
+            </Button>
+            <Button variant="ghost" size="sm" :loading="xForm.probing" :disabled="!accounts.x.available" @click="probeX">
+              验证登录
+            </Button>
+          </div>
+        </SurfaceCard>
       </div>
 
       <!-- 步骤 5：完成 -->
@@ -538,10 +988,16 @@ function onPresetChange(e: Event): void {
     <!-- 底部导航 -->
     <footer class="mx-auto flex w-full max-w-xl items-center justify-between gap-3 px-6 pb-10">
       <Button variant="ghost" :disabled="step === 1" @click="prev">上一步</Button>
-      <Button :disabled="step !== 4 && step !== 5 ? !canNext : saving" @click="next">
-        <Spinner v-if="saving" class="size-4" />
-        {{ step === 5 ? '进入对话' : '继续' }}
-      </Button>
+      <div class="flex items-center gap-2">
+        <Button v-if="step === 4" variant="ghost" @click="skipAccounts">
+          <SkipForward class="size-4" />
+          暂时跳过
+        </Button>
+        <Button :disabled="step !== 4 && step !== 5 ? !canNext : saving" @click="next">
+          <Spinner v-if="saving" class="size-4" />
+          {{ step === 5 ? '进入对话' : '继续' }}
+        </Button>
+      </div>
     </footer>
   </div>
 </template>

@@ -52,6 +52,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/channels/qq', name: 'channel-qq', component: () => import('@/pages/channels/QqPage.vue'), meta: { title: 'QQ' } },
   { path: '/channels/discord', name: 'channel-discord', component: () => import('@/pages/channels/DiscordPage.vue'), meta: { title: 'Discord' } },
   { path: '/channels/bilibili', name: 'channel-bilibili', component: () => import('@/pages/channels/BilibiliPage.vue'), meta: { title: 'Bilibili' } },
+  { path: '/channels/x', name: 'channel-x', component: () => import('@/pages/channels/XPage.vue'), meta: { title: 'X' } },
   { path: '/contacts', name: 'contacts', component: () => import('@/pages/contacts/ContactsPage.vue'), meta: { title: '联系人' } },
   { path: '/bind', name: 'bind', component: () => import('@/pages/bind/BindPage.vue'), meta: { title: '账号绑定' } },
 

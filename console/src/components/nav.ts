@@ -22,6 +22,7 @@ import {
   Shield,
   TrendingUp,
   Tv,
+  Twitter,
   UserRound,
   Users,
 } from 'lucide-vue-next'
@@ -60,6 +61,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/channels/qq', label: 'QQ', icon: Bot },
       { to: '/channels/discord', label: 'Discord', icon: Gamepad2 },
       { to: '/channels/bilibili', label: 'Bilibili', icon: Tv },
+      { to: '/channels/x', label: 'X', icon: Twitter },
       { to: '/contacts', label: '联系人', icon: Users },
       { to: '/bind', label: '账号绑定', icon: Link2 },
     ],

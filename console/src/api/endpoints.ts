@@ -25,7 +25,7 @@
  *   wechat     (契约，wechat 实现中) POST /api/wechat/qr, GET /api/wechat/qr/:sessionId,
  *             GET /api/wechat/status, POST /api/wechat/friend-qr, POST /api/wechat/logout
  */
-import { ApiError, asBool, asNum, asStr, firstOf, http, isRecord, pickArray, pickRecord } from './client'
+import { ApiError, asBool, asNum, asStr, firstOf, http, isRecord, pickArray, pickRecord, readErrorEnvelope } from './client'
 import type {
   ActivityStats,
   AiSettings,
@@ -323,6 +323,105 @@ export const callApi = {
       reason: asStr(rec.reason),
       topic: asStr(rec.topic),
       createdAt: asStr(rec.createdAt),
+    }
+  },
+}
+
+/* ---------------- X（Twitter） ---------------- */
+
+export interface XStatus {
+  /** 是否已保存 auth_token/ct0（为 true 才可能登录成功）。 */
+  configured: boolean
+  username: string
+  loggedInAt: string
+  allowWrites: boolean
+  /** twitter-cli 可执行文件路径（后端配置）。 */
+  bin: string
+  /** 二进制是否可执行（后端 60s 缓存 `twitter --version` 结果）。 */
+  binOk: boolean
+  /** 接口本身是否可用（404/未就绪时为 false，页面据此降级）。 */
+  available: boolean
+}
+
+export interface XProbe {
+  ok: boolean
+  username?: string
+  error?: string
+}
+
+export interface XCmdResult {
+  ok: boolean
+  output: string
+  error?: string
+}
+
+function toXStatus(v: unknown, available = true): XStatus {
+  if (isRecord(v) && typeof v.__status === 'number') {
+    return { configured: false, username: '', loggedInAt: '', allowWrites: false, bin: '', binOk: false, available: false }
+  }
+  const rec = isRecord(v) ? v : {}
+  return {
+    configured: asBool(rec.configured) ?? false,
+    username: asStr(rec.username) ?? '',
+    loggedInAt: asStr(rec.loggedInAt) ?? asStr(rec.logged_in_at) ?? '',
+    allowWrites: asBool(rec.allowWrites) ?? false,
+    bin: asStr(rec.bin) ?? '',
+    binOk: asBool(rec.binOk) ?? false,
+    available,
+  }
+}
+
+export const xApi = {
+  /** GET /api/x/status（required）→ 状态（绝不回传 token）。 */
+  async status(): Promise<XStatus> {
+    const out = await http.get<unknown>('/api/x/status', undefined, {
+      silentUnauthorized: true,
+      allowAnyStatus: true,
+    })
+    if (isRecord(out) && typeof out.__status === 'number') {
+      return toXStatus(null, false)
+    }
+    return toXStatus(out, true)
+  },
+  /** POST /api/x/login（admin）{cookie? | authToken+ct0, proxy?} → status。 */
+  async login(input: { cookie?: string; authToken?: string; ct0?: string; proxy?: string }): Promise<XStatus> {
+    const out = await http.post<unknown>('/api/x/login', input)
+    return toXStatus(out, true)
+  },
+  /** POST /api/x/logout（admin）→ 清凭据。 */
+  async logout(): Promise<void> {
+    await http.post('/api/x/logout')
+  },
+  /** PUT /api/x/settings（admin）{allowWrites?, proxy?}。 */
+  async saveSettings(input: { allowWrites?: boolean; proxy?: string }): Promise<void> {
+    await http.put('/api/x/settings', input)
+  },
+  /** POST /api/x/probe（required）→ 跑 `twitter status`，验证登录是否有效。 */
+  async probe(): Promise<XProbe> {
+    const out = await http.post<unknown>('/api/x/probe', undefined, { allowAnyStatus: true })
+    const rec = isRecord(out) && isRecord(out.__body) ? (pickRecord(out.__body, 'data') ?? {}) : pickRecord(out) ?? {}
+    const ok = asBool(rec.ok) ?? false
+    return {
+      ok,
+      username: asStr(rec.username),
+      error: asStr(rec.error) ?? asStr(rec.message),
+    }
+  },
+  /** POST /api/x/cmd（required）{argv, dryRun?} → 只读预览（写命令默认预演）。 */
+  async cmd(argv: string[], dryRun = false): Promise<XCmdResult> {
+    const out = await http.post<unknown>('/api/x/cmd', { argv, dryRun }, { allowAnyStatus: true })
+    if (isRecord(out) && typeof out.__status === 'number') {
+      return { ok: false, output: '', error: readErrorEnvelope(out.__body).message }
+    }
+    const rec = isRecord(out) ? out : {}
+    const output =
+      typeof rec.output === 'string'
+        ? rec.output
+        : JSON.stringify(rec.data ?? rec.result ?? rec, null, 2)
+    return {
+      ok: asBool(rec.ok) ?? true,
+      output,
+      error: asStr(rec.error) ?? undefined,
     }
   },
 }
