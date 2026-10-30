@@ -49,6 +49,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 # 限时 900s：PyPI 慢的时候（实测能到 30~40kB/s）不让构建无限挂住。
 RUN timeout 900 pip3 install --no-cache-dir --break-system-packages --timeout 60 --retries 3 "bili-agent[mcp]==0.9.1" || \
     echo "[warn] bili-agent 安装失败（或超时）：MCP 面不可用，bili 元工具仍走 HTTP sidecar"
+# twitter-cli：她自己的 X 账号（@littly/x 插件调用 `twitter` 二进制；写操作默认预演）。
+# 装不上也不阻塞镜像构建：插件 binOk=false，控制台明确显示「已安装/未安装」。
+RUN timeout 600 pip3 install --no-cache-dir --break-system-packages --timeout 60 --retries 3 "twitter-cli==0.8.5" || \
+    echo "[warn] twitter-cli 安装失败（或超时）：X 接入不可用（binOk=false）"
+
 WORKDIR /app/harness
 # corepack：运行期若改动了 profile 依赖，播种脚本可以退回 pnpm install
 RUN corepack enable

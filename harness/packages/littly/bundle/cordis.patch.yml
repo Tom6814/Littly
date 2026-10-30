@@ -50,6 +50,9 @@
     - id: littly-agents
       name: '@littly/agents'
     # @littly/voice 是库模块（无 apply），由 @littly/agents 直接引用，不作为插件行装配
+    # X（Twitter）：她自己的账号（twitter-cli）。写操作默认预演，开关由控制台控制。
+    - id: littly-x
+      name: '@littly/x'
     - id: littly-console-api
       name: '@littly/console-api'
     - id: littly-scheduler

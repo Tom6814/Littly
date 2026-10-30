@@ -11933,6 +11933,9 @@ importers:
       '@littly/voice-call':
         specifier: workspace:*
         version: link:../voice-call
+      '@littly/x':
+        specifier: workspace:*
+        version: link:../x
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
@@ -12064,6 +12067,9 @@ importers:
       '@littly/voice-call':
         specifier: workspace:*
         version: link:../voice-call
+      '@littly/x':
+        specifier: workspace:*
+        version: link:../x
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
@@ -12250,6 +12256,21 @@ importers:
       '@types/ws':
         specifier: 8.18.1
         version: 8.18.1
+
+  packages/littly/x:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
+      '@littly/tools':
+        specifier: workspace:*
+        version: link:../tools
 
   packages/llm/deepseek-llm-api-extensions:
     devDependencies:

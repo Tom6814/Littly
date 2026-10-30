@@ -9,6 +9,7 @@ import type { LittlyGrowth } from '@littly/growth'
 import type { LittlyMcpManager } from '@littly/mcp'
 import type { PluginManager } from '@deepseek-ai/dsh-plugin-manager'
 import type { SkillRegistry } from '@deepseek-ai/dsh-skill'
+import type { XService } from '@littly/x'
 import type { SessionManager } from './auth.ts'
 import { err, type Router, type ApiRequest } from './http.ts'
 
@@ -23,6 +24,8 @@ export interface Deps {
   pluginManager: PluginManager | undefined
   /** dsh 原生技能注册表；profile 未装时为 undefined。 */
   skills: SkillRegistry | undefined
+  /** X（Twitter）服务；profile 未启用 @littly/x 时为 undefined。 */
+  x: XService | undefined
   sessions: SessionManager
   cwd: string
   log: (msg: string, ...args: unknown[]) => void

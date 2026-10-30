@@ -34,6 +34,8 @@ import { registerAdminRoutes } from './routes-admin.ts'
 import { registerBindRoutes } from './routes-bind.ts'
 import { registerOnboardingRoutes } from './routes-onboarding.ts'
 import { registerWechatRoutes, createWechatServiceGetter } from './routes-wechat.ts'
+import { registerXRoutes } from './routes-x.ts'
+import type { XService } from '@littly/x'
 
 export const name = 'littly-console-api'
 
@@ -63,6 +65,7 @@ export function apply(ctx: Context, _config: Config): void {
     // 不阻塞控制台启动（ctx.pluginManager 直接取会触发 Cordis 的 inject 守卫）。
     pluginManager: ctx.get('pluginManager') as LittlyPluginManager | undefined,
     skills: ctx.get('skills') as LittlySkillRegistry | undefined,
+    x: ctx.get('littlyX') as XService | undefined,
     sessions,
     cwd: process.cwd(),
     log: (msg, ...args) => ctx.logger.info(msg, ...args),
@@ -79,6 +82,7 @@ export function apply(ctx: Context, _config: Config): void {
   registerBindRoutes(router, deps)
   registerOnboardingRoutes(router, deps)
   registerWechatRoutes(router, deps, createWechatServiceGetter(ctx))
+  registerXRoutes(router, deps)
   router.get('/api', 'public', (a) => {
     jsonHealth(a)
   })

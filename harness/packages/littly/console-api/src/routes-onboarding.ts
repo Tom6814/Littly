@@ -36,6 +36,11 @@ interface BotLite {
   wx_hub_bot_id: string
   wx_push_token: string
   wx_friend_qrcode: string
+  tg_bot_token: string
+  qq_app_id: string
+  snowluma_ws_url: string
+  snowluma_enabled: number
+  discord_bot_token: string
 }
 
 function readState(d: Deps): OnboardingState {
@@ -66,7 +71,7 @@ function writeState(d: Deps, state: OnboardingState): void {
 function firstBot(d: Deps): BotLite | undefined {
   return d.storage
     .prepare(
-      'SELECT id, name, system_prompt, character_id, ai_model, wx_enabled, wx_hub_bot_id, wx_push_token, wx_friend_qrcode FROM bots ORDER BY created_at ASC LIMIT 1',
+      'SELECT id, name, system_prompt, character_id, ai_model, wx_enabled, wx_hub_bot_id, wx_push_token, wx_friend_qrcode, tg_bot_token, qq_app_id, snowluma_ws_url, snowluma_enabled, discord_bot_token FROM bots ORDER BY created_at ASC LIMIT 1',
     )
     .get() as BotLite | undefined
 }
@@ -99,7 +104,41 @@ function stepsOf(d: Deps, bot: BotLite | undefined): Record<string, boolean> {
     model: modelReady(d.storage),
     persona: bot !== undefined && (bot.system_prompt.trim() !== '' || (bot.character_id ?? '') !== ''),
     wechat: wechatReady(bot),
+    // 「给她账号」这一步：X 是否已配好（twitter-cli 凭据），以及至少接入了一个外部平台。
+    x: xReady(d.storage),
+    accounts: wechatReady(bot) || biliReady(d.storage) || xReady(d.storage) || tgReady(bot) || qqReady(bot) || discordReady(bot),
   }
+}
+
+/** X：twitter-cli 的 auth_token + ct0 两项都配了才算就绪。 */
+function xReady(storage: LittlyStorage): boolean {
+  const token = storage.getSetting('x.auth_token') ?? ''
+  const ct0 = storage.getSetting('x.ct0') ?? ''
+  return token !== '' && ct0 !== ''
+}
+
+/** Bilibili：扫码登录后凭据落在 bili sidecar 侧，这里以「bili 相关配置齐全」近似判断。 */
+function biliReady(storage: LittlyStorage): boolean {
+  return (storage.getSetting('bili.logged_in') ?? '') === '1' || (storage.getSetting('bili_sidcar_url') ?? '') !== ''
+}
+
+function tgReady(bot: BotLite | undefined): boolean {
+  return bot !== undefined && (storageTg(bot) !== '')
+}
+
+function storageTg(bot: BotLite): string {
+  return (bot as unknown as { tg_bot_token?: string }).tg_bot_token ?? ''
+}
+
+function qqReady(bot: BotLite | undefined): boolean {
+  if (bot === undefined) return false
+  const row = bot as unknown as { qq_app_id?: string; snowluma_ws_url?: string; snowluma_enabled?: number }
+  return (row.qq_app_id ?? '') !== '' || ((row.snowluma_enabled ?? 0) === 1 && (row.snowluma_ws_url ?? '') !== '')
+}
+
+function discordReady(bot: BotLite | undefined): boolean {
+  if (bot === undefined) return false
+  return ((bot as unknown as { discord_bot_token?: string }).discord_bot_token ?? '') !== ''
 }
 
 /** 让 seed 先跑一遍（幂等）：首启即有小璃/铁律/角色卡/世界书。 */

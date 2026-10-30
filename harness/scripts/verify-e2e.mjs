@@ -117,6 +117,7 @@ const pdata = plugins.json?.data ?? {}
 const toolNames = (pdata.tools ?? []).map((t) => t.name)
 ok(toolNames.includes('remember'), 'Littly 内置工具在清单里')
 ok(toolNames.includes('bili'), 'bili 元工具在清单里')
+ok(toolNames.includes('x'), 'x 元工具在清单里（@littly/x 已装配）')
 ok(toolNames.includes('case_convert'), '★ dsh 社区插件工具 case_convert 可见（Littly↔dsh 桥）')
 const caseTool = (pdata.tools ?? []).find((t) => t.name === 'case_convert')
 ok(typeof caseTool?.description === 'string' && caseTool.description.length > 0, 'dsh 工具描述透传')
@@ -247,6 +248,15 @@ const del = await api('/api/plugins/mcp/e2e-demo', { method: 'DELETE' })
 ok(del.status === 200, `删 MCP 服务器 200（${del.status}）`)
 const list2 = await api('/api/plugins')
 ok(!(list2.json?.data?.mcp ?? []).some((s) => s.name === 'e2e-demo'), '删除后不再出现在清单里')
+
+console.log('== X（Twitter）接入 ==')
+const xStatus = await api('/api/x/status')
+ok(xStatus.status === 200, `/api/x/status 200（${xStatus.status}）`)
+const xStatusData = xStatus.json?.data ?? {}
+ok(typeof xStatusData.binOk === 'boolean', 'X status 带 binOk（二进制可用性与最近错误分开）')
+ok(typeof xStatusData.configured === 'boolean' && typeof xStatusData.allowWrites === 'boolean', 'X status 含 configured/allowWrites')
+const xBadCmd = await api('/api/x/cmd', { method: 'POST', body: { argv: ['not-a-real-command'] } })
+ok(xBadCmd.status === 400, `未知 X 子命令经 /api/x/cmd → 400（实际 ${xBadCmd.status}）`)
 
 console.log('== 工具按角色启停 ==')
 // 建一个角色用于启停断言：先走 API（管理员），不行就直接写库

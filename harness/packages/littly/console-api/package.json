@@ -26,7 +26,8 @@
     "@littly/persona": "workspace:*",
     "@littly/storage": "workspace:*",
     "@littly/tools": "workspace:*",
-    "@littly/voice-call": "workspace:*"
+    "@littly/voice-call": "workspace:*",
+    "@littly/x": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:~",

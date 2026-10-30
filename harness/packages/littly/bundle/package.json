@@ -37,7 +37,8 @@
     "@littly/storage": "workspace:*",
     "@littly/tools": "workspace:*",
     "@littly/voice": "workspace:*",
-    "@littly/voice-call": "workspace:*"
+    "@littly/voice-call": "workspace:*",
+    "@littly/x": "workspace:*"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:~"
