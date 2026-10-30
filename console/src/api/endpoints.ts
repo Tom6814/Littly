@@ -281,6 +281,52 @@ export const chatApi = {
   },
 }
 
+/* ---------------- 语音通话来电（voice-call 主动来电队列） ---------------- */
+
+export interface PendingCall {
+  id: string
+  botId: string
+  sender: string
+  reason?: string
+  topic?: string
+  createdAt?: string
+}
+
+export const callApi = {
+  /** GET /api/call/requests?botId= → 未接来电（普通用户只看自己的）。 */
+  async requests(botId: string): Promise<PendingCall[]> {
+    const out = await http.get<unknown>('/api/call/requests', { botId })
+    const rec = isRecord(out) ? out : {}
+    return pickArray(rec, 'calls')
+      .filter(isRecord)
+      .map((c) => ({
+        id: asStr(c.id) ?? '',
+        botId: asStr(c.botId) ?? '',
+        sender: asStr(c.sender) ?? '',
+        reason: asStr(c.reason),
+        topic: asStr(c.topic),
+        createdAt: asStr(c.createdAt),
+      }))
+      .filter((c) => c.id !== '')
+  },
+  /** POST /api/call/requests/:id/accept → 消费来电请求（拿不到则 404/403）。 */
+  async accept(id: string): Promise<PendingCall | null> {
+    const out = await http.post<unknown>(`/api/call/requests/${encodeURIComponent(id)}/accept`)
+    const rec = pickRecord(out, 'call') ?? (isRecord(out) ? out : {})
+    if (!isRecord(rec)) return null
+    const callId = asStr(rec.id)
+    if (!callId) return null
+    return {
+      id: callId,
+      botId: asStr(rec.botId) ?? '',
+      sender: asStr(rec.sender) ?? '',
+      reason: asStr(rec.reason),
+      topic: asStr(rec.topic),
+      createdAt: asStr(rec.createdAt),
+    }
+  },
+}
+
 /* ---------------- settings（模型 / 语音 / 通用） ---------------- */
 
 export const settingsApi = {

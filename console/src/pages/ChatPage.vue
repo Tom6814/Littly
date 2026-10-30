@@ -13,6 +13,12 @@ import {
   Button,
   CalloutBanner,
   ConfirmPopover,
+  Dialog,
+  DialogBody,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -20,9 +26,11 @@ import {
   DropdownMenuTrigger,
   Spinner,
   Textarea,
+  toast,
 } from '@felinic/ui'
 import { MoreHorizontal, Phone, RefreshCw, SendHorizontal, Trash2, WifiOff } from 'lucide-vue-next'
-import { chatApi } from '@/api/endpoints'
+import { ApiError } from '@/api/client'
+import { callApi, chatApi, type PendingCall } from '@/api/endpoints'
 import type { ChatMessage, StreamToolCall } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 import { useBots } from '@/stores/bots'
@@ -42,9 +50,18 @@ const agentStatus = ref('')
 const buffer = ref<{ buffered: boolean; count: number }>({ buffered: false, count: 0 })
 const toolCalls = ref<StreamToolCall[]>([])
 const silentNotice = ref(false)
+/** 非 bot 所有者/管理员：可发消息，但历史与实时流会被归属守卫拒绝（403）。 */
+const historyDenied = ref(false)
 const streamState = ref<'connecting' | 'open' | 'offline'>('connecting')
 /** 语音通话浮层开关（token/WS/麦克风全部由 CallOverlay 自包含处理）。 */
 const callOpen = ref(false)
+/** 她主动打来的未接来电（voice-call 的 pending queue）。 */
+const pendingCall = ref<PendingCall | null>(null)
+/** 接听 AI 来电时传给浮层的 callId/reason。 */
+const aiCall = ref<{ id: string; reason: string } | null>(null)
+/** 已忽略的来电 id：轮询不再重复弹出同一通。 */
+const dismissedCallIds = new Set<string>()
+let callPollTimer: ReturnType<typeof setInterval> | null = null
 
 // 联系人页通过 /chat?sender=<id> 打开某人的会话；缺省用当前登录用户。
 const routeSender = computed(() => (typeof route.query.sender === 'string' ? route.query.sender : ''))
@@ -77,7 +94,13 @@ async function loadHistory(): Promise<void> {
     messages.value = await chatApi.messages({ botId: botId.value, sender: sender.value })
     await scrollToBottom()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载消息失败'
+    if (e instanceof ApiError && e.status === 403) {
+      // 归属守卫拒绝：不把它当页面错误（发送仍可用），只做安静提示。
+      historyDenied.value = true
+      messages.value = []
+    } else {
+      error.value = e instanceof Error ? e.message : '加载消息失败'
+    }
   } finally {
     loading.value = false
   }
@@ -189,9 +212,16 @@ async function send(): Promise<void> {
 
   try {
     const res = await chatApi.send({ botId: botId.value, text, sender: sender.value })
-    // 空库首聊：后端在 /api/chat 里播种默认 bot，响应之后才有 botId；
-    // 刷新列表让外壳的「当前她」、SSE 与后续接口都拿到它。
-    if (botId.value === '') await bots.refresh()
+    // 空库首聊：后端在 /api/chat 里播种默认 bot，响应消息里带 botId。
+    // 先采纳它（非 owner 账号的 /api/bots 可能被裁剪为空），再刷新列表兜底。
+    if (botId.value === '') {
+      const inferred = res.messages.find((m) => m.botId !== '')?.botId
+      if (inferred) {
+        bots.adopt(inferred)
+      } else {
+        await bots.refresh()
+      }
+    }
     messages.value = messages.value.filter((m) => m.pending !== true)
     mergeMessages(res.messages)
     if (res.silent) {
@@ -236,11 +266,53 @@ async function removeMessage(id: string): Promise<void> {
   }
 }
 
+/* ---------------- 主动来电 ---------------- */
+async function pollCalls(): Promise<void> {
+  if (!botId.value || !sender.value || callOpen.value || pendingCall.value) return
+  if (document.visibilityState !== 'visible') return
+  try {
+    const calls = await callApi.requests(botId.value)
+    const next = calls.find((c) => !dismissedCallIds.has(c.id))
+    if (next) pendingCall.value = next
+  } catch {
+    /* 轮询失败静默：下次再试，不打扰正常聊天 */
+  }
+}
+
+function declineCall(): void {
+  if (pendingCall.value) dismissedCallIds.add(pendingCall.value.id)
+  pendingCall.value = null
+}
+
+async function acceptCall(): Promise<void> {
+  const call = pendingCall.value
+  if (!call) return
+  dismissedCallIds.add(call.id)
+  try {
+    const accepted = await callApi.accept(call.id)
+    pendingCall.value = null
+    aiCall.value = { id: accepted?.id ?? call.id, reason: accepted?.reason ?? call.reason ?? '' }
+    callOpen.value = true
+  } catch (e) {
+    pendingCall.value = null
+    toast.error(e instanceof Error ? e.message : '接听失败，来电可能已过期')
+  }
+}
+
+/** 通话结束：收起浮层并刷新对话（通话内容会由后端整理成消息/记忆）。 */
+function onCallEnd(): void {
+  callOpen.value = false
+  aiCall.value = null
+  void loadHistory()
+}
+
 /* ---------------- 生命周期 ---------------- */
 onMounted(async () => {
   await bots.bootstrap()
   await loadHistory()
   connectStream()
+  callPollTimer = setInterval(() => void pollCalls(), 10_000)
+  void pollCalls()
 })
 
 watch(
@@ -270,6 +342,7 @@ watch(botId, async (next, prev) => {
 
 onBeforeUnmount(() => {
   callOpen.value = false
+  if (callPollTimer) clearInterval(callPollTimer)
   disconnectStream()
   if (silentTimer) clearTimeout(silentTimer)
 })
@@ -352,6 +425,12 @@ function goBindWechat(): void {
     <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
       <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 md:px-6">
         <CalloutBanner v-if="error" tone="destructive" :description="error" size="sm" />
+        <CalloutBanner
+          v-if="historyDenied"
+          tone="neutral"
+          size="sm"
+          description="当前账号不是这个 bot 的所有者：历史记录与实时同步不可用，但仍可以给她发消息。"
+        />
 
         <!-- 加载占位：保持消息区框架，不让页面塌陷 -->
         <div v-if="loading" class="flex items-center gap-2 py-10 text-label text-muted-foreground">
@@ -482,7 +561,33 @@ function goBindWechat(): void {
       :bot-id="botId"
       :sender="sender"
       :open="callOpen"
-      @close="callOpen = false"
+      :ai-call-id="aiCall?.id ?? ''"
+      :ai-reason="aiCall?.reason ?? ''"
+      @close="onCallEnd"
     />
+
+    <!-- 她主动打来电话：接听走 accept（消费 pending），再以 AI 来电模式拨号。 -->
+    <Dialog :open="pendingCall !== null" @update:open="(v: boolean) => { if (!v) declineCall() }">
+      <DialogPanel width="lg" footer>
+        <DialogHeader>
+          <DialogTitle>她打来电话了</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <p class="text-control text-foreground">
+            {{ pendingCall?.reason || '（她没说原因，就是想听听你的声音）' }}
+          </p>
+          <p v-if="pendingCall?.topic" class="mt-1 text-label text-muted-foreground">
+            想聊：{{ pendingCall.topic }}
+          </p>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" @click="declineCall">挂掉</Button>
+          <Button variant="brand" @click="acceptCall">
+            <Phone />
+            接听
+          </Button>
+        </DialogFooter>
+      </DialogPanel>
+    </Dialog>
   </div>
 </template>

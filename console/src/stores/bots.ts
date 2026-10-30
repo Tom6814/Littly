@@ -71,6 +71,21 @@ async function bootstrap(): Promise<void> {
 }
 
 /**
+ * 采纳后端在聊天响应里带回的 botId。
+ * 非 owner / 非 admin 账号的 `GET /api/bots` 可能是空列表（后端按归属裁剪），
+ * 但消息里带 bot_id——用它补一个本地占位（名称未知时显示「她」），
+ * 让后续发送 / SSE / 语音通话都拿到同一个 botId。
+ */
+function adopt(id: string, name = '她'): void {
+  if (!id) return
+  if (!state.bots.some((b) => b.id === id)) {
+    state.bots = [...state.bots, { id, name }]
+  }
+  setCurrent(id)
+  state.ready = true
+}
+
+/**
  * 强制重新拉取（后端在首次 /api/chat 时才播种默认 bot，因此首发消息后需要
  * 刷新一次才能拿到新 bot 的 id，否则后续消息与实时流都没有 botId 可用）。
  */
@@ -98,6 +113,7 @@ export function useBots() {
     currentBot,
     bootstrap,
     refresh,
+    adopt,
     setCurrent,
     reset,
   }
