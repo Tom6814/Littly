@@ -142,6 +142,51 @@ ok(
   `心跳审计逐条落库（speak/schedule/memory/silent）实际：${hbActions.join(',')}`,
 )
 
+console.log('== qzone 参数（B8）==')
+// B8：post_qzone 的工具签名是 { text, photoIds } —— 旧实现传 { content, imageUrl }，
+// 正文与配图两个字段都不被识别，空间动态必然失败。
+{
+  const photoId = 'photo-1'
+  storage.prepare("INSERT INTO photos (id, bot_id, url, caption, tags, created_at) VALUES (?,?,?,?,?,?)")
+    .run(photoId, 'b1', '/api/photos/file/photos/p1.png', '', '[]', new Date().toISOString())
+  const calls = []
+  const originalCollect = deps.hub.tools.collectTools
+  const originalDispatch = deps.hub.tools.dispatch
+  deps.hub.tools.collectTools = () => [{ type: 'function', function: { name: 'post_qzone', description: '', parameters: {} } }]
+  deps.hub.tools.dispatch = async (name, args, execCtx) => { calls.push({ name, args, execCtx }); return { ok: true, result: '{}' } }
+  await executeHeartbeatAction(deps, {
+    botId: 'b1', sender: 'u1', action: 'qzone', reason: '想发条动态', content: '今天天气真好', photo: true,
+    silenceSec: 900, backoffLevel: 0,
+  }, botRow, new Date())
+  ok(calls.length === 1 && calls[0].name === 'post_qzone', 'qzone 决策 → 调用 post_qzone 工具')
+  ok(calls[0].args.text === '今天天气真好', 'B8：正文参数是 text（不是 content）')
+  ok(Array.isArray(calls[0].args.photoIds) && calls[0].args.photoIds[0] === photoId, 'B8：配图参数是 photoIds 数组（相册照片 id）')
+  ok(!('content' in calls[0].args) && !('imageUrl' in calls[0].args), 'B8：不再出现工具不认识的 content/imageUrl')
+  ok(calls[0].execCtx.channelId === 'qqp', 'qzone 走 qqp 渠道上下文')
+
+  // 无配图时只传 text
+  calls.length = 0
+  await executeHeartbeatAction(deps, {
+    botId: 'b1', sender: 'u1', action: 'qzone', reason: '想发条动态', content: '只是想说说话',
+    silenceSec: 900, backoffLevel: 0,
+  }, botRow, new Date())
+  ok(calls.length === 1 && !('photoIds' in calls[0].args), 'B8：无配图不传 photoIds')
+
+  // 工具未接入 → 静默跳过并审计
+  deps.hub.tools.collectTools = () => []
+  calls.length = 0
+  await executeHeartbeatAction(deps, {
+    botId: 'b1', sender: 'u1', action: 'qzone', reason: '想发条动态', content: 'x',
+    silenceSec: 900, backoffLevel: 0,
+  }, botRow, new Date())
+  ok(calls.length === 0, 'qzone 工具未接入 → 不派发')
+  const skipAudit = storage.prepare("SELECT action FROM audit_logs WHERE category='heartbeat' AND action='qzone_skip'").get()
+  ok(skipAudit?.action === 'qzone_skip', 'qzone 工具未接入 → 审计 qzone_skip')
+  deps.hub.tools.collectTools = originalCollect
+  deps.hub.tools.dispatch = originalDispatch
+  storage.prepare('DELETE FROM photos WHERE id = ?').run(photoId)
+}
+
 console.log('== 扫描守卫 ==')
 // 未开启心跳开关的 bot 不被扫描
 storage.prepare("INSERT INTO bots (id, name, created_at, heartbeat_enabled) VALUES ('b2','另一个',?,0)").run(nowIso)

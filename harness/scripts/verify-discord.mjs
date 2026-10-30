@@ -37,6 +37,7 @@ import {
   discordDisplayName,
   extractDiscordContent,
   handleDiscordMessage,
+  isDirectMessage,
   resolveDiscordSender,
 } from '../packages/littly/channel-discord/src/inbound.ts'
 
@@ -212,6 +213,15 @@ console.log('== 绑定码流程 ==')
   eq(prefixed?.user_id, null, 'discord_<userId> 前缀联系人不被 promoteContact 认领（旧行为一致）')
 }
 
+// ---------- 3.5 DM 判据（B6） ----------
+console.log('== DM 判据（B6：无 guild_id 即 DM）==')
+ok(isDirectMessage({}) === true, '既无 guild_id 也无 channel_type → 判 DM（旧实现这里恒丢）')
+ok(isDirectMessage({ channel_type: 1 }) === true, 'channel_type=1 → DM')
+ok(isDirectMessage({ guild_id: 'g1' }) === false, '带 guild_id → 群聊')
+ok(isDirectMessage({ guild_id: 'g1', channel_type: 0 }) === false, '群消息（guild_id + type 0）→ 群聊')
+ok(isDirectMessage({ channel_type: 0 }) === false, '显式 channel_type=0 → 群聊')
+ok(isDirectMessage({ channel_type: 1, guild_id: '' }) === true, '空串 guild_id 视为 DM')
+
 // ---------- 4. 入站处理 ----------
 console.log('== 入站处理 ==')
 {
@@ -233,10 +243,19 @@ console.log('== 入站处理 ==')
 
   enqueued.length = 0
   await handleDiscordMessage(deps, bot, {
-    id: 'm2', channel_id: 'g1', channel_type: 0,
+    id: 'm2', channel_id: 'g1', guild_id: 'guild-1',
     author: { id: 'u43', username: 'g43' }, content: '群消息',
   })
   eq(enqueued.length, 0, '群聊消息忽略（只收 DM）')
+
+  // B6 回归：真实 Gateway DM payload 没有 channel_type 字段 —— 旧实现会在这里丢消息
+  enqueued.length = 0
+  await handleDiscordMessage(deps, bot, {
+    id: 'm2b', channel_id: 'dm-77b',
+    author: { id: 'u42', username: 'u42name' },
+    content: '没有 channel_type 的私聊',
+  })
+  eq(enqueued.length, 1, '无 channel_type 的 DM 也入队（B6 回归）')
 
   enqueued.length = 0
   await handleDiscordMessage(deps, bot, {

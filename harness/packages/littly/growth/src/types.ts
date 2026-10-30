@@ -184,6 +184,55 @@ export function validateProposalChanges(
   return { ok: errors.length === 0, errors }
 }
 
+/**
+ * 铁律四：价值禁区（GrowthProfile.value_exclusions，JSON 字符串数组）硬校验。
+ *
+ * 禁区 = 角色人格里「无论如何都不能被成长改写」的核心价值/行为边界（例如「绝不 NTR」
+ * 「绝不自残」「绝不欺骗主人」）。评审提案的维度名/新判据/理由任意一处命中禁区词，
+ * 整条变更作废（与其它铁律一样由服务端裁决，不靠提示词自觉）。
+ *
+ * 空列表 = 明确 no-op（返回 ok，不产生任何错误），保持向后兼容。
+ *
+ * @param rawExclusions - 当前生效档案的 value_exclusions 原始 JSON 串
+ * @param changes - 待校验的变更
+ * @returns ok/errors（errors 为中文原因）
+ */
+export function validateValueExclusions(rawExclusions: string, changes: GrowthChange[]): ValidationResult {
+  const errors: string[] = []
+  let exclusions: string[] = []
+  try {
+    const parsed = JSON.parse(rawExclusions === '' ? '[]' : rawExclusions) as unknown
+    if (Array.isArray(parsed)) {
+      exclusions = parsed.filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+    }
+  } catch {
+    exclusions = []
+  }
+  // 空禁区列表 → 明确 no-op
+  if (exclusions.length === 0) return { ok: true, errors }
+  for (const ch of changes) {
+    const text = `${ch.dimension} ${ch.toDesc ?? ''} ${ch.reasoning ?? ''}`
+    for (const zone of exclusions) {
+      if (text.includes(zone)) {
+        errors.push(`维度 ${ch.dimension} 的变更触碰价值禁区「${zone}」`)
+        break
+      }
+    }
+  }
+  return { ok: errors.length === 0, errors }
+}
+
+/** 解析价值禁区 JSON 串（坏数据 → 空数组）。 */
+export function parseValueExclusions(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw === '' ? '[]' : raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+  } catch {
+    return []
+  }
+}
+
 /** 批准时把变更套到当前维度上，生成新版本的维度快照 */
 export function applyChangesToDims(
   baseDims: GrowthDimension[],

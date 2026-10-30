@@ -6,13 +6,15 @@
  * （会话窗口、记忆双池、到期任务），KV 语义不适配（移植指南 §14 的取舍说明）。
  */
 import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { MIGRATIONS } from './schema.ts'
 
 export * from './rows.ts'
+export * from './paths.ts'
 export { MIGRATIONS }
 
 export const name = 'littly-storage'
@@ -100,6 +102,17 @@ export class LittlyStorage {
 export function apply(ctx: Context, config: Config): void {
   const storage = new LittlyStorage(ctx, config)
   ctx.provide('littlyStorage', storage)
+  // 运行期自述：把「当前进程用的是哪个业务库/端口/cwd」写到临时目录。
+  // 验收脚本（verify-e2e.mjs 等）据此定位真实 DB 做 admin 提权，避免靠猜相对路径。
+  try {
+    const port = process.env['PORT'] ?? '3000'
+    writeFileSync(
+      join(tmpdir(), `littly-runtime-${port}.json`),
+      JSON.stringify({ pid: process.pid, port: Number(port) || 0, dbFile: config.file, cwd: process.cwd(), startedAt: new Date().toISOString() }),
+    )
+  } catch {
+    // 自述失败不影响启动
+  }
   ctx.effect(() => () => storage.close(), 'littly-storage.close')
   ctx.logger.info('littly storage ready at %s', config.file)
 }

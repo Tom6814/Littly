@@ -12,7 +12,7 @@
  */
 import { randomBytes } from 'node:crypto'
 import type { LittlyStorage } from '@littly/storage'
-import { json, err, bodyRecord, reqStr } from './http.ts'
+import { json, err, bodyRecord, reqStr, reportInternalError } from './http.ts'
 import type { RegisterFn } from './deps.ts'
 
 /** 6 位码字母表（剔除易混淆的 I/O/0/1）。 */
@@ -90,7 +90,9 @@ export const registerBindRoutes: RegisterFn = (r, d) => {
         },
       })
     } catch (e) {
-      err(ctx.res, 500, 'internal', e instanceof Error ? e.message : String(e))
+      // B4：内部错误详情不回报文，只记服务端日志。
+      reportInternalError(e, { method: ctx.method, path: ctx.url.pathname, userId: ctx.user?.id ?? '' })
+      err(ctx.res, 500, 'internal', '服务器内部错误，请稍后重试')
     }
   })
 

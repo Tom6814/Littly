@@ -6,15 +6,16 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { join, basename, extname, resolve, sep } from 'node:path'
-import type { CharacterRow, WorldEntryRow } from '@littly/storage'
+import { downloadsDir, type CharacterRow, type WorldEntryRow } from '@littly/storage'
 import { WI_LOGIC, evaluateWorldEntry } from '@littly/persona/src/worldbook.ts'
 import { json, err, bodyRecord, reqStr, reqNum, reqBool, type ApiRequest } from './http.ts'
 import { characterView, worldEntryView } from './mapping.ts'
 import { buildCharacterPng, extractCharaCard } from './png.ts'
-import { loadBot, nowIso, queryStr } from './deps.ts'
+import { loadBot, nowIso, queryStr, botOwnedBy, requireRowBotAccess } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
-const FILE_ROOT = 'public/downloads'
+// B11：上传目录改为持久卷（LITTLY_DATA_DIR/downloads；默认 <cwd>/data/downloads）。
+// 对外的 /api/photos/file/* URL 保持不变。
 const AVATAR_DIR = 'avatars'
 const EXT_MIME: Record<string, string> = {
   '.png': 'image/png',
@@ -37,25 +38,27 @@ function pickFile(ctx: ApiRequest, field: string): { data: Buffer; filename: str
   return { data: wanted.data, filename: wanted.filename, contentType: wanted.contentType }
 }
 
-function avatarPath(cwd: string, row: CharacterRow): string | null {
+function avatarPath(row: CharacterRow): string | null {
   if (row.avatar === '') return null
   const name = basename(row.avatar)
-  const file = join(cwd, FILE_ROOT, AVATAR_DIR, name)
+  const file = join(downloadsDir(), AVATAR_DIR, name)
   if (!existsSync(file)) return null
   return file
 }
 
-function saveUpload(cwd: string, dir: string, filename: string, data: Buffer): string {
+function saveUpload(dir: string, filename: string, data: Buffer): string {
   const safeBase = basename(filename).replace(/[^\w.-]/g, '_') || 'upload'
   const ext = extname(safeBase) || '.png'
   const name = `${Date.now()}-${randomUUID().slice(0, 8)}${ext}`
-  const dirAbs = join(cwd, FILE_ROOT, dir)
+  const dirAbs = join(downloadsDir(), dir)
   mkdirSync(dirAbs, { recursive: true })
   writeFileSync(join(dirAbs, name), data)
   return join(dir, name)
 }
 
 export const registerContentRoutes: RegisterFn = (r, d) => {
+  // B3：内容域归属守卫 —— 带 botId 的请求要求 admin 或该 bot 的 owner。
+  r.botGuard = (ctx, botId) => botOwnedBy(ctx, d, botId)
   // ---- 角色卡 ----
 
   r.get('/api/characters', 'required', (ctx) => {
@@ -63,7 +66,7 @@ export const registerContentRoutes: RegisterFn = (r, d) => {
     json(ctx.res, 200, { data: { characters: rows.map(characterView) } })
   })
 
-  r.post('/api/characters', 'required', (ctx) => {
+  r.post('/api/characters', 'admin', (ctx) => {
     const body = bodyRecord(ctx.body)
     const name = reqStr(body, 'name', 'characterName')?.trim()
     if (name === undefined || name === '') {
@@ -88,7 +91,7 @@ export const registerContentRoutes: RegisterFn = (r, d) => {
     json(ctx.res, 200, { data: { character: characterView(row) } })
   })
 
-  r.patch('/api/characters/:id', 'required', (ctx) => {
+  r.patch('/api/characters/:id', 'admin', (ctx) => {
     const row = charRow(d, ctx.params['id'] ?? '')
     if (row === undefined) {
       err(ctx.res, 404, 'not_found', '角色不存在')
@@ -136,7 +139,7 @@ export const registerContentRoutes: RegisterFn = (r, d) => {
     json(ctx.res, 200, { data: { character: characterView(updated) } })
   })
 
-  r.del('/api/characters/:id', 'required', (ctx) => {
+  r.del('/api/characters/:id', 'admin', (ctx) => {
     const row = charRow(d, ctx.params['id'] ?? '')
     if (row === undefined) {
       err(ctx.res, 404, 'not_found', '角色不存在')
@@ -148,7 +151,7 @@ export const registerContentRoutes: RegisterFn = (r, d) => {
   })
 
   // PNG 导入（multipart file）
-  r.post('/api/characters/import-png', 'required', (ctx) => {
+  r.post('/api/characters/import-png', 'admin', (ctx) => {
     const file = pickFile(ctx, 'file')
     if (file === null) {
       err(ctx.res, 400, 'bad_request', '缺少上传文件')
@@ -193,7 +196,7 @@ export const registerContentRoutes: RegisterFn = (r, d) => {
       card = {}
     }
     const cardJson = JSON.stringify({ spec: 'chara_card_v2', spec_version: '2.0', data: { ...card, name: row.name } })
-    const avatarFile = avatarPath(d.cwd, row)
+    const avatarFile = avatarPath(row)
     let avatarPng: Buffer | null = null
     if (avatarFile !== null) avatarPng = readFileSync(avatarFile)
     const png = buildCharacterPng(avatarPng, cardJson)
@@ -206,7 +209,7 @@ export const registerContentRoutes: RegisterFn = (r, d) => {
   })
 
   // 头像上传（multipart file）
-  r.post('/api/characters/:id/avatar', 'required', (ctx) => {
+  r.post('/api/characters/:id/avatar', 'admin', (ctx) => {
     const row = charRow(d, ctx.params['id'] ?? '')
     if (row === undefined) {
       err(ctx.res, 404, 'not_found', '角色不存在')
@@ -217,7 +220,7 @@ export const registerContentRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 400, 'bad_request', '缺少上传文件')
       return
     }
-    const rel = saveUpload(d.cwd, AVATAR_DIR, file.filename, file.data)
+    const rel = saveUpload(AVATAR_DIR, file.filename, file.data)
     const url = `/api/photos/file/${rel.split(sep).join('/')}`
     d.storage.prepare('UPDATE characters SET avatar = ? WHERE id = ?').run(url, row.id)
     json(ctx.res, 200, { data: { avatarUrl: url, url } })
@@ -268,6 +271,7 @@ export const registerContentRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '词条不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     const body = bodyRecord(ctx.body)
     const columns: string[] = []
     const values: unknown[] = []
@@ -310,6 +314,7 @@ export const registerContentRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '词条不存在')
       return
     }
+    if (!requireRowBotAccess(ctx, d, row.bot_id)) return
     d.storage.prepare('DELETE FROM world_entries WHERE id = ?').run(row.id)
     json(ctx.res, 200, { data: { entry: worldEntryView(row) } })
   })
@@ -378,22 +383,24 @@ export const registerContentRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '文件不存在')
       return
     }
-    const base = resolve(d.cwd, FILE_ROOT)
-    const target = resolve(base, rest)
-    if (target !== base && !target.startsWith(base + sep)) {
-      err(ctx.res, 400, 'bad_request', '非法路径')
+    const legacyBase = resolve(d.cwd, 'public', 'downloads')
+    for (const base of [downloadsDir(), legacyBase]) {
+      const target = resolve(base, rest)
+      if (target !== base && !target.startsWith(base + sep)) {
+        err(ctx.res, 400, 'bad_request', '非法路径')
+        return
+      }
+      if (!existsSync(target)) continue
+      const mime = EXT_MIME[extname(target).toLowerCase()] ?? 'application/octet-stream'
+      const body = readFileSync(target)
+      ctx.res.writeHead(200, {
+        'content-type': mime,
+        'cache-control': 'public, max-age=31536000, immutable',
+      })
+      ctx.res.end(body)
       return
     }
-    if (!existsSync(target)) {
-      err(ctx.res, 404, 'not_found', '文件不存在')
-      return
-    }
-    const mime = EXT_MIME[extname(target).toLowerCase()] ?? 'application/octet-stream'
-    const body = readFileSync(target)
-    ctx.res.writeHead(200, {
-      'content-type': mime,
-      'cache-control': 'public, max-age=31536000, immutable',
-    })
-    ctx.res.end(body)
+    // 两个目录都不存在 → 404（旧目录 public/downloads 仅作升级兼容的只读回退）
+    err(ctx.res, 404, 'not_found', '文件不存在')
   })
 }

@@ -5,8 +5,8 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { LittlyStorage, MemoryRow } from '@littly/storage'
-import { generateImage, webSearch } from '@littly/llm'
+import { downloadsDir, type LittlyStorage, type MemoryRow } from '@littly/storage'
+import { chatComplete, generateImage, webSearch } from '@littly/llm'
 import type { LittlyMemory } from '@littly/memory'
 import { ALL_TOOLS, type ToolDef } from './defs.ts'
 import { biliAuthStatus, biliRunCommand } from './bili.ts'
@@ -51,13 +51,22 @@ export interface LittlyToolRegistry {
   registerChannelTool(def: ToolDef, exec: (args: Record<string, unknown>, ctx: ToolExecCtx) => Promise<{ result: string; artifact?: ToolArtifact }>): void
 }
 
+/** Asia/Shanghai 日期键 yyyy-mm-dd（日记按上海自然日）。 */
+function shanghaiDateKey(now: Date): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(now)
+  return parts
+}
+
 class Registry implements LittlyToolRegistry {
   private readonly extra = new Map<string, { def: ToolDef; exec: (args: Record<string, unknown>, ctx: ToolExecCtx) => Promise<{ result: string; artifact?: ToolArtifact }> }>()
   constructor(
     private readonly storage: LittlyStorage,
     private readonly memory: LittlyMemory,
     private readonly bridge: ChannelBridge,
-    private readonly cwd: string,
+    // B11 起文件路径统一由 @littly/storage 的 downloadsDir() 决定，cwd 参数保留以兼容装配签名。
+    _cwd: string,
   ) {}
 
   collectTools(): ToolDef[] {
@@ -102,13 +111,30 @@ class Registry implements LittlyToolRegistry {
     const s = (k: string): string => String(args[k] ?? '')
     switch (name) {
       case 'remember': {
-        const items = (args.items as Array<{ category?: string; content: string; importance?: number; expiresAt?: string }> | undefined) ?? []
-        const out: Array<{ id: string; dupSkipped: boolean }> = []
+        const items = (args.items as Array<{
+          category?: string
+          content: string
+          importance?: number
+          expiresAt?: string
+          idempotencyKey?: string
+          ifSha256?: string
+        }> | undefined) ?? []
+        const out: Array<{ id: string; dupSkipped: boolean; idempotentReplay?: boolean; drift?: unknown }> = []
         for (const item of items) {
+          // B14：expiresAt→valid_until、idempotencyKey/ifSha256 都在记忆层接线，
+          // 这里把模型给的可选字段原样透传。
           const r = await this.memory.remember(ctx.botId, ctx.sender, item)
           out.push(r)
         }
-        return { result: { remembered: out.filter((x) => !x.dupSkipped).length, dupSkipped: out.filter((x) => x.dupSkipped).length, ids: out.map((x) => x.id) } }
+        return {
+          result: {
+            remembered: out.filter((x) => !x.dupSkipped).length,
+            dupSkipped: out.filter((x) => x.dupSkipped).length,
+            idempotentReplay: out.filter((x) => x.idempotentReplay === true).length,
+            drifted: out.filter((x) => x.drift !== undefined).length,
+            ids: out.map((x) => x.id),
+          },
+        }
       }
       case 'schedule_message': {
         const fireAt = new Date(s('fireAt'))
@@ -199,7 +225,7 @@ class Registry implements LittlyToolRegistry {
         return { result: { ok: true, results } }
       }
       case 'write_doc': {
-        const dir = join(this.cwd, 'public', 'downloads', 'docs')
+        const dir = join(downloadsDir(), 'docs')
         mkdirSync(dir, { recursive: true })
         const filename = s('filename').replace(/[^\w.-]/g, '_') || `${Date.now()}.md`
         writeFileSync(join(dir, filename), s('content'), 'utf8')
@@ -207,7 +233,7 @@ class Registry implements LittlyToolRegistry {
       }
       case 'gen_image': {
         const img = await generateImage(this.storage, s('prompt'), { negativePrompt: s('negativePrompt'), size: s('size') })
-        const dir = join(this.cwd, 'public', 'downloads', 'photos')
+        const dir = join(downloadsDir(), 'photos')
         mkdirSync(dir, { recursive: true })
         const filename = `${Date.now()}.png`
         let url: string
@@ -237,9 +263,61 @@ class Registry implements LittlyToolRegistry {
         return { result: { ok: true } }
       }
       case 'write_diary': {
-        const date = new Date().toISOString().slice(0, 10)
+        // B15：原实现是桩（只查有没有写过、什么都不写）。现在真写：
+        // 取今天的对话 + 角色卡摘要 → chatComplete 生成第一人称日记 → 落 diaries（一天一篇）。
+        const now = new Date()
+        const date = shanghaiDateKey(now)
         const existing = this.get<{ id: string; content: string }>('SELECT id, content FROM diaries WHERE bot_id = ? AND date = ?', ctx.botId, date)
-        return { result: existing ? { ok: true, alreadyWritten: true, diary: existing.content } : { ok: true, alreadyWritten: false } }
+        if (existing) {
+          return { result: { ok: true, alreadyWritten: true, date, diary: existing.content } }
+        }
+        const dayStart = `${date}T00:00:00+08:00`
+        const botRow = this.get<{ name: string; system_prompt: string; character_id: string | null }>(
+          'SELECT name, system_prompt, character_id FROM bots WHERE id = ?', ctx.botId,
+        )
+        if (!botRow) return { result: { ok: false, error: '角色不存在' } }
+        const character = botRow.character_id
+          ? this.get<{ name: string; data: string }>('SELECT name, data FROM characters WHERE id = ?', botRow.character_id)
+          : null
+        let personaHint = botRow.name
+        if (character) {
+          let cardText = ''
+          try {
+            const parsed = JSON.parse(character.data) as Record<string, unknown>
+            const data = (parsed['data'] ?? parsed) as Record<string, unknown>
+            cardText = [data['description'], data['personality']].filter((x) => typeof x === 'string').join('；')
+          } catch {
+            cardText = character.data.slice(0, 300)
+          }
+          personaHint = `${character.name}${cardText ? `（${cardText}）` : ''}`
+        } else if (botRow.system_prompt.trim()) {
+          personaHint = `${botRow.name}（${botRow.system_prompt.trim().slice(0, 300)}）`
+        }
+        const msgs = this.all<{ role: string; content: string; created_at: string }>(
+          "SELECT role, content, created_at FROM messages WHERE bot_id = ? AND sender = ? AND created_at >= ? AND role IN ('user','assistant') ORDER BY created_at ASC LIMIT 80",
+          ctx.botId, ctx.sender, dayStart,
+        )
+        if (msgs.length === 0) {
+          return { result: { ok: false, date, error: '今天还没有对话，写不出日记（先聊几句）' } }
+        }
+        const transcript = msgs
+          .map((m) => `${m.role === 'user' ? '对方' : '我'}：${m.content.slice(0, 200)}`)
+          .join('\n')
+        const generated = await chatComplete(this.storage, [
+          {
+            role: 'system',
+            content: `你是「${personaHint}」，一个有血有肉的真实角色。现在深夜独处，写今天的私密日记（第一人称，只用你自己的口吻）。\n要求：像深夜随手写的私密日记——口语、碎片、不修饰；记具体的事和当时的感觉，不写道理不写总结；允许只写两三行；情绪不平摊；不要提到「AI」「模型」「提示词」，不要分点、不用 markdown。`,
+          },
+          { role: 'user', content: `今天的对话记录：\n${transcript}\n\n请写今天的日记。` },
+        ], { temperature: 0.85, enableThinking: false, maxTokens: 600 })
+        const content = generated.content.trim()
+        if (content === '') return { result: { ok: false, date, error: '模型没有产出日记内容' } }
+        const id = randomUUID()
+        const nowIso = now.toISOString()
+        this.storage.prepare(
+          'INSERT INTO diaries (id, bot_id, date, content, mood, snapshot, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
+        ).run(id, ctx.botId, date, content, '', '{}', nowIso, nowIso)
+        return { result: { ok: true, alreadyWritten: false, date, diary: content } }
       }
       case 'go_to_sleep': {
         const until = args.sleepUntil ? new Date(s('sleepUntil')) : new Date(Date.now() + 8 * 3600_000)

@@ -2,6 +2,7 @@
  * 管理与运维端点：铁律、全局设置（AI 打码）、成长系统、插件清单、
  * Bilibili sidecar 代理、调试（系统提示词 / 审计）、活动统计、全局搜索、种子初始化。
  */
+import { randomUUID } from 'node:crypto'
 import type { AuditLogRow, BotRow, CharacterRow, ContactRow, MemoryRow, MessageRow, ScheduledMessageRow } from '@littly/storage'
 import { invalidateAIConfigCache } from '@littly/llm'
 import { parseChanges, parseProposalMeta } from '@littly/growth'
@@ -16,10 +17,10 @@ import {
   getDisabledTools,
   toggleDisabledTool,
 } from '@littly/tools'
-import { json, err, bodyRecord, reqStr, reqNum, reqBool, type ApiRequest } from './http.ts'
+import { json, err, bodyRecord, reqStr, reqNum, reqBool, fire, type ApiRequest } from './http.ts'
 import { maskSecret, isMaskedInput } from './mapping.ts'
 import { ensureSeed } from './seed.ts'
-import { isAdmin, ownSender, senderAllowed, loadBot, queryStr, nowIso } from './deps.ts'
+import { isAdmin, ownSender, senderAllowed, loadBot, queryStr, nowIso, botOwnedBy, requireBotAccess } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
 /** 安装失败时给出「为什么 + 怎么办」，不要只丢一个 failed。 */
@@ -55,7 +56,71 @@ function localizeText(text: string | { readonly en: string; readonly [locale: st
   return typeof zh === 'string' ? zh : undefined
 }
 
-/** Bilibili sidecar 错误 → 统一信封（sidecar 不可达 = 502；业务错误码原样透传）。 */function biliFail(ctx: ApiRequest, error: unknown): void {
+/**
+ * B1 安全修复：MCP 服务器端点（原 `/api/plugins/mcp` POST/DELETE 仅 required、命令由请求方
+ * 自由给 → 任意登录用户可启一个任意 stdio 子进程）改为：
+ * - 仅管理员可增删；
+ * - stdio 的 command 只允许白名单里的可执行文件（basename 匹配）；
+ * - command / args 拒绝 shell 元字符（防拼接注入）；
+ * - 解释器的 eval 类参数（-e/--eval/-c/--command）一律拒绝；
+ * - 每次改动写审计（audit_logs，category=tool_call，action=mcp_upsert/mcp_remove）。
+ */
+const MCP_SAFE_COMMANDS = new Set(['npx', 'node', 'uvx', 'python3', 'python', 'deno', 'bun', 'bunx', 'true'])
+const SHELL_META_RE = /[;&|`$<>()[\]{}*?!~#\n\r\t'"\\]/
+const INTERPRETER_MARKERS = new Set(['node', 'deno', 'bun', 'bunx', 'npx', 'python', 'python3'])
+const EVAL_FLAGS = new Set(['-e', '--eval', '-c', '--command', '-p', '--print', '--shell', '--input-type'])
+
+/** 校验一次 MCP 服务器配置；通过返回 null，否则返回中文原因。 */
+export function validateMcpServer(input: {
+  name: string
+  transport: 'stdio' | 'streamable-http'
+  command?: string | undefined
+  args: string[]
+  url?: string | undefined
+  /** 同名已登记服务器的原配置（更新时用：命令未变可放行）。 */
+  existing?: { command?: string | undefined } | undefined
+}): string | null {
+  if (!/^[A-Za-z0-9_-]{1,32}$/.test(input.name)) return '服务器名只允许字母数字下划线连字符，1-32 位'
+  if (input.transport === 'stdio') {
+    if (input.command === undefined || input.command === '') return 'stdio 传输必须给出 command'
+    if (SHELL_META_RE.test(input.command)) return '命令包含 shell 元字符'
+    const base = input.command.split(/[/\\]/).pop() ?? ''
+    const unchanged = input.existing?.command !== undefined && input.existing.command === input.command
+    if (!MCP_SAFE_COMMANDS.has(base) && !unchanged) {
+      return `不允许的命令（${base}）：只允许以 ${[...MCP_SAFE_COMMANDS].join(' / ')} 启动；已登记服务器保持原命令时可直接更新`
+    }
+    const interpreter = INTERPRETER_MARKERS.has(base)
+    for (const arg of input.args) {
+      if (SHELL_META_RE.test(arg)) return '参数包含 shell 元字符'
+      if (interpreter && EVAL_FLAGS.has(arg)) return `不允许的启动参数（${arg}）：解释器的 eval 类参数可执行任意代码`
+    }
+  } else {
+    if (input.url === undefined || input.url === '') return 'streamable-http 传输必须给出 url'
+    let parsed: URL
+    try {
+      parsed = new URL(input.url)
+    } catch {
+      return 'url 不合法'
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'url 只支持 http/https'
+    if (parsed.username !== '' || parsed.password !== '') return 'url 不允许携带凭据'
+  }
+  return null
+}
+
+/** MCP 配置变更审计（失败不阻断请求）。 */
+function auditMcpChange(d: Deps, action: 'mcp_upsert' | 'mcp_remove', detail: Record<string, unknown>): void {
+  try {
+    d.storage
+      .prepare('INSERT INTO audit_logs (id, bot_id, category, action, detail, created_at) VALUES (?,?,?,?,?,?)')
+      .run(randomUUID(), '', 'tool_call', action, JSON.stringify(detail), new Date().toISOString())
+  } catch (e) {
+    d.log('[mcp] 审计写入失败: %s', e instanceof Error ? e.message : e)
+  }
+}
+
+/** Bilibili sidecar 错误 → 统一信封（sidecar 不可达 = 502；业务错误码原样透传）。 */
+function biliFail(ctx: ApiRequest, error: unknown): void {
   if (error instanceof BiliSidecarError) {
     const status = error.status === 502 || error.status === 504 ? 502 : error.status >= 400 && error.status < 600 ? error.status : 502
     err(ctx.res, status, error.code, error.message)
@@ -118,6 +183,8 @@ function applyAiSettings(d: Deps, body: Record<string, unknown>): void {
 // 由 /api/bots 与聊天路由自动调用；这里只保留手动触发的管理端点。
 
 export const registerAdminRoutes: RegisterFn = (r, d) => {
+  // B3：内容域归属守卫 —— 带 botId 的请求要求 admin 或该 bot 的 owner。
+  r.botGuard = (ctx, botId) => botOwnedBy(ctx, d, botId)
   // ---- 铁律（bot 回落全局，读时自动建空行）----
 
   r.get('/api/persona-rules', 'required', (ctx) => {
@@ -234,6 +301,8 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
         pendingProposals: snap.pendingProposals.map(decorate),
         history: snap.history.map(decorate),
         reviewWindowOpen: snap.reviewWindowOpen,
+        // B10：价值禁区（不可被成长改写的人格边界；空数组 = 未设置）
+        valueExclusions: d.growth.getValueExclusions(botId),
         nextReviewAt: snap.nextReviewAt,
         nextReviewText: snap.nextReviewText,
         // 控制台读的窗口视图
@@ -243,7 +312,7 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
   })
 
   r.post('/api/growth', 'required', (ctx) => {
-    void (async (): Promise<void> => {
+    fire(ctx, (async (): Promise<void> => {
       const body = bodyRecord(ctx.body)
       const action = reqStr(body, 'action') ?? ''
       const botId = reqStr(body, 'botId') ?? ''
@@ -285,11 +354,33 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
         return
       }
       err(ctx.res, 400, 'bad_request', 'unknown action')
-    })()
+    })())
+  })
+
+  /**
+   * B10：设置/清除当前生效成长档案的「价值禁区」。
+   * 提案评审（创建 + 审批）都会硬校验 changes 不得触碰禁区；空列表 = 明确 no-op。
+   * 写域内新增端点，前端可在 /her/growth 页接入。
+   */
+  r.put('/api/growth/value-exclusions', 'required', (ctx) => {
+    const body = bodyRecord(ctx.body)
+    const botId = reqStr(body, 'botId') ?? ''
+    if (botId === '') {
+      err(ctx.res, 400, 'bad_request', '缺少 botId')
+      return
+    }
+    if (!requireBotAccess(ctx, d, botId)) return
+    const exclusions = Array.isArray(body['exclusions']) ? body['exclusions'] : (Array.isArray(body['valueExclusions']) ? body['valueExclusions'] : undefined)
+    const result = d.growth.setValueExclusions(botId, exclusions ?? [])
+    if (!result.ok) {
+      err(ctx.res, 400, 'bad_request', result.error)
+      return
+    }
+    json(ctx.res, 200, { data: { botId, valueExclusions: result.valueExclusions } })
   })
 
   r.post('/api/growth/proposals/:id', 'required', (ctx) => {
-    void (async (): Promise<void> => {
+    fire(ctx, (async (): Promise<void> => {
       const body = bodyRecord(ctx.body)
       const decision = reqStr(body, 'decision') ?? ''
       const result = await d.growth.decide(ctx.params['id'] ?? '', decision as never, body['changes'])
@@ -298,13 +389,13 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
         return
       }
       json(ctx.res, 200, { data: result })
-    })()
+    })())
   })
 
   // ---- 插件 / 技能 / MCP / 工具 ----
 
   r.get('/api/plugins', 'required', (ctx) => {
-    void (async (): Promise<void> => {
+    fire(ctx, (async (): Promise<void> => {
       // dsh 插件：委托 dsh 原生 plugin-manager（不自造插件清单）
       let dsh: Array<Record<string, unknown>> = []
       try {
@@ -419,13 +510,13 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
           skillSources: skills.map((s) => ({ name: s.name, provider: s.provider, description: s.description })),
         },
       })
-    })()
+    })())
   })
 
   // ---- 插件安装 / 卸载 / 启停（走 dsh 原生 pluginManager，语义与官方面板一致）----
 
   r.post('/api/plugins/install', 'admin', (ctx) => {
-    void (async (): Promise<void> => {
+    fire(ctx, (async (): Promise<void> => {
       const body = bodyRecord(ctx.body)
       const spec = reqStr(body, 'spec', 'name', 'package')?.trim() ?? ''
       if (spec === '') {
@@ -458,11 +549,11 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
         const message = e instanceof Error ? e.message : String(e)
         err(ctx.res, 400, 'install_failed', message)
       }
-    })()
+    })())
   })
 
   r.post('/api/plugins/remove', 'admin', (ctx) => {
-    void (async (): Promise<void> => {
+    fire(ctx, (async (): Promise<void> => {
       const body = bodyRecord(ctx.body)
       const name = reqStr(body, 'name') ?? ''
       if (name === '') {
@@ -480,11 +571,11 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
       } catch (e) {
         err(ctx.res, 400, 'remove_failed', e instanceof Error ? e.message : String(e))
       }
-    })()
+    })())
   })
 
   r.post('/api/plugins/enable', 'admin', (ctx) => {
-    void (async (): Promise<void> => {
+    fire(ctx, (async (): Promise<void> => {
       const body = bodyRecord(ctx.body)
       const id = reqStr(body, 'id') ?? ''
       const name = reqStr(body, 'name') ?? ''
@@ -506,11 +597,11 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
       } catch (e) {
         err(ctx.res, 400, 'enable_failed', e instanceof Error ? e.message : String(e))
       }
-    })()
+    })())
   })
 
-  r.post('/api/plugins/mcp', 'required', (ctx) => {
-    void (async (): Promise<void> => {
+  r.post('/api/plugins/mcp', 'admin', (ctx) => {
+    fire(ctx, (async (): Promise<void> => {
       const body = bodyRecord(ctx.body)
       const name = reqStr(body, 'name', 'serverName') ?? ''
       if (name === '') {
@@ -519,31 +610,46 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
       }
       const transport = reqStr(body, 'transport', 'type') === 'streamable-http' ? 'streamable-http' : 'stdio'
       const args = Array.isArray(body['args']) ? (body['args'] as unknown[]).map((a) => String(a)) : []
+      const command = reqStr(body, 'command')
+      const url = reqStr(body, 'url')
+      const existing = d.mcp.listConfigs().find((c) => c.name === name)
+      const reject = validateMcpServer({ name, transport, command, args, url, existing })
+      if (reject !== null) {
+        auditMcpChange(d, 'mcp_upsert', { name, transport, command: command ?? '', rejected: reject, user: ctx.user?.username ?? '' })
+        err(ctx.res, 400, 'bad_request', reject)
+        return
+      }
       const result = await d.mcp.upsertServer({
         name,
         transport,
-        ...(reqStr(body, 'command') ? { command: reqStr(body, 'command') as string } : {}),
+        ...(command ? { command } : {}),
         ...(args.length > 0 ? { args } : {}),
-        ...(reqStr(body, 'url') ? { url: reqStr(body, 'url') as string } : {}),
+        ...(url ? { url } : {}),
         enabled: body['enabled'] !== false,
+      })
+      auditMcpChange(d, 'mcp_upsert', {
+        name, transport, command: command ?? '', url: url ?? '', args, ok: result.ok, error: result.error ?? '',
+        user: ctx.user?.username ?? '',
       })
       if (!result.ok) {
         err(ctx.res, 400, 'bad_request', result.error ?? '添加失败')
         return
       }
       json(ctx.res, 200, { data: { ok: true } })
-    })()
+    })())
   })
 
-  r.del('/api/plugins/mcp/:name', 'required', (ctx) => {
-    void (async (): Promise<void> => {
-      const result = await d.mcp.removeServer(ctx.params['name'] ?? '')
+  r.del('/api/plugins/mcp/:name', 'admin', (ctx) => {
+    fire(ctx, (async (): Promise<void> => {
+      const name = ctx.params['name'] ?? ''
+      const result = await d.mcp.removeServer(name)
+      auditMcpChange(d, 'mcp_remove', { name, ok: result.ok, error: result.error ?? '', user: ctx.user?.username ?? '' })
       if (!result.ok) {
         err(ctx.res, 404, 'not_found', result.error ?? '服务器不存在')
         return
       }
       json(ctx.res, 200, { data: { ok: true } })
-    })()
+    })())
   })
 
   r.patch('/api/plugins/tools', 'required', (ctx) => {
@@ -576,7 +682,7 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
   // ---- Bilibili sidecar 代理 ----
 
   r.get('/api/bili/status', 'required', (ctx) => {
-    void (async (): Promise<void> => {
+    fire(ctx, (async (): Promise<void> => {
       try {
         const envelope = await biliAuthStatus()
         const data = (typeof envelope.data === 'object' && envelope.data !== null ? envelope.data : {}) as Record<string, unknown>
@@ -599,11 +705,11 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
         }
         biliFail(ctx, e)
       }
-    })()
+    })())
   })
 
   r.post('/api/bili/qr/start', 'required', (ctx) => {
-    void (async (): Promise<void> => {
+    fire(ctx, (async (): Promise<void> => {
       try {
         const body = await biliQrStart()
         json(ctx.res, 200, {
@@ -618,11 +724,11 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
       } catch (e) {
         biliFail(ctx, e)
       }
-    })()
+    })())
   })
 
   r.get('/api/bili/qr/status', 'required', (ctx) => {
-    void (async (): Promise<void> => {
+    fire(ctx, (async (): Promise<void> => {
       const sessionId = queryStr(ctx, 'sessionId', 'session_id') ?? ''
       if (sessionId === '') {
         err(ctx.res, 400, 'bad_request', '缺少 sessionId')
@@ -640,11 +746,11 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
       } catch (e) {
         biliFail(ctx, e)
       }
-    })()
+    })())
   })
 
   r.post('/api/bili/cmd', 'required', (ctx) => {
-    void (async (): Promise<void> => {
+    fire(ctx, (async (): Promise<void> => {
       const body = bodyRecord(ctx.body)
       const argv = Array.isArray(body['argv']) ? (body['argv'] as unknown[]).map((a) => String(a)) : []
       if (argv.length === 0) {
@@ -665,7 +771,7 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
       } catch (e) {
         biliFail(ctx, e)
       }
-    })()
+    })())
   })
 
   // ---- 调试 ----

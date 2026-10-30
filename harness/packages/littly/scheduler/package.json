@@ -18,7 +18,8 @@
     "@littly/agents": "workspace:*",
     "@littly/llm": "workspace:*",
     "@littly/memory": "workspace:*",
-    "@littly/storage": "workspace:*"
+    "@littly/storage": "workspace:*",
+    "@littly/growth": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:~",

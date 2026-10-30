@@ -90,6 +90,85 @@ ok(protectedHits.length <= 5, `protected 标记不超过 5 条（实际 ${protec
 ok(protectedHits.length >= 1, '最近写入的带 protected 能力位')
 ok(hits.every((h) => 'protected' in h || h.protected === undefined), 'protected 是可选能力位，不改原字段')
 
+// ---------- B14：归属 / expiresAt / 幂等接线 ----------
+console.log('== B14 记忆归属与时效 ==')
+{
+  const { normalizeValidUntil } = await import('../packages/littly/memory/src/index.ts')
+  ok(normalizeValidUntil('2026-12-01T00:00:00Z') === '2026-12-01T00:00:00.000Z', 'B14：expiresAt → ISO valid_until')
+  ok(normalizeValidUntil('bad-date') === null, 'B14：非法时间 → null（不写坏值）')
+  ok(normalizeValidUntil('') === null && normalizeValidUntil(null) === null, 'B14：空值 → null')
+
+  // remember 落 valid_until + idempotencyKey 回放 + if_sha256 漂移
+  const idem1 = await memory.remember('b1', 'u1', {
+    category: 'fact', content: 'B14 有时效的事实：下周三出差', importance: 3,
+    expiresAt: '2026-12-01T00:00:00Z', idempotencyKey: 'b14-key-1',
+  })
+  const row1 = storage.prepare('SELECT * FROM memories WHERE id = ?').get(idem1.id)
+  ok(row1.valid_until === '2026-12-01T00:00:00.000Z', 'B14：remember 把 expiresAt 落进 valid_until')
+  const idem2 = await memory.remember('b1', 'u1', {
+    category: 'fact', content: 'B14 有时效的事实：下周三出差', importance: 3, idempotencyKey: 'b14-key-1',
+  })
+  ok(idem2.id === idem1.id && idem2.idempotentReplay === true, 'B14：idempotencyKey 重复写入 → 回放同一条，不新增')
+  const countSame = storage.prepare("SELECT COUNT(*) AS c FROM memories WHERE content = 'B14 有时效的事实：下周三出差'").get().c
+  ok(countSame === 1, 'B14：幂等键不产生重复行')
+
+  // if_sha256：同话题内容被改 → 报漂移（不静默覆盖）
+  const driftSeed = await memory.remember('b1', 'u1', {
+    category: 'profile', content: 'B14 漂移检测内容 喜欢猫', importance: 2,
+  })
+  const driftRes = await memory.remember('b1', 'u1', {
+    category: 'profile', content: 'B14 漂移检测内容 喜欢猫', importance: 2,
+    ifSha256: contentSha256('完全不同的内容'),
+  })
+  ok(driftRes.dupSkipped === true && driftRes.id === driftSeed.id && driftRes.drift !== undefined, 'B14：if_sha256 不符 → 命中重复并报告漂移（不覆盖）')
+
+  // 整理：只允许操作 (bot_id, sender) 范围内的记忆 —— 别的 bot 的记忆 id 动了也不改库
+  const otherId = 'b14-other-bot'
+  storage.prepare(
+    "INSERT INTO memories (id, bot_id, sender, category, content, importance, event_time, recorded_at, provenance, volatility, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+  ).run(otherId, 'b2', 'u2', 'fact', '别的 bot 的记忆', 3, now, now, 'observed', 'stable', now)
+  // 造 12 条 b1/u1 的记忆（整理要求 >=10），并让模型返回：删除别的 bot 的 id + 删除自己范围内一条
+  for (let i = 0; i < 12; i++) {
+    storage.prepare(
+      "INSERT INTO memories (id, bot_id, sender, category, content, importance, event_time, recorded_at, provenance, volatility, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+    ).run(`b14-m${i}`, 'b1', 'u1', 'detail', `B14 整理条目 ${i}`, 1, now, new Date(Date.parse(now) - i * 60000).toISOString(), 'observed', 'stable', now)
+  }
+  storage.setSetting('ai.api.base_url', 'http://127.0.0.1:9/v1')
+  storage.setSetting('ai.api.api_key', 'test-key')
+  storage.setSetting('ai.api.chat_model', 'test-model')
+  // remember() 的异步预嵌入可能已经用「未配置」状态占过一次 30s 配置缓存 → 显式失效。
+  const { invalidateAIConfigCache } = await import('../packages/littly/llm/lib/index.js')
+  invalidateAIConfigCache()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('/chat/completions')) {
+      const ops = [
+        { op: 'DELETE', id: otherId, reason: '模型幻觉的越权 id' },
+        { op: 'DELETE', id: 'b14-m11', reason: '过期琐事' },
+        { op: 'COMPRESS', ids: ['b14-m10', otherId], mergedContent: '越权合并', mergedImportance: 2 },
+      ]
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ operations: ops }) } }] }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      })
+    }
+    return realFetch(url, init)
+  }
+  try {
+    const cons = await memory.runConsolidation('b1', 'u1')
+    ok(cons.before >= 12, `B14：整理扫描到本会话记忆（${cons.before} 条）`)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  const otherRow = storage.prepare('SELECT deleted_at FROM memories WHERE id = ?').get(otherId)
+  ok(otherRow.deleted_at === null, 'B14：整理不会删除其他 bot 的记忆（裸 id 越权被拦）')
+  const ownDeleted = storage.prepare('SELECT deleted_at IS NOT NULL AS d FROM memories WHERE id = ?').get('b14-m11')
+  ok(ownDeleted.d === 1, 'B14：本会话范围内允许的 DELETE 生效')
+  const protectedRow = storage.prepare('SELECT deleted_at FROM memories WHERE id = ?').get('b14-m0')
+  ok(protectedRow.deleted_at === null, 'B14：最近 5 条硬保护仍生效（不被 DELETE）')
+  const crossMerge = storage.prepare("SELECT COUNT(*) AS c FROM memories WHERE content = '越权合并'").get().c
+  ok(crossMerge === 0, 'B14：含越权 id 的 COMPRESS 整条跳过，不写合并记忆')
+}
+
 storage.close()
 rmSync(dir, { recursive: true, force: true })
 

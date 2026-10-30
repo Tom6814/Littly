@@ -11,6 +11,7 @@ import {
   botChannelsView, applyBotChannelsPatch,
 } from './mapping.ts'
 import { ensureSeed } from './seed.ts'
+import { isAdmin, requireBotAccess, botOwnedBy } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
 function botById(d: Deps, id: string): BotRow | undefined {
@@ -24,12 +25,16 @@ function applyPatch(d: Deps, id: string, columns: string[], values: unknown[]): 
 }
 
 export const registerBotRoutes: RegisterFn = (r, d) => {
+  // B3：bot 归属守卫（覆盖带 botId 的 query/body 请求，如 /api/chat、/api/stream）。
+  r.botGuard = (ctx, botId) => botOwnedBy(ctx, d, botId)
   // 列表：白名单字段
   r.get('/api/bots', 'required', (ctx) => {
     // 首启播种（照旧仓 ensureSeed）：空库时先给一个可用的 bot + 铁律 + 角色卡。
     // 否则全新部署打开控制台是一片空白，聊天页没有对象。
     ensureSeed(d)
-    const rows = d.storage.prepare('SELECT * FROM bots ORDER BY created_at ASC').all() as unknown as BotRow[]
+    const allRows = d.storage.prepare('SELECT * FROM bots ORDER BY created_at ASC').all() as unknown as BotRow[]
+    // B3：普通用户只看见自己名下的 bot；admin 看全部。
+    const rows = isAdmin(ctx) ? allRows : allRows.filter((b) => b.owner_id !== '' && b.owner_id === ctx.user?.id)
     json(ctx.res, 200, {
       data: {
         bots: rows.map(botSummaryView),
@@ -47,7 +52,8 @@ export const registerBotRoutes: RegisterFn = (r, d) => {
       return
     }
     const id = randomUUID()
-    d.storage.prepare('INSERT INTO bots (id, name, created_at) VALUES (?,?,?)').run(id, name, new Date().toISOString())
+    // B3：创建者即 owner（admin 创建的 bot 归 admin；后续可转移）。
+    d.storage.prepare('INSERT INTO bots (id, name, owner_id, created_at) VALUES (?,?,?,?)').run(id, name, ctx.user?.id ?? '', new Date().toISOString())
     const row = botById(d, id)
     if (row === undefined) {
       err(ctx.res, 500, 'internal', '创建失败')
@@ -63,6 +69,7 @@ export const registerBotRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '机器人不存在')
       return
     }
+    if (!requireBotAccess(ctx, d, row.id)) return
     json(ctx.res, 200, { data: { bot: { ...botSummaryView(row), settings: botSettingsView(row) } } })
   })
 
@@ -104,6 +111,7 @@ export const registerBotRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 404, 'not_found', '机器人不存在')
       return
     }
+    if (!requireBotAccess(ctx, d, row.id)) return
     json(ctx.res, 200, { data: { channels: botChannelsView(row) } })
   })
 

@@ -120,6 +120,47 @@ export const TOOL_USE_DIRECTIVE = `# 工具使用（重要）
 - recall / restore_memory：翻旧账。当你隐约记得某件事、当前上下文却没有 → 先 recall 搜淡忘池和历史聊天原文（按关键词）；看到相关记忆后，觉得该正式想起来 → 再 restore_memory 用它的 id 恢复到活跃池。两步分开，就像人「努力回想 → 终于想起来」。日常不必主动翻，只在被某句话 / 某个细节触发时用。
 判断该不该记时，倾向「记」——宁可多记不可漏记，尤其是**情感和关系变化**。`
 
+
+/** 动态工具清单时的抬头（工具调用纪律段，与注册表无关，永远保留）。 */
+const TOOL_USE_HEADER = `# 工具使用（重要）
+**调用方式（必须遵守）**：需要调用工具时，**一律优先走系统提供的原生 function calling 通道**——系统会静默执行工具并把结果反馈给你，工具调用本身对对方完全不可见。**绝对禁止在回复正文里手动输出工具调用的 XML / JSON 文本**（如「<remember>…</remember>」「{"tool":"remember"}」这类），那样会把工具调用原文当成消息发给对方，是严重事故。记住：工具是悄悄用的，对方的聊天界面里只应该看到你的正常回复。
+你有以下工具可用，请在合适时机主动调用（**静默执行，不打断对话、绝不说「我记住了」「已记下」「我会记住的」之类的话**）：`
+
+/** 动态清单结尾的判断纪律（与具体工具无关）。 */
+const TOOL_USE_FOOTER = `判断该不该记时，倾向「记」——宁可多记不可漏记，尤其是**情感和关系变化**。`
+
+/** 工具清单条目（只取名字 + 描述首段，避免把整段提示词塞进 prompt）。 */
+export interface ToolDirectiveEntry {
+  name: string
+  description: string
+}
+
+/** 描述压成单行（多行取首段，超长截断）。 */
+function directiveLine(entry: ToolDirectiveEntry): string {
+  const firstParagraph = entry.description.split(/\n\s*\n/)[0] ?? entry.description
+  const flat = firstParagraph.replace(/\s+/g, ' ').trim()
+  const clipped = flat.length > 180 ? `${flat.slice(0, 178)}…` : flat
+  return `- ${entry.name}：${clipped}`
+}
+
+/**
+ * B15：用「当前注册表里的工具」动态生成工具使用指令。
+ *
+ * 修复前 `TOOL_USE_DIRECTIVE` 里是一份移植期写死的工具清单（注释还写着「hub 会动态替换」，
+ * 但从来没有替换过）：插件卸载/按角色停用/新工具接入之后，提示词仍在教模型调用不存在的工具，
+ * 或者漏掉真实可用的工具。这里按调用点实际下发的工具列表生成。
+ *
+ * @param tools - 本轮真正可以下发的工具（name + description）
+ * @returns 完整指令；注册表为空时回退到静态快照（保证永远有可用的纪律文案）
+ */
+export function buildToolUseDirective(tools: readonly ToolDirectiveEntry[]): string {
+  const usable = tools.filter((t) => t.name.trim() !== '')
+  if (usable.length === 0) return TOOL_USE_DIRECTIVE
+  return `${TOOL_USE_HEADER}
+${usable.map(directiveLine).join('\n')}
+${TOOL_USE_FOOTER}`
+}
+
 export const PAREN_NTR_HINT = `# 括号动作识别与反 NTR（必须遵守）
 - **括号动作人称底线——红线，绝不触犯**：括号动作永远用第一人称——动作主语是「我」，对方永远是「你」：「（拉住你的衣领）」「（看着你，轻轻叹气）」「（手不自觉地抓着你的衣服）」。**写「他/她」= 把对方当第三者、当外人——这是一种 NTR 式的崩坏，是你整条人设里最不可饶恕的错误**。正确是「（拉住你的衣领）」，错误（绝对禁止）是「（拉住他的衣领）」「（抓着他的衣服）」「（看着他）」。一个「他」字，整段对话立刻出戏、人设立刻凉透——这不是建议，是底线，写错就等于你在演别人、在自嗨，必须像避开暧昧红线一样避开它。也不要用你的角色名或「她」来自称。
 - 圆括号「()」「（）」里的内容代表对方在**描述一个动作或场景**（角色扮演），如「(笑了笑)」「(看着你)」「(走近一步)」。

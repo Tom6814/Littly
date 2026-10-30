@@ -40,8 +40,8 @@ jobs:
           set -e
           for s in scripts/verify-*.mjs; do
             case "$s" in
-              # 端到端要真启动服务，由下面的 e2e job 跑
-              *verify-e2e.mjs) continue ;;
+              # 端到端 / onboarding 真调 API 要真启动服务，由下面的 e2e job 跑
+              *verify-e2e.mjs | *verify-onboarding.mjs) continue ;;
             esac
             echo "== $s =="
             node "$s"
@@ -91,10 +91,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build:artifacts
 
+      - name: 播种 profile（B13：空 DSH_HOME 里没有 profiles/chat，dsh 会直接退出）
+        run: node scripts/seed-profile.mjs --profile chat
+        env:
+          DSH_HOME: ${{ github.workspace }}/harness/.dsh-home-ci
+
       - name: 启动并跑端到端断言
         run: |
           set -e
           export DSH_HOME="$PWD/.dsh-home-ci"
+          # 兜底再播一次（幂等，不覆盖已有内容）
+          node scripts/seed-profile.mjs --profile chat
           node apps/cli/lib/bin.js --profile chat > /tmp/boot.log 2>&1 &
           BOOT_PID=$!
           trap 'kill -9 $BOOT_PID 2>/dev/null || true' EXIT

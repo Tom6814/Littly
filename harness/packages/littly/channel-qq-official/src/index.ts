@@ -13,6 +13,7 @@ import type { BotRow, LittlyStorage } from '@littly/storage'
 import type { LittlyHub } from '@littly/agents'
 import { ensureQQMonitors, sendQQText, stopAllQQMonitors, type QqDeps } from './client.ts'
 import { handleQQMessage, resolveQqOpenid } from './inbound.ts'
+import { recallQqEvent } from './event-context.ts'
 
 export const name = 'littly-channel-qq-official'
 
@@ -54,7 +55,10 @@ export async function sendQqText(
   if (!openid) {
     return { ok: false, sent: 0, error: '没有 QQ openid（对方需要先给 bot 发过消息）' }
   }
-  const ok = await sendQQText(deps, bot, openid, text)
+  // §B7：主链路回复优先走「被动回复」—— 带最近 60 分钟内的入站 event_id，
+  // 否则会被 QQ 当主动推送（每月仅 4 条配额）。
+  const eventId = recallQqEvent(botId, openid)
+  const ok = await sendQQText(deps, bot, openid, text, { eventId })
   return ok ? { ok: true, sent: 1 } : { ok: false, sent: 0, error: 'QQ 发送失败' }
 }
 

@@ -57,29 +57,56 @@ console.log('== 注册 + 登录 ==')
 // 容器验收时会用 LITTLY_E2E_USER 指向一个**预先建好的管理员**账号
 // （容器里的库在别的进程/别的卷上，测试脚本没法直接提权 ——
 //  「首个注册用户即 admin」那条只在库里没用户时成立）。
+// 已有 admin 凭据时直接登录（容器/共享库场景）；否则注册。
 const username = process.env.LITTLY_E2E_USER ?? `e2e_${Date.now()}`
 const password = process.env.LITTLY_E2E_PASS ?? 'e2e-pass-123'
-let reg = await api('/api/auth/register', { method: 'POST', body: { username, password } })
-if (reg.status !== 200) {
-  reg = await api('/api/auth/login', { method: 'POST', body: { username, password } })
+let reg = await api('/api/auth/login', { method: 'POST', body: { username, password } })
+const registered = reg.status !== 200
+if (registered) {
+  reg = await api('/api/auth/register', { method: 'POST', body: { username, password } })
 }
-ok(reg.status === 200, `注册/登录成功（${reg.status}）`)
+ok(reg.status === 200, `${registered ? '注册' : '登录'}成功（${reg.status}）`)
 ok(jar.size > 0, '拿到会话 cookie')
 const sess = await api('/api/auth/session')
 ok(sess.status === 200 && sess.json?.data?.user?.username === username, '会话可回读')
 
-// 装/卸插件是管理员操作：把本测试账号在库里提为管理员
+// 装/卸插件等是管理员操作：把本测试账号在库里提为管理员
 // （会话里的角色是每次请求实时读库的 —— 见 auth.ts userFromRequest）
+// 库路径来源（按优先级）：
+//  1) 服务进程启动时写的运行期自述 <tmp>/littly-runtime-<PORT>.json（storage 插件写入，最可靠）
+//  2) argv[3] / LITTLY_DB_FILE / 相对路径 data/littly.db
 {
-  const { LittlyStorage } = await import('../packages/littly/storage/src/index.ts')
-  const dbFile = process.env.LITTLY_DB_FILE ?? 'data/littly.db'
+  let runtimeDb = ''
   try {
-    const store = new LittlyStorage({ logger: { info: () => {} } }, { file: dbFile })
-    store.prepare("UPDATE users SET role = 'admin' WHERE username = ?").run(username)
-    store.close()
-  } catch (e) {
-    // 提不了权不算失败 —— 管理类断言会自己给出可读的错误
-    console.log(`  （跳过本地提权：${dbFile} 不可直接访问，${e instanceof Error ? e.message : String(e)}）`)
+    const { readFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const info = JSON.parse(readFileSync(join(tmpdir(), `littly-runtime-${port}.json`), 'utf8'))
+    if (typeof info?.dbFile === 'string' && info.dbFile !== '') runtimeDb = info.dbFile
+  } catch {
+    // 自述文件不存在（旧版服务）→ 走兜底候选
+  }
+  const { LittlyStorage } = await import('../packages/littly/storage/src/index.ts')
+  const candidates = [runtimeDb, process.argv[3], process.env.LITTLY_DB_FILE, 'data/littly.db'].filter(
+    (x) => typeof x === 'string' && x !== '',
+  )
+  let elevated = false
+  let hitPath = ''
+  for (const dbFile of candidates) {
+    try {
+      const store = new LittlyStorage({ logger: { info: () => {} } }, { file: dbFile })
+      store.prepare("UPDATE users SET role = 'admin' WHERE username = ?").run(username)
+      store.close()
+      elevated = true
+      hitPath = dbFile
+      break
+    } catch {
+      // 换下一个候选
+    }
+  }
+  ok(elevated, `本地提权为 admin（候选 ${candidates.length} 个${elevated ? `，命中 ${hitPath}` : ''}）`)
+  if (!elevated) {
+    console.log('  （提示：用 `node scripts/verify-e2e.mjs <port> <业务库路径>` 或 LITTLY_DB_FILE=<路径> 重跑）')
   }
 }
 
