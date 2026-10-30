@@ -222,7 +222,7 @@ node scripts/verify-onboarding.mjs 3000
 | `verify-bind.mjs` | 发码 / 消费 / 一次性 / 冲突 / 身份归一 / 解绑（22 项） |
 | `verify-seed.mjs` | 首启播种：bot / 完整铁律 / 角色卡 / 世界书 / 幂等 / 不覆盖（43 项） |
 | `verify-secret-mask.mjs` | 密钥三态：掩码=保持 / 空串=清空 / 其它=写入（25 项） |
-| `verify-qq-official.mjs` | QQ 官方网关（69 项） |
+| `verify-channel-qq.mjs` | QQ 渠道（SnowLuma OneBot v11 + 官方 QQBot 适配器；66 项，假 WS/FakeBot 注入） |
 | `verify-discord.mjs` | Discord 网关（75 项） |
 | `verify-wechat-ilink.mjs` | 微信 iLink + 桥接 Webhook（78 项） |
 | `verify-voice-call.mjs` | 通话协议 / 令牌鉴权 / 精简 prompt 层集 / 回响总结（84 项） |

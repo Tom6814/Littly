@@ -334,3 +334,21 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 - `pnpm run build:artifacts` → **7/7 gates**；`verify-e2e.mjs` → **63/0**（含 `/api/x/status` 200 + binOk、`x` 工具在清单、未知子命令 400）。
 - 本地 3111 真服务：`GET /api/x/status` → `{"configured":false,...,"binOk":true,"lastProbe":null}`；`/api/x/probe` 未登录时返回可读错误（不 500）。
 - 真实 X 登录需用户提供自己的 cookie（auth_token+ct0），本机直连需代理；这两种情况都在 UI 错误文案里显式提示。
+
+---
+
+## 11. QQ 渠道重写（2026-10-31）：SnowLuma OneBot v11 + 官方 QQBot
+
+用户决定：QQ 全面改用 SnowLuma，旧 SnowLuma 集成不完善 → 整体去掉，以
+[`CNranger1124/dsh-lane-bridge`](https://github.com/CNranger1124/dsh-lane-bridge)（MIT）为基础重写，
+只保留 SnowLuma OneBot v11 与官方 QQBot 两个渠道。
+
+| 项 | 内容 |
+|---|---|
+| 新插件 | `@littly/channel-qq`：移植 lane-bridge 的 `base/onebot-ws/snowluma/snowluma-discovery/qqbot/manager` 为 TypeScript（协议行为保持），去掉 Discord；MIT `LICENSE`+`NOTICE` 致谢 CNranger1124 / Derpyu520；依赖 `@tencent-connect/qqbot-nodejs` |
+| hub 接入 | 入站 `enqueueBufferedMessage({channelId:'snowluma'｜'qqp'})`；出站 `registerChannel` 回到来源会话；身份/绑定统一 `qqp`（旧绑定保留）；QQBot 被动 msg_id 5 分钟窗口 + 过期降级 + 错误码中文化 |
+| 智能连接 | SnowLuma 支持 `SNOWLUMA_HOME` 自动发现 ws/token；**不代装/不代启**（SnowLuma EULA，非商业自托管） |
+| API | `GET /api/qq/status`、`PUT /api/qq/snowluma`（token 掩码写）、`PUT /api/qq/qqbot`（secret 掩码写 + 清 token 缓存）、`POST /api/qq/probe`、`GET /api/qq/logs`（脱敏） |
+| 下线 | `channel-snowluma`、`channel-qq-official`、`verify-qq-official.mjs`、supervisor 实验包全部删除；bots 表 `qq_*`/`snowluma_*` 列保留兼容 |
+| 前端 | `/channels/qq` 双 Tab（SnowLuma / 官方 QQBot）＋ onboarding「给她账号」QQ 卡联动 |
+| 验证 | `verify-channel-qq` **66/0**；`build:artifacts` 7/7；`verify-e2e` **71/0**（+4 QQ）；onboarding 19/0；其余脚本不回归；3000 实测 `/api/qq/status` 200、`/channels/qq` 200 |
