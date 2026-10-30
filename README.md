@@ -22,11 +22,15 @@
   · QQ 官方 · Discord。绑定一次，全渠道同一条会话线。
 - **实时语音通话**：同端口 `/call` WebSocket —— 浏览器 PCM → Deepgram 流式 STT → 角色快速回复
   → Fish 流式 TTS → 通话卡片 → 挂断后自动「回响」总结（记忆 + 待办）。
+- **她自己的 X（Twitter）**：`x` 元工具走 twitter-cli（[jackwener/twitter-cli](https://github.com/jackwener/twitter-cli)，
+  无官方 API key）——读 feed/搜索/用户/推文，写推文/回复/点赞/转推/关注默认**预演**，开启写开关后才真发；
+  凭据是你自己的 X 登录 cookie（存 DB、不回显、不进日志），支持代理。
 - **她自己的 B 站**：`bili` 元工具走 sidecar（子命令白名单 + 写操作默认预演 + 限频 + 审计），
   harness 同时挂上 bili 的 MCP 服务器；原始 MCP 工具由收敛门挡在元工具后面。
 - **社区 dsh 插件可直接接入**：装完的插件注册的工具对她可见可调（dsh-bridge）。
 - **首启引导（onboarding）**：全新部署打开控制台 → 5 步向导：她是谁 → 模型连接（真实测连通 + 延迟）
-  → 人格 → 接入微信（可跳过）→ 完成；状态存 `global_settings.onboarding`，管理员可一键重置重走。
+  → 人格 → **给她账号**（微信 / B 站 / Telegram / QQ / Discord / X，逐平台状态 + 内联快速配置，可跳过）
+  → 完成；状态存 `global_settings.onboarding`，管理员可一键重置重走。
 - **控制台（重写）**：Vue 3.5 + Vite + Tailwind 4 + [@felinic/ui](https://github.com/felinics/ui) 设计系统，
   22 条真 URL 路由按使用逻辑分五组——**对话 / 她（角色卡·世界书·铁律·成长·相册·日记）/ 记忆 / 主动 /
   连接（微信·Telegram·QQ·Discord·Bilibili·联系人·账号绑定）/ 系统（概览·设置·插件·调试）**；
@@ -37,7 +41,7 @@
 | 目录 | 内容 |
 |---|---|
 | `harness/` | 基座：[DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) fork（vendor 于固定 commit），继承插件系统 / MCP / skills / 定时任务 / LLM 适配器 |
-| `harness/packages/littly/` | 业务插件（从旧项目逐行移植）：`storage` `persona` `memory` `agents` `tools` `voice` `voice-call` `growth` `scheduler` `console-api` `mcp` `bili` + 渠道 `channel-snowluma` `channel-telegram` `channel-wechat-ilink` `channel-qq-official` `channel-discord` |
+| `harness/packages/littly/` | 业务插件（从旧项目逐行移植 / 本轮新增）：`storage` `persona` `memory` `agents` `tools` `voice` `voice-call` `growth` `scheduler` `console-api` `mcp` `bili` `x` + 渠道 `channel-snowluma` `channel-telegram` `channel-wechat-ilink` `channel-qq-official` `channel-discord` |
 | `console/` | Vue 3.5 + Vite + Tailwind 4 + `@felinic/ui` 控制台（真 URL 路由，五组导航 + 首启引导；`packages/ui` 为 vendored 设计系统） |
 | `sidecars/bili/` | bili-cli（bili-agent）HTTP wrapper sidecar —— AI 自己的 bilibili 账号 |
 | `deploy/` | 容器编排（harness + SnowLuma + bili sidecar） |

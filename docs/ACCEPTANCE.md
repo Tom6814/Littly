@@ -303,3 +303,34 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 | 真实微信扫码 | 需用户本人微信扫一次（页面已就绪：连接 → 微信 → 生成绑定二维码） |
 | CI 真跑 | 仓库无远端 runner；配置已修（e2e 前播种 profile）并通过 YAML 校验 |
 | 消息 Markdown/富媒体渲染、token 级流式逐字 | 已列为后续迭代（当前为完整回复 + SSE 状态推送） |
+
+## 10. X（Twitter）接入（2026-10-31 第二波）
+
+用户要求：让她拥有自己的 X 账号（基于 twitter-cli），登录用户自己的账号。
+
+### 10.1 组成
+
+| 层 | 内容 |
+|---|---|
+| 插件 `@littly/x` | `harness/packages/littly/x`，服务键 `littlyX`；`x` 元工具注册进 Littly 工具表（hub 就绪后 `ctx.inject(['littlyHub'])`） |
+| 控制台 API | `console-api/src/routes-x.ts`：`GET /api/x/status`、`POST /api/x/login`(admin)、`POST /api/x/logout`(admin)、`PUT /api/x/settings`(admin)、`POST /api/x/probe`、`POST /api/x/cmd` |
+| 装配 | `@littly/bundle` 的 `cordis.patch.yml` 增加一行 `@littly/x`；`apps/cli`/bundle/console-api 依赖 + `tsconfig.host.json` 引用 |
+| 镜像 | runtime 层 `pip3 install --break-system-packages twitter-cli==0.8.5`（失败不阻塞，同 bili 风格；失败时 `binOk=false`） |
+
+### 10.2 护栏（服务端硬约束，模型绕不过）
+
+- **允许清单**：读 `status/whoami/feed/bookmarks/favorites/search/tweet/show/user/user-posts/likes/followers/following/list/article`；写 `post/reply/quote/delete/like/unlike/retweet/unretweet/bookmark/unbookmark/favorite/unfavorite/follow/unfollow`（以 `twitter --help` 为准）。
+- **写默认预演**：`x.allow_writes='1'` 且调用显式 `dryRun:false` 才真执行；否则返回 `{dryRun:true,note}` 不 spawn。
+- **参数限制**：禁 `-o/--output/--input`（文件读写）与 `--image/-i`（本条只做纯文本）；禁空 argv/未知命令/空字符串项。
+- **限频**：读 30 次/小时、写 5 次/小时（按 bot 统计 `audit_logs`），超限返回可读错误。
+- **审计**：每次调用写 `audit_logs`（category=tool_call，action=`x_<cmd>`，detail 含脱敏 argv/ok/exitCode/dryRun/kind）。
+- **凭据**：`auth_token`/`ct0` 存 `global_settings`，只注入子进程环境，**不回传前端/不写日志**；status 仅 `configured/username/loggedInAt/allowWrites/bin/hasProxy`。
+- **错误判定**：twitter-cli **错误时退出码也可能是 0**，成功判定解析 JSON 信封的 `ok`/`error`；401/403→`not_authenticated`、429→`rate_limited`、226→`login_incomplete`，其它保留原始错误文本（本机直连 x.com 超时时用户能看到「需要代理」的原文）。
+- **代理**：`x.proxy` 真的注入子进程 `TWITTER_PROXY`（本机直连 x.com 会超时）；`/api/x/status` 的 `binOk`（60s 缓存）与 `lastProbe`（最近一次连不上的原因）分开返回，前端可显示「已安装但连不上」。
+
+### 10.3 验收
+
+- `node scripts/verify-x.mjs` → **75/0**（fake bin：允许清单、写默认预演、开关放行、限频、审计、JSON 解析、401/429/226 映射、凭据注入与不回传、工具注册）。
+- `pnpm run build:artifacts` → **7/7 gates**；`verify-e2e.mjs` → **63/0**（含 `/api/x/status` 200 + binOk、`x` 工具在清单、未知子命令 400）。
+- 本地 3111 真服务：`GET /api/x/status` → `{"configured":false,...,"binOk":true,"lastProbe":null}`；`/api/x/probe` 未登录时返回可读错误（不 500）。
+- 真实 X 登录需用户提供自己的 cookie（auth_token+ct0），本机直连需代理；这两种情况都在 UI 错误文案里显式提示。

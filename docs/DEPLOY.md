@@ -61,6 +61,7 @@ docker run -d --name littly \
 | `PORT` | 可选，默认 3000 |
 | `LITTLY_DATA_DIR` | 可选，业务数据根目录（**上传/生成文件**落这里的 `downloads/`），默认 `<cwd>/data`；容器 entrypoint 默认 `/app/data`（与 SQLite 同卷）。B11 起不再写 `public/downloads` —— 容器重建不丢相册/文档/语音/头像 |
 | `LITTLY_DB_FILE` | 可选，业务 SQLite 路径，默认 `data/littly.db`；容器里是 `/app/data/littly.db` |
+| `X_BIN` | 可选，twitter-cli 可执行文件路径，默认 `twitter`（镜像运行层已 `pip3 install twitter-cli==0.8.5`；装不上时控制台 `binOk=false`） |
 | `BILI_SIDECAR_URL` | 有 bili sidecar 时设 `http://bili:3010` |
 | `BILI_SIDECAR_TOKEN` | sidecar 设了 token 时必须一致 |
 
@@ -103,6 +104,27 @@ DSH_HOME="$PWD/.dsh-home" node apps/cli/lib/bin.js plugin --profile chat add "gi
 - 例：`dsh-case` 提供 `case_convert`（命名风格转换），控制台「插件管理」页能看到。
 
 ---
+
+## 3.5 X（Twitter）接入
+
+她用自己的 X 账号（[twitter-cli](https://github.com/jackwener/twitter-cli)，cookie 认证，无官方 API key）。
+
+```sh
+# 运行时依赖（镜像已内置；本机手动装）
+uv tool install twitter-cli            # 或 pipx / pip3 install --break-system-packages twitter-cli==0.8.5
+twitter --version                      # 0.8.5
+```
+
+- **登录**：控制台「连接 → X」→ 粘贴浏览器里 x.com 的完整 Cookie（或直接填 `auth_token` + `ct0`）→
+  「验证登录」会跑一次 `twitter whoami` 并把用户名存下来。凭据只存业务库，不回显、不进日志。
+- **代理**：x.com 在部分网络环境需要代理。X 页面可填 `proxy`（写入 `TWITTER_PROXY`），
+  也可用环境变量 `TWITTER_PROXY=http://127.0.0.1:7890`。
+- **写操作默认关**：`x.post/x.reply/x.like/...` 一律返回 dry-run 预览；在 X 页面打开「允许写操作」后才会真发，
+  且仍受「读 30 次/小时、写 5 次/小时」限频与审计约束。
+- **能做什么**：feed / bookmarks / search / tweet / show / user / user-posts / followers / following / list / article
+  （读）；post / reply / quote / delete / like / unlike / retweet / unretweet / bookmark / follow / unfollow（写）。
+  不支持 DM / 通知 / 投票（上游限制）。
+- **验收**：`node harness/scripts/verify-x.mjs`（fake bin，覆盖允许清单/写预演/开关/限频/审计/错误映射）。
 
 ## 4. 旧库迁移
 
@@ -172,6 +194,7 @@ node scripts/verify-onboarding.mjs 3000
 | `verify-backend-mainloop.mjs` | T-A~T-D 主链路契约：缓冲 exactly-once（合并窗口/原子认领/僵死恢复）、沉默不落库、投递失败 failed、工具循环（原生+文本兜底+乱序）、思考不外泄、安全阀、SnowLuma 群@门（43 项） |
 | `verify-onboarding.mjs` | 首次引导 API：GET 状态 / test-model（坏配置 + 真模型两条路径）/ complete 幂等（19 项，需真服务） |
 | `verify-wechat.mjs` | 微信 iLink 重写套件（116 项，mock HTTP） |
+| `verify-x.mjs` | X（Twitter）接入：允许清单 / 写默认预演 / 开关放行 / 限频 / 审计 / JSON 信封（exit 0 也可能失败）/ 401·429·226 映射 / 凭据注入与不回传（75 项，fake bin，不联网） |
 | `verify-e2e.mjs` | 真启动：首启播种 / 注册登录 / 插件清单 / 成长 / 来电 / MCP 增删（admin+白名单）/ 工具启停 / 控制台静态托管 / 越界防护（62 项，需真服务） |
 
 CI（`.github/workflows/ci.yml`）跑同样的门禁：构建 + 断言 + 控制台构建 + 端到端 + 容器构建探活。
