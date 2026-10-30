@@ -919,6 +919,253 @@ export const mcpApi = {
   },
 }
 
+/* ---------------- 邮箱（@littly/mail：IMAP/SMTP） ---------------- */
+
+export interface MailEndpoint {
+  host: string
+  port: number
+  secure: boolean
+  hasPassword: boolean
+}
+
+export interface MailStatus {
+  /** 接口是否可用（404/未就绪 false，页面据此静默降级）。 */
+  available: boolean
+  configured: boolean
+  address: string
+  fromName: string
+  imap: MailEndpoint
+  smtp: MailEndpoint
+  allowWrite: boolean
+  verifiedAt: string
+  lastError: string
+}
+
+export interface MailTestResult {
+  ok: boolean
+  imap: boolean
+  smtp: boolean
+  error: string
+}
+
+export interface MailMessage {
+  uid: string
+  from: string
+  subject: string
+  date: string
+  unread: boolean
+  snippet: string
+}
+
+export interface MailAttachment {
+  filename: string
+  size: number
+  contentType: string
+}
+
+export interface MailMessageBody {
+  uid: string
+  from: string
+  subject: string
+  date: string
+  text: string
+  html: string
+  attachments: MailAttachment[]
+}
+
+export interface MailCmdResult {
+  ok: boolean
+  dryRun: boolean
+  data: unknown
+  error: string
+}
+
+function emptyMailEndpoint(): MailEndpoint {
+  return { host: '', port: 0, secure: true, hasPassword: false }
+}
+
+function toMailEndpoint(v: unknown): MailEndpoint {
+  const rec = isRecord(v) ? v : {}
+  return {
+    host: asStr(rec.host) ?? '',
+    port: asNum(rec.port) ?? 0,
+    secure: asBool(rec.secure) ?? true,
+    hasPassword: asBool(rec.hasPassword) ?? false,
+  }
+}
+
+function emptyMailStatus(available = false): MailStatus {
+  return {
+    available,
+    configured: false,
+    address: '',
+    fromName: '',
+    imap: emptyMailEndpoint(),
+    smtp: emptyMailEndpoint(),
+    allowWrite: false,
+    verifiedAt: '',
+    lastError: '',
+  }
+}
+
+function toMailStatus(v: unknown): MailStatus {
+  if (isRecord(v) && typeof v.__status === 'number') return emptyMailStatus(false)
+  const rec = isRecord(v) ? v : {}
+  return {
+    available: true,
+    configured: asBool(rec.configured) ?? false,
+    address: asStr(rec.address) ?? '',
+    fromName: asStr(rec.fromName) ?? asStr(rec.from_name) ?? '',
+    imap: toMailEndpoint(rec.imap),
+    smtp: toMailEndpoint(rec.smtp),
+    allowWrite: asBool(rec.allowWrite) ?? asBool(rec.allow_write) ?? false,
+    verifiedAt: asStr(rec.verifiedAt) ?? '',
+    lastError: asStr(rec.lastError) ?? '',
+  }
+}
+
+/** 解析 mail cmd 的统一结果（后端可能返回 envelope/扁平/错误结构）。 */
+function toMailCmdResult(v: unknown): MailCmdResult {
+  if (isRecord(v) && typeof v.__status === 'number') {
+    return { ok: false, dryRun: false, data: null, error: readErrorEnvelope(v.__body).message }
+  }
+  const rec = isRecord(v) ? v : {}
+  const dryRun = asBool(rec.dryRun) ?? false
+  if (asBool(rec.ok) === false) {
+    const errRaw = rec.error
+    const error = isRecord(errRaw)
+      ? (asStr(errRaw.message) ?? readErrorEnvelope(errRaw).message)
+      : (asStr(errRaw) ?? '邮件命令执行失败')
+    return { ok: false, dryRun, data: null, error }
+  }
+  return { ok: asBool(rec.ok) ?? true, dryRun, data: rec.data ?? rec.result ?? rec, error: '' }
+}
+
+function mailFromText(v: unknown): string {
+  if (typeof v === 'string') return v
+  if (isRecord(v)) {
+    const name = asStr(v.name) ?? asStr(v.fromName) ?? ''
+    const address = asStr(v.address) ?? asStr(v.email) ?? ''
+    if (name && address) return `${name} <${address}>`
+    return name || address
+  }
+  return ''
+}
+
+function toMailMessages(data: unknown): MailMessage[] {
+  const rec = isRecord(data) ? data : {}
+  const raw = pickArray(rec, 'messages', 'emails', 'items')
+  const list = raw.length > 0 ? raw : Array.isArray(data) ? data : []
+  return list
+    .filter(isRecord)
+    .map((m) => {
+      const flags = asStringArray(m.flags)
+      return {
+        uid: asStrOrNum(m.uid) || asStr(m.id) || '',
+        from: mailFromText(m.from),
+        subject: asStr(m.subject) ?? '(无主题)',
+        date: asStr(m.date) ?? '',
+        unread: (() => {
+          const explicit = asBool(m.unread)
+          if (explicit !== undefined) return explicit
+          const seen = asBool(m.seen)
+          if (seen !== undefined) return !seen
+          return !flags.includes('\\Seen')
+        })(),
+        snippet: asStr(m.snippet) ?? asStr(m.preview) ?? asStr(m.text)?.slice(0, 160) ?? '',
+      }
+    })
+    .filter((m) => m.uid !== '' || m.subject !== '')
+}
+
+function toMailBody(data: unknown): MailMessageBody {
+  const rec = isRecord(data) ? data : {}
+  const message = pickRecord(rec, 'message') ?? rec
+  return {
+    uid: asStrOrNum(message.uid) || '',
+    from: mailFromText(message.from),
+    subject: asStr(message.subject) ?? '(无主题)',
+    date: asStr(message.date) ?? '',
+    text: asStr(message.text) ?? '',
+    html: asStr(message.html) ?? '',
+    attachments: pickArray(message, 'attachments')
+      .filter(isRecord)
+      .map((a) => ({
+        filename: asStr(a.filename) ?? asStr(a.name) ?? '',
+        size: asNum(a.size) ?? 0,
+        contentType: asStr(a.contentType) ?? asStr(a.content_type) ?? '',
+      })),
+  }
+}
+
+export interface MailAccountInput {
+  address: string
+  imapHost: string
+  imapPort: number
+  imapSecure: boolean
+  smtpHost: string
+  smtpPort: number
+  smtpSecure: boolean
+  username: string
+  password?: string
+  fromName?: string
+}
+
+export const mailApi = {
+  /** GET /api/mail/status（required）→ 绑定状态（密码永不回传，只有 hasPassword）。 */
+  async status(): Promise<MailStatus> {
+    const out = await http.get<unknown>('/api/mail/status', undefined, {
+      silentUnauthorized: true,
+      allowAnyStatus: true,
+    })
+    return toMailStatus(out)
+  },
+  /** PUT /api/mail/account（admin）→ 保存配置（password 空=不修改），返回 status。 */
+  async saveAccount(input: MailAccountInput): Promise<MailStatus> {
+    const out = await http.put<unknown>('/api/mail/account', input, { allowAnyStatus: true })
+    // 路由返回 {ok, status}；兼容直接返回 status。
+    const rec = isRecord(out) ? out : {}
+    return toMailStatus(pickRecord(rec, 'status') ?? rec)
+  },
+  /** POST /api/mail/test（admin）→ IMAP/SMTP 分别连通性。 */
+  async test(): Promise<MailTestResult> {
+    const out = await http.post<unknown>('/api/mail/test', undefined, { allowAnyStatus: true })
+    if (isRecord(out) && typeof out.__status === 'number') {
+      return { ok: false, imap: false, smtp: false, error: readErrorEnvelope(out.__body).message }
+    }
+    const rec = isRecord(out) ? out : {}
+    return {
+      ok: asBool(rec.ok) ?? false,
+      imap: asBool(rec.imap) ?? false,
+      smtp: asBool(rec.smtp) ?? false,
+      error: asStr(rec.error) ?? asStr(rec.message) ?? '',
+    }
+  },
+  /** POST /api/mail/cmd（required）{command, params?, dryRun?} —— 读放行、写受开关限制。 */
+  async cmd(command: string, params: Record<string, unknown> = {}, dryRun = false): Promise<MailCmdResult> {
+    const out = await http.post<unknown>('/api/mail/cmd', { command, params, dryRun }, { allowAnyStatus: true })
+    return toMailCmdResult(out)
+  },
+  /** PUT /api/mail/settings（admin）{allowWrite} —— 写操作开关。 */
+  async saveSettings(allowWrite: boolean): Promise<void> {
+    await http.put('/api/mail/settings', { allowWrite })
+  },
+  /** DELETE /api/mail/account（admin，二次确认）→ 清空凭据。 */
+  async remove(): Promise<void> {
+    await http.del('/api/mail/account')
+  },
+}
+
+/** 邮箱命令返回 → 消息列表（供页面复用）。 */
+export function mailMessagesFrom(data: unknown): MailMessage[] {
+  return toMailMessages(data)
+}
+
+/** 邮箱命令返回 → 邮件正文（供页面复用）。 */
+export function mailBodyFrom(data: unknown): MailMessageBody {
+  return toMailBody(data)
+}
+
 /* ---------------- settings（模型 / 语音 / 通用） ---------------- */
 
 export const settingsApi = {

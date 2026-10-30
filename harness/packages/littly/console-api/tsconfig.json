@@ -22,6 +22,7 @@
     { "path": "../x" },
     { "path": "../channel-qq" },
     { "path": "../snowluma" },
+    { "path": "../mail" },
     { "path": "../../boot/plugin-manager" },
     { "path": "../../skill/skill" }
   ]

@@ -197,6 +197,24 @@ API：`GET /api/mcp/servers`、`POST /api/mcp/servers`、`PATCH/DELETE /api/mcp/
 `POST /api/mcp/import`、`GET /api/mcp/export`、`POST /api/mcp/servers/:name/test`、`GET /api/mcp/tools`
 （旧 `/api/plugins/mcp` 保留兼容）。验收：`node harness/scripts/verify-mcp-page.mjs`（83 项）。
 
+## 3.8 邮箱（IMAP/SMTP）
+
+控制台「连接 → 邮箱」给她绑定一个邮箱，她就能收发/阅读/处理邮件（`@littly/mail` 插件，原生 IMAP/SMTP，
+依赖 `imapflow` + `nodemailer` + `mailparser`，无 sidecar）。
+
+- **绑定**：填发件地址、IMAP/SMTP 服务器与端口、TLS、用户名、密码/授权码（保存后只回 `hasPassword`，不回显）。
+  常见服务商：QQ 邮箱 `imap.qq.com:993` / `smtp.qq.com:465`（密码处填**授权码**）；163 `imap.163.com:993` /
+  `smtp.163.com:465`（需在设置里开启 IMAP/SMTP）；Gmail `imap.gmail.com:993` / `smtp.gmail.com:465`（应用专用密码）。
+- **测试连接**：分别验证 IMAP（连接 + INBOX 只读）与 SMTP（verify），失败给可读原因。
+- **AI 能力**（工具 `mail`）：读 `folders/list/search/read`；写 `send/reply/mark/move/archive/delete`。
+  **写命令默认只预演**，需在页面打开「允许写操作」且模型显式 `dryRun:false` 才真执行；`delete` 默认进 Trash。
+- **限制**：单次最多 20 封、正文截断 100KB、附件落 `LITTLY_DATA_DIR/mail/<botId>/<uid>/`（防路径穿越，单附件 20MB）；
+  读 60/h、写 10/h 限频；审计 `mail_<cmd>` 不含正文/地址/密码；发件 From 固定为绑定地址。
+- **验收**：`node harness/scripts/verify-mail.mjs`（111 项，fake IMAP/SMTP 不联网）。真实收发需要你自己的授权码。
+
+API：`GET /api/mail/status`、`PUT /api/mail/account`（密码空=不改、`***`=保持）、`POST /api/mail/test`、
+`POST /api/mail/cmd`、`PUT /api/mail/settings`、`DELETE /api/mail/account`。
+
 ## 4. 旧库迁移
 
 旧项目（Next.js 单体）的 `db/custom.db` 一次性迁进新 schema：

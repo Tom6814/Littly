@@ -26,6 +26,7 @@ import {
   Check,
   Gamepad2,
   Heart,
+  Mail,
   MessageCircle,
   Send,
   SkipForward,
@@ -38,6 +39,7 @@ import {
   channelsApi,
   charactersApi,
   personaApi,
+  mailApi,
   qqApi,
   settingsApi,
   wechatApi,
@@ -86,7 +88,7 @@ const presets = ref<Array<{ id: string; name: string; data: Record<string, unkno
 const rules = ref('')
 
 /* ---------------- 步骤 4：给她账号 ---------------- */
-type PlatformId = 'wechat' | 'bilibili' | 'telegram' | 'qq' | 'discord' | 'x'
+type PlatformId = 'wechat' | 'bilibili' | 'telegram' | 'qq' | 'discord' | 'x' | 'email'
 
 interface PlatformView {
   id: PlatformId
@@ -108,6 +110,7 @@ const accounts = reactive({
   bindings: [] as Array<{ channel: string; externalId: string }>,
   channels: {} as Record<string, { enabled: boolean; hasToken: boolean }>,
   x: { available: true, configured: false, username: '' },
+  mail: { available: true, configured: false, address: '' },
   /** QQ 双通道（SnowLuma OneBot / 官方 QQBot），任一启用即算已接。 */
   qq: {
     available: true,
@@ -253,6 +256,16 @@ async function loadAccounts(): Promise<void> {
     })(),
     (async () => {
       try {
+        const out = await mailApi.status()
+        accounts.mail.available = out.available
+        accounts.mail.configured = out.configured
+        accounts.mail.address = out.address
+      } catch {
+        accounts.mail.available = false
+      }
+    })(),
+    (async () => {
+      try {
         const out = await xApi.status()
         accounts.x.available = out.available
         accounts.x.configured = out.configured
@@ -351,6 +364,23 @@ const platforms = computed<PlatformView[]>(() => {
     actionLabel: qqEnabled ? '管理 QQ' : '配置 QQ',
     actionDisabled: false,
     connected: qqEnabled,
+  })
+  // 邮箱（IMAP/SMTP）
+  list.push({
+    id: 'email',
+    name: '邮箱',
+    icon: Mail,
+    statusText: !accounts.mail.available
+      ? '接口未就绪'
+      : accounts.mail.configured
+        ? accounts.mail.address
+          ? `已绑定 ${accounts.mail.address}`
+          : '已绑定'
+        : '未绑定',
+    badgeVariant: accounts.mail.configured ? 'success' : accounts.mail.available ? 'outline' : 'warning',
+    actionLabel: accounts.mail.configured ? '管理邮箱' : '配置邮箱',
+    actionDisabled: false,
+    connected: accounts.mail.configured,
   })
   // X
   list.push({

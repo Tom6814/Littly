@@ -12,6 +12,7 @@ import type { SkillRegistry } from '@deepseek-ai/dsh-skill'
 import type { XService } from '@littly/x'
 import type { QqChannelService } from '@littly/channel-qq'
 import type { SnowlumaService } from '@littly/snowluma'
+import type { MailService } from '@littly/mail'
 import type { SessionManager } from './auth.ts'
 import { err, type Router, type ApiRequest } from './http.ts'
 
@@ -128,6 +129,8 @@ export interface Deps {
   qq: QqChannelService | undefined
   /** SnowLuma 一键安装服务；profile 未启用 @littly/snowluma 时为 undefined。 */
   snowluma: SnowlumaService | undefined
+  /** 邮箱服务；profile 未启用 @littly/mail 时为 undefined。 */
+  mail: MailService | undefined
   /** Bilibili 服务；profile 未启用 @littly/bili 时为 undefined。 */
   bili: BiliServiceLike | undefined
   sessions: SessionManager

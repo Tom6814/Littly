@@ -57,6 +57,9 @@
       name: '@littly/scheduler'
     - id: littly-channel-telegram
       name: '@littly/channel-telegram'
+    # 邮箱：给 AI 绑定邮箱后的 IMAP/SMTP 收发能力（写默认预演，密码不回传）
+    - id: littly-mail
+      name: '@littly/mail'
     # SnowLuma 一键安装/配置（docker pull/run + noVNC 扫码信息 + token 自动接线）
     - id: littly-snowluma
       name: '@littly/snowluma'

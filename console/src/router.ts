@@ -53,6 +53,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/channels/discord', name: 'channel-discord', component: () => import('@/pages/channels/DiscordPage.vue'), meta: { title: 'Discord' } },
   { path: '/channels/bilibili', name: 'channel-bilibili', component: () => import('@/pages/channels/BilibiliPage.vue'), meta: { title: 'Bilibili' } },
   { path: '/channels/x', name: 'channel-x', component: () => import('@/pages/channels/XPage.vue'), meta: { title: 'X' } },
+  { path: '/channels/email', name: 'channel-email', component: () => import('@/pages/channels/EmailPage.vue'), meta: { title: '邮箱' } },
   { path: '/contacts', name: 'contacts', component: () => import('@/pages/contacts/ContactsPage.vue'), meta: { title: '联系人' } },
 
   // 系统

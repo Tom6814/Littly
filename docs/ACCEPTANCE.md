@@ -404,3 +404,17 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 | 校验 | 复用 `validateMcpServer`（命令白名单/shell 元字符/eval/url 凭据）+ 新增 `env` 键 `[A-Za-z0-9_]`、`headers` 键 `[A-Za-z0-9-]`（禁 NUL/换行）；审计 `mcp_upsert/mcp_import/mcp_test/mcp_remove`，detail 不含值 |
 | 前端 | 新页面 `/system/mcp`（导航「系统」）：Cursor 格式说明、添加/导入/导出/刷新；列表含传输徽标、env/headers 键数、启用开关、工具数/错误、测试/编辑/删除；添加 Dialog 双 Tab（粘贴 Cursor 配置 / 手动填写，env`KEY=VALUE` 多行）；测试连接弹窗列工具；导出 CodePanel+复制；错误文本截断（http 服务器可能回整页 HTML） |
 | 验证 | `verify-mcp-page` **83/0**（假 Router+假 manager+真 SQLite 审计，不联网）；`build:artifacts` 7/7；`verify-e2e` **94/0**（+7 MCP）；3000 真机：Cursor 导入 2 条 → 列表（envKeys/headerKeys 只键名）→ export 往返一致 → test 可读错误 → tools → 删除，全通过 |
+
+### 11.5 邮箱功能（2026-10-31）
+
+用户要求：可以给 AI 绑定邮箱，使其收发/阅读/处理邮件；做 dsh 插件/MCP，参考 GitHub 现成项目。
+
+| 项 | 内容 |
+|---|---|
+| 选型 | 原生 TS 插件 `@littly/mail`，依赖 `imapflow@2.10` + `nodemailer@10.3` + `mailparser@3.14`；能力集参考 `iflow-mcp/mcp-email-server`、`mindstone/mcp-servers` email-imap（无 Python sidecar） |
+| 能力 | 工具 `mail{command,params,dryRun?}`：读 `folders/list/search/read`；写 `send/reply/mark/move/archive/delete`。`status()` 只回 `hasPassword`；`test()` 分别验 IMAP/SMTP |
+| 安全 | 凭据存 `global_settings['mail.*']` 不回传；发件 From 固定；附件落 `LITTLY_DATA_DIR/mail/<botId>/<uid>/` 并防穿越（单附件 20MB）；正文截断 100KB；读 60/h、写 10/h；审计 `mail_<cmd>` 不含正文/地址/密码；写操作需 `mail.allow_write='1'` 且显式 `dryRun:false` |
+| API | `GET /api/mail/status`、`PUT /api/mail/account`（密码空=不改/`***`=保持）、`POST /api/mail/test`、`POST /api/mail/cmd`、`PUT /api/mail/settings`、`DELETE /api/mail/account` |
+| 前端 | 新页面 `/channels/email`（连接组「邮箱」）：未绑定表单（地址/IMAP/SMTP/TLS/授权码/发件人名 + 服务商提示）+ 测试连接（IMAP/SMTP 分开结果）；已绑定状态卡 + 收件箱预览（10 封，点开正文/附件）+ 搜索 + 写开关 + 发测试邮件 + 解绑；onboarding「给她账号」新增「邮箱」卡 |
+| 验证 | `verify-mail` **111/0**（fake IMAP/SMTP，不联网）；`build:artifacts` 7/7；`verify-e2e` **98/0**（+4）；3000 真机：保存假配置 → status 掩码 → test 返回可读失败（ENOTFOUND）→ cmd list 502 可读错误 → 删除清理 |
+| 限制 | 真实收发需用户自己的 IMAP/SMTP 授权码；本任务用注入 fake 完成协议层验证 |

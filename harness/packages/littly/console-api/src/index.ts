@@ -38,10 +38,12 @@ import { registerXRoutes } from './routes-x.ts'
 import { registerQqRoutes } from './routes-qq.ts'
 import { registerSnowlumaInstallRoutes } from './routes-snowluma.ts'
 import { registerMcpRoutes } from './routes-mcp.ts'
+import { registerMailRoutes } from './routes-mail.ts'
 import { registerBiliRoutes } from './routes-bili.ts'
 import type { XService } from '@littly/x'
 import type { QqChannelService } from '@littly/channel-qq'
 import type { SnowlumaService } from '@littly/snowluma'
+import type { MailService } from '@littly/mail'
 
 export const name = 'littly-console-api'
 
@@ -74,6 +76,7 @@ export function apply(ctx: Context, _config: Config): void {
     x: ctx.get('littlyX') as XService | undefined,
     qq: ctx.get('littlyChannelQq') as QqChannelService | undefined,
     snowluma: ctx.get('littlySnowluma') as SnowlumaService | undefined,
+    mail: ctx.get('littlyMail') as MailService | undefined,
     bili: ctx.get('littlyBili') as Deps['bili'],
     sessions,
     cwd: process.cwd(),
@@ -95,6 +98,7 @@ export function apply(ctx: Context, _config: Config): void {
   registerQqRoutes(router, deps)
   registerSnowlumaInstallRoutes(router, deps)
   registerMcpRoutes(router, deps)
+  registerMailRoutes(router, deps)
   registerBiliRoutes(router, deps)
   router.get('/api', 'public', (a) => {
     jsonHealth(a)
