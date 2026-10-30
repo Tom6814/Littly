@@ -1,0 +1,38 @@
+/* App stylesheet — ONLY the design-system imports + app-level chrome that the
+   page shell itself owns. No component styling, no raw values: every visual
+   decision comes from @felinic/ui tokens (packages/ui/AGENTS.md). */
+@import "tailwindcss";
+@import "@felinic/ui/style.css";
+
+/* Tailwind v4 content scan: the vendored library sources and this app. */
+@source "../../packages/ui/src";
+@source "../src";
+
+/* Inter-script spacing (W3C CLREQ), same as the host app; inherited. */
+:root {
+  text-autospace: normal;
+}
+
+/* CJK de-emphasis: CJK glyphs read heavier than Inter at the same weight, so
+   remap the rungs down while the UI language is Chinese. Vendored from the
+   design system's host stylesheet (keep in sync with packages/ui/showcase). */
+@layer utilities {
+  :lang(zh) .font-light {
+    font-weight: 280;
+  }
+  :lang(zh) .font-normal {
+    font-weight: 315;
+  }
+  :lang(zh) .font-medium {
+    font-weight: 370;
+  }
+  :lang(zh) .font-semibold {
+    font-weight: 410;
+  }
+  :lang(zh) .font-bold {
+    font-weight: 450;
+  }
+}
+:lang(zh) body {
+  font-weight: 335;
+}
