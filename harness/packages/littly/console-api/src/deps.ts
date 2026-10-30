@@ -81,7 +81,17 @@ export function botOwnedBy(ctx: ApiRequest, d: Deps, botId: string): boolean {
   const user = ctx.user
   if (user === null || botId === '') return false
   const row = d.storage.prepare('SELECT owner_id FROM bots WHERE id = ?').get(botId) as { owner_id?: string } | undefined
-  return row !== undefined && typeof row.owner_id === 'string' && row.owner_id !== '' && row.owner_id === user.id
+  if (row === undefined) return false
+  const ownerId = typeof row.owner_id === 'string' ? row.owner_id : ''
+  // 本产品的形态是「一个她 + 多个真人用户各聊各的」（sender 才是会话主键），不是多租户多角色。
+  // 因此**部署里的第一个 bot（默认的她）对所有登录用户开放**：否则新装实例里第二个非 admin
+  // 账号会读不到自己的消息/流（B3 引入的回归）。隔离只针对后续显式创建的额外 bot。
+  const first = d.storage.prepare('SELECT id FROM bots ORDER BY created_at ASC LIMIT 1').get() as
+    | { id: string }
+    | undefined
+  if (first !== undefined && first.id === botId) return true
+  if (ownerId === '') return true
+  return ownerId === user.id
 }
 
 /** 校验 bot 归属；无权限时回 403 并返回 false。 */

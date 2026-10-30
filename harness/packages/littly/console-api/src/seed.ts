@@ -67,17 +67,25 @@ export interface SeedResult {
  * 保证库里至少有一个可用的 bot / 铁律 / 角色卡。
  * 幂等：已有就什么都不做（不覆盖用户改过的内容）。
  */
+/** 首个管理员 id（没有用户时返回 ''）；播种 bot 时据此归属，避免非 admin 读不到默认角色。 */
+function firstAdminId(d: Deps): string {
+  const row = d.storage
+    .prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1")
+    .get() as { id: string } | undefined
+  return row?.id ?? ''
+}
+
 export function ensureSeed(d: Deps): SeedResult {
   const now = new Date().toISOString()
 
   // ---- bot ----
   let bot = d.storage.prepare('SELECT * FROM bots ORDER BY created_at ASC LIMIT 1').get() as
-    | { id: string; character_id: string | null }
+    | { id: string; character_id: string | null; owner_id?: string }
     | undefined
   if (!bot) {
     const botId = randomUUID()
     d.storage.prepare(
-      'INSERT INTO bots (id, name, system_prompt, ai_temperature, ai_max_history, memory_scope, ai_humanize_wechat, proactive_enabled, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO bots (id, name, system_prompt, ai_temperature, ai_max_history, memory_scope, ai_humanize_wechat, proactive_enabled, owner_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
     ).run(
       botId,
       '小璃',
@@ -87,6 +95,7 @@ export function ensureSeed(d: Deps): SeedResult {
       'global',
       1,
       1,
+      firstAdminId(d),
       now,
     )
     bot = { id: botId, character_id: null }
