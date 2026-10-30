@@ -176,6 +176,27 @@ node scripts/verify-e2e.mjs 3000       # 含 /api/qq/status 200、未登录 401
 
 API：`GET /api/qq/status`、`PUT /api/qq/snowluma`、`PUT /api/qq/qqbot`、`POST /api/qq/probe`、`GET /api/qq/logs`。
 
+## 3.7 MCP 服务器（Cursor 格式）
+
+控制台「系统 → MCP」可管理外部 MCP 服务器，配置格式与 Cursor/Claude 的 `mcpServers` 一致：
+
+```json
+{"mcpServers": {
+  "filesystem": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"], "env": {"NODE_OPTIONS": ""}},
+  "remote-tools": {"url": "https://example.com/mcp", "headers": {"Authorization": "Bearer …"}}
+}}
+```
+
+- **导入**：粘贴上面的 JSON（也接受裸 map 或单个条目）→ 逐条 upsert，返回「新增 / 更新 / 失败」明细，部分失败不影响其它条目。
+- **导出**：`GET /api/mcp/export` 返回同格式 JSON（含真实 env/headers，仅管理员），可复制到 Cursor 使用。
+- **列表**：名称 / 传输（stdio|http）/ command 或 url / env、headers 键数量 / 启用状态 / 工具数 / 最近错误；**值不回显**。
+- **测试连接**：重连后 `listTools`，在弹窗里看工具列表或可读错误。
+- **安全**（沿用 B1 修复）：仅管理员可写；stdio 命令只允许 `npx/node/uvx/python3/deno/bun/true`；拒绝 shell 元字符与解释器 eval 参数；url 仅 http/https 且不允许携带凭据；`env` 键 `[A-Za-z0-9_]`、`headers` 键 `[A-Za-z0-9-]`；所有变更写 `audit_logs`（不含值）。
+
+API：`GET /api/mcp/servers`、`POST /api/mcp/servers`、`PATCH/DELETE /api/mcp/servers/:name`、
+`POST /api/mcp/import`、`GET /api/mcp/export`、`POST /api/mcp/servers/:name/test`、`GET /api/mcp/tools`
+（旧 `/api/plugins/mcp` 保留兼容）。验收：`node harness/scripts/verify-mcp-page.mjs`（83 项）。
+
 ## 4. 旧库迁移
 
 旧项目（Next.js 单体）的 `db/custom.db` 一次性迁进新 schema：

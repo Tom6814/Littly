@@ -37,6 +37,7 @@ import { registerWechatRoutes, createWechatServiceGetter } from './routes-wechat
 import { registerXRoutes } from './routes-x.ts'
 import { registerQqRoutes } from './routes-qq.ts'
 import { registerSnowlumaInstallRoutes } from './routes-snowluma.ts'
+import { registerMcpRoutes } from './routes-mcp.ts'
 import { registerBiliRoutes } from './routes-bili.ts'
 import type { XService } from '@littly/x'
 import type { QqChannelService } from '@littly/channel-qq'
@@ -93,6 +94,7 @@ export function apply(ctx: Context, _config: Config): void {
   registerXRoutes(router, deps)
   registerQqRoutes(router, deps)
   registerSnowlumaInstallRoutes(router, deps)
+  registerMcpRoutes(router, deps)
   registerBiliRoutes(router, deps)
   router.get('/api', 'public', (a) => {
     jsonHealth(a)

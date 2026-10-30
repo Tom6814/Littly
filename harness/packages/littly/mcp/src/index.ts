@@ -119,7 +119,25 @@ export function mcpToolDef(serverName: string, rawName: string, description: str
 interface LiveServer {
   client: { close: () => Promise<void> } | null
   tools: string[]
+  /** 工具名 + 描述（testServer / tools 端点展示用）。 */
+  toolDetails: Array<{ name: string; description?: string }>
   state: McpServerStatus['state']
+  error?: string
+}
+
+/** 单个服务器的状态快照（routes-mcp 的 GET /servers 用）。 */
+export interface McpServerBriefStatus {
+  enabled: boolean
+  connected: boolean
+  toolCount: number
+  lastError?: string
+}
+
+/** 测试连接结果。 */
+export interface McpTestResult {
+  ok: boolean
+  tools: Array<{ name: string; description?: string }>
+  toolCount: number
   error?: string
 }
 
@@ -189,7 +207,7 @@ export class LittlyMcpManager {
   async connect(serverName: string): Promise<{ ok: boolean; error?: string }> {
     const config = this.listConfigs().find((c) => c.name === serverName)
     if (!config) return { ok: false, error: '服务器不存在' }
-    const live: LiveServer = { client: null, tools: [], state: 'connecting' }
+    const live: LiveServer = { client: null, tools: [], toolDetails: [], state: 'connecting' }
     this.live.set(serverName, live)
     try {
       const { Client } = await import('@modelcontextprotocol/client')
@@ -231,6 +249,10 @@ export class LittlyMcpManager {
         tools.push(def.function.name)
       }
       live.tools = tools
+      live.toolDetails = response.tools.map((tool) => ({
+        name: tool.name,
+        ...(typeof tool.description === 'string' && tool.description !== '' ? { description: tool.description } : {}),
+      }))
       live.state = 'connected'
       this.log('[mcp] 服务器 %s 已连接（%d 个工具）', config.name, tools.length)
       return { ok: true }
@@ -240,6 +262,33 @@ export class LittlyMcpManager {
       this.log('[mcp] 服务器 %s 连接失败：%s', config.name, live.error)
       return { ok: false, error: live.error }
     }
+  }
+
+  /** 单个服务器的简要状态（未连接时 toolCount=0）。 */
+  statusOf(serverName: string): McpServerBriefStatus {
+    const config = this.listConfigs().find((c) => c.name === serverName)
+    const live = this.live.get(serverName)
+    return {
+      enabled: config?.enabled === true,
+      connected: live?.state === 'connected',
+      toolCount: live?.tools.length ?? 0,
+      ...(live?.error !== undefined ? { lastError: live.error } : {}),
+    }
+  }
+
+  /**
+   * 测试一个服务器：重连 + listTools，返回工具列表与可读错误（不抛异常）。
+   * 用于 MCP 管理页的「测试连接」；成功后会保持连接（工具照常注册）。
+   */
+  async testServer(serverName: string): Promise<McpTestResult> {
+    const config = this.listConfigs().find((c) => c.name === serverName)
+    if (config === undefined) return { ok: false, tools: [], toolCount: 0, error: '服务器不存在' }
+    await this.disconnect(serverName)
+    const result = await this.connect(serverName)
+    if (!result.ok) return { ok: false, tools: [], toolCount: 0, error: result.error ?? '连接失败' }
+    const live = this.live.get(serverName)
+    const tools = live?.toolDetails ?? []
+    return { ok: true, tools, toolCount: tools.length }
   }
 
   /** 断开一个服务器（工具随之从注册表移除）。 */

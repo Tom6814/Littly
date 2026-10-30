@@ -392,3 +392,15 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 | API | `GET /api/snowluma/status`、`POST install/start/stop/qr/autoconfigure/remove`、`GET logs`（admin；status 非 admin 剥密码） |
 | 验证 | `verify-snowluma-install` **68/0**（fake docker，含 `restarts=0` 断言）；`build:artifacts` 7/7；`verify-e2e` **87/0**（+4 snowluma）；**3000 真机**：state installed → start → waiting_scan（容器 running、noVNC 200、WebUI 200、configReady=true、hasToken=true），noVNC 免密链接可用 |
 | 合规 | SnowLuma 为第三方非商业自托管软件；安装前必须勾选知情同意（EULA 条款），未同意 API 返回 400 `consent_required` |
+
+### 11.4 MCP 管理页面（Cursor 格式，2026-10-31）
+
+用户要求：新增 MCP 页面，可管理/添加 MCP 服务器（Cursor 格式）。
+
+| 项 | 内容 |
+|---|---|
+| 服务扩展 | `@littly/mcp`：`env`（stdio，并入 process.env）/`headers`（http，requestInit.headers）建连时真正生效；`testServer(name)`（重连+listTools+可读错误）；`statusOf(name)`（enabled/connected/toolCount/lastError） |
+| API | `GET /api/mcp/servers`（env/header 只回键名）、`POST /api/mcp/servers`、`PATCH/DELETE /api/mcp/servers/:name`、`POST /api/mcp/import`（Cursor `{mcpServers}`，返回 added/updated/errors，部分成功不整体失败）、`GET /api/mcp/export`（Cursor 格式含真实值，admin）、`POST /api/mcp/servers/:name/test`、`GET /api/mcp/tools`；旧 `/api/plugins/mcp*` 保留兼容 |
+| 校验 | 复用 `validateMcpServer`（命令白名单/shell 元字符/eval/url 凭据）+ 新增 `env` 键 `[A-Za-z0-9_]`、`headers` 键 `[A-Za-z0-9-]`（禁 NUL/换行）；审计 `mcp_upsert/mcp_import/mcp_test/mcp_remove`，detail 不含值 |
+| 前端 | 新页面 `/system/mcp`（导航「系统」）：Cursor 格式说明、添加/导入/导出/刷新；列表含传输徽标、env/headers 键数、启用开关、工具数/错误、测试/编辑/删除；添加 Dialog 双 Tab（粘贴 Cursor 配置 / 手动填写，env`KEY=VALUE` 多行）；测试连接弹窗列工具；导出 CodePanel+复制；错误文本截断（http 服务器可能回整页 HTML） |
+| 验证 | `verify-mcp-page` **83/0**（假 Router+假 manager+真 SQLite 审计，不联网）；`build:artifacts` 7/7；`verify-e2e` **94/0**（+7 MCP）；3000 真机：Cursor 导入 2 条 → 列表（envKeys/headerKeys 只键名）→ export 往返一致 → test 可读错误 → tools → 删除，全通过 |

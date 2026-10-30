@@ -22,6 +22,7 @@
   · QQ 官方 · Discord。绑定一次，全渠道同一条会话线。
 - **实时语音通话**：同端口 `/call` WebSocket —— 浏览器 PCM → Deepgram 流式 STT → 角色快速回复
   → Fish 流式 TTS → 通话卡片 → 挂断后自动「回响」总结（记忆 + 待办）。
+- **MCP 管理**：控制台「系统 → MCP」按 **Cursor 格式**（`mcpServers`）管理服务器——粘贴导入、手动增删改、启用/停用、测试连接看工具列表、一键导出；`env`/`headers` 明文只存服务端，列表只显示键名。
 - **她自己的 X（Twitter）**：`x` 元工具走 twitter-cli（[jackwener/twitter-cli](https://github.com/jackwener/twitter-cli)，
   无官方 API key）——读 feed/搜索/用户/推文，写推文/回复/点赞/转推/关注默认**预演**，开启写开关后才真发；
   凭据是你自己的 X 登录 cookie（存 DB、不回显、不进日志），支持代理。
@@ -35,7 +36,7 @@
   → 完成；状态存 `global_settings.onboarding`，管理员可一键重置重走。
 - **控制台（重写）**：Vue 3.5 + Vite + Tailwind 4 + [@felinic/ui](https://github.com/felinics/ui) 设计系统，
   22 条真 URL 路由按使用逻辑分五组——**对话 / 她（角色卡·世界书·铁律·成长·相册·日记）/ 记忆 / 主动 /
-  连接（微信·Telegram·QQ·Discord·Bilibili·X·联系人；账号绑定已并入各渠道页）/ 系统（概览·设置·插件·调试）**；
+  连接（微信·Telegram·QQ·Discord·Bilibili·X·联系人；账号绑定已并入各渠道页）/ 系统（概览·设置·插件·MCP·调试）**；
   含 SSE 实时推送（思考态 / 工具阶段 / 沉默终止态）。
 
 ## 结构

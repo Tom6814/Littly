@@ -5,6 +5,7 @@
 import type { Component } from 'vue'
 import {
   BellRing,
+  Blocks,
   BookOpen,
   Bot,
   Brain,
@@ -70,6 +71,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/system/overview', label: '概览', icon: LayoutDashboard },
       { to: '/system/settings', label: '设置', icon: Settings },
       { to: '/system/plugins', label: '插件', icon: Puzzle },
+      { to: '/system/mcp', label: 'MCP', icon: Blocks },
       { to: '/system/debug', label: '调试', icon: Bug },
     ],
   },

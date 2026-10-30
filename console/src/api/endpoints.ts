@@ -768,6 +768,157 @@ export const snowlumaInstallApi = {
   },
 }
 
+/* ---------------- MCP 管理（Cursor 格式） ---------------- */
+
+export interface McpServer {
+  name: string
+  /** stdio | streamable-http（展示为 stdio / http） */
+  transport: string
+  command: string
+  args: string[]
+  url: string
+  enabled: boolean
+  /** env / headers 只回键名，不回值（安全）。 */
+  envKeys: string[]
+  headerKeys: string[]
+  connected: boolean | undefined
+  toolCount: number | undefined
+  lastError: string
+}
+
+export interface McpToolInfo {
+  server: string
+  name: string
+  description: string
+}
+
+export interface McpTestResult {
+  ok: boolean
+  tools: McpToolInfo[]
+  toolCount: number
+  error: string
+}
+
+export interface McpImportResult {
+  added: string[]
+  updated: string[]
+  errors: Array<{ name: string; error: string }>
+}
+
+function asStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.map((x) => (typeof x === 'string' ? x : String(x))).filter((x) => x !== '')
+}
+
+function toMcpServer(v: unknown): McpServer {
+  const rec = isRecord(v) ? v : {}
+  const args = asStringArray(rec.args)
+  const envKeys = asStringArray(rec.envKeys ?? rec.env_keys)
+  const headerKeys = asStringArray(rec.headerKeys ?? rec.header_keys)
+  return {
+    name: asStr(rec.name) ?? '',
+    transport: asStr(rec.transport) ?? 'stdio',
+    command: asStr(rec.command) ?? '',
+    args,
+    url: asStr(rec.url) ?? '',
+    enabled: asBool(rec.enabled) ?? false,
+    envKeys,
+    headerKeys,
+    connected: asBool(rec.connected),
+    toolCount: asNum(rec.toolCount),
+    lastError: asStr(rec.lastError) ?? '',
+  }
+}
+
+function toMcpTool(v: unknown): McpToolInfo {
+  const rec = isRecord(v) ? v : {}
+  return {
+    server: asStr(rec.server) ?? '',
+    name: asStr(rec.name) ?? '',
+    description: asStr(rec.description) ?? '',
+  }
+}
+
+export interface McpServerInput {
+  name: string
+  transport: 'stdio' | 'streamable-http'
+  command?: string
+  args?: string[]
+  url?: string
+  env?: Record<string, string>
+  headers?: Record<string, string>
+  enabled?: boolean
+}
+
+export const mcpApi = {
+  /** GET /api/mcp/servers（required）→ 服务器列表（env/headers 只有键名）。 */
+  async servers(): Promise<{ available: boolean; servers: McpServer[] }> {
+    const out = await http.get<unknown>('/api/mcp/servers', undefined, {
+      silentUnauthorized: true,
+      allowAnyStatus: true,
+    })
+    if (isRecord(out) && typeof out.__status === 'number') return { available: false, servers: [] }
+    const rec = isRecord(out) ? out : {}
+    return { available: true, servers: pickArray(rec, 'servers').map(toMcpServer) }
+  },
+  /** POST /api/mcp/servers（admin）→ 单服务器 upsert。 */
+  async upsert(input: McpServerInput): Promise<void> {
+    await http.post('/api/mcp/servers', input)
+  },
+  /** PATCH /api/mcp/servers/:name（admin）→ 局部更新（改名=删除+新增）。 */
+  async patch(name: string, input: Partial<Omit<McpServerInput, 'name'>>): Promise<void> {
+    await http.patch(`/api/mcp/servers/${encodeURIComponent(name)}`, input)
+  },
+  /** DELETE /api/mcp/servers/:name（admin）。 */
+  async remove(name: string): Promise<void> {
+    await http.del(`/api/mcp/servers/${encodeURIComponent(name)}`)
+  },
+  /** POST /api/mcp/import（admin）→ 粘贴 Cursor 格式，部分成功。 */
+  async importConfig(config: unknown): Promise<McpImportResult> {
+    const out = await http.post<unknown>('/api/mcp/import', config, { allowAnyStatus: true })
+    if (isRecord(out) && typeof out.__status === 'number') {
+      return { added: [], updated: [], errors: [{ name: '*', error: readErrorEnvelope(out.__body).message }] }
+    }
+    const rec = isRecord(out) ? out : {}
+    return {
+      added: asStringArray(rec.added),
+      updated: asStringArray(rec.updated),
+      errors: pickArray(rec, 'errors')
+        .filter(isRecord)
+        .map((e) => ({ name: asStr(e.name) ?? '', error: asStr(e.error) ?? '' })),
+    }
+  },
+  /** GET /api/mcp/export（admin）→ Cursor 格式（env/headers 含真实值）。 */
+  async exportConfig(): Promise<Record<string, unknown>> {
+    const out = await http.get<unknown>('/api/mcp/export', undefined, { allowAnyStatus: true })
+    if (isRecord(out) && typeof out.__status === 'number') return {}
+    return isRecord(out) ? out : {}
+  },
+  /** POST /api/mcp/servers/:name/test（admin）→ 连接并列出工具。 */
+  async test(name: string): Promise<McpTestResult> {
+    const out = await http.post<unknown>(`/api/mcp/servers/${encodeURIComponent(name)}/test`, undefined, {
+      allowAnyStatus: true,
+    })
+    if (isRecord(out) && typeof out.__status === 'number') {
+      return { ok: false, tools: [], toolCount: 0, error: readErrorEnvelope(out.__body).message }
+    }
+    const rec = isRecord(out) ? out : {}
+    return {
+      ok: asBool(rec.ok) ?? false,
+      tools: pickArray(rec, 'tools').map(toMcpTool),
+      toolCount: asNum(rec.toolCount) ?? 0,
+      error: asStr(rec.error) ?? '',
+    }
+  },
+  /** GET /api/mcp/tools（required）→ 所有启用服务器的工具聚合。 */
+  async tools(): Promise<McpToolInfo[]> {
+    const out = await http.get<unknown>('/api/mcp/tools', undefined, { allowAnyStatus: true })
+    if (isRecord(out) && typeof out.__status === 'number') return []
+    const rec = isRecord(out) ? out : {}
+    return pickArray(rec, 'tools').map(toMcpTool)
+  },
+}
+
 /* ---------------- settings（模型 / 语音 / 通用） ---------------- */
 
 export const settingsApi = {

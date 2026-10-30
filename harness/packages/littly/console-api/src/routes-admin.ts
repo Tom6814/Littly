@@ -60,6 +60,35 @@ const SHELL_META_RE = /[;&|`$<>()[\]{}*?!~#\n\r\t'"\\]/
 const INTERPRETER_MARKERS = new Set(['node', 'deno', 'bun', 'bunx', 'npx', 'python', 'python3'])
 const EVAL_FLAGS = new Set(['-e', '--eval', '-c', '--command', '-p', '--print', '--shell', '--input-type'])
 
+const MCP_ENV_KEY_RE = /^[A-Za-z0-9_]{1,64}$/
+const MCP_HEADER_KEY_RE = /^[A-Za-z0-9-]{1,64}$/
+
+/** 校验 env（stdio 会话环境变量）：键名规则 + 值必须是字符串且不含 NUL。 */
+export function validateMcpEnv(env: Record<string, unknown> | undefined): string | null {
+  if (env === undefined) return null
+  if (env === null || typeof env !== 'object' || Array.isArray(env)) return 'env 必须是对象（KEY: VALUE）'
+  for (const [key, value] of Object.entries(env)) {
+    if (!MCP_ENV_KEY_RE.test(key)) return `env 键名不合法（${key}）：只允许字母数字下划线，1-64 位`
+    if (typeof value !== 'string') return `env[${key}] 的值必须是字符串`
+    if (value.includes('\u0000')) return `env[${key}] 的值包含 NUL 字符`
+    if (value.length > 16_384) return `env[${key}] 的值过长（>16KB）`
+  }
+  return null
+}
+
+/** 校验 headers（streamable-http 请求头）：名称规则 + 值必须是字符串且不含 NUL/换行。 */
+export function validateMcpHeaders(headers: Record<string, unknown> | undefined): string | null {
+  if (headers === undefined) return null
+  if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) return 'headers 必须是对象（名称: 值）'
+  for (const [key, value] of Object.entries(headers)) {
+    if (!MCP_HEADER_KEY_RE.test(key)) return `headers 名称不合法（${key}）：只允许字母数字连字符，1-64 位`
+    if (typeof value !== 'string') return `headers[${key}] 的值必须是字符串`
+    if (value.includes('\u0000') || /[\r\n]/.test(value)) return `headers[${key}] 的值包含 NUL 或换行`
+    if (value.length > 16_384) return `headers[${key}] 的值过长（>16KB）`
+  }
+  return null
+}
+
 /** 校验一次 MCP 服务器配置；通过返回 null，否则返回中文原因。 */
 export function validateMcpServer(input: {
   name: string
@@ -67,6 +96,8 @@ export function validateMcpServer(input: {
   command?: string | undefined
   args: string[]
   url?: string | undefined
+  env?: Record<string, unknown> | undefined
+  headers?: Record<string, unknown> | undefined
   /** 同名已登记服务器的原配置（更新时用：命令未变可放行）。 */
   existing?: { command?: string | undefined } | undefined
 }): string | null {
@@ -95,11 +126,16 @@ export function validateMcpServer(input: {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'url 只支持 http/https'
     if (parsed.username !== '' || parsed.password !== '') return 'url 不允许携带凭据'
   }
+  // Cursor 格式支持 env（stdio）/ headers（http）；两者都允许但按传输取用，多余字段保留。
+  const envError = validateMcpEnv(input.env)
+  if (envError !== null) return envError
+  const headersError = validateMcpHeaders(input.headers)
+  if (headersError !== null) return headersError
   return null
 }
 
 /** MCP 配置变更审计（失败不阻断请求）。 */
-function auditMcpChange(d: Deps, action: 'mcp_upsert' | 'mcp_remove', detail: Record<string, unknown>): void {
+export function auditMcpChange(d: Deps, action: 'mcp_upsert' | 'mcp_remove' | 'mcp_import' | 'mcp_test', detail: Record<string, unknown>): void {
   try {
     d.storage
       .prepare('INSERT INTO audit_logs (id, bot_id, category, action, detail, created_at) VALUES (?,?,?,?,?,?)')

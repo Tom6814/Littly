@@ -59,6 +59,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/system/overview', name: 'system-overview', component: () => import('@/pages/system/OverviewPage.vue'), meta: { title: '概览' } },
   { path: '/system/settings', name: 'system-settings', component: () => import('@/pages/system/SettingsPage.vue'), meta: { title: '设置' } },
   { path: '/system/plugins', name: 'system-plugins', component: () => import('@/pages/system/PluginsPage.vue'), meta: { title: '插件' } },
+  { path: '/system/mcp', name: 'system-mcp', component: () => import('@/pages/system/McpPage.vue'), meta: { title: 'MCP' } },
   { path: '/system/debug', name: 'system-debug', component: () => import('@/pages/system/DebugPage.vue'), meta: { title: '调试' } },
 
   { path: '/:pathMatch(.*)*', redirect: '/chat' },
