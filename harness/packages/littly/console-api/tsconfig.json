@@ -21,6 +21,7 @@
     { "path": "../channel-wechat-ilink" },
     { "path": "../x" },
     { "path": "../channel-qq" },
+    { "path": "../snowluma" },
     { "path": "../../boot/plugin-manager" },
     { "path": "../../skill/skill" }
   ]

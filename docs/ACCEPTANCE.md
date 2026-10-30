@@ -378,3 +378,17 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 | 下线 | `sidecars/bili/`、MCP `mcp-bili`、旧 4 条 sidecar 路由、`@littly/tools` 旧 bili 客户端/工具、compose bili 服务、`verify-bili-sidecar.mjs` |
 | 前端 | `/channels/bilibili` 重写：状态卡（头像/账号/UID/等级/VIP/最近登录）、扫码四态轮询自动刷新、一键提取浏览器 Cookie、登出、写开关、只读预览（视频/热门/排行/搜索） |
 | 验证 | `verify-bili` **140/0**（fake bin + mock passport）；`build:artifacts` 7/7；`verify-e2e` **83/0**（+12 bili）；其余 17 套脚本 + agent-loop 30 + backend-mainloop 47 全 0 失败；真机 live（3000）：authenticated=true/银色的whale/mid 3546953329674695、qr/start 真 passport 链接 + PNG(2338B)、qr/status wait、cmd status ok、settings 写开关可持久化 |
+
+### 11.3 一键安装/配置 SnowLuma（2026-10-31）
+
+用户要求：自动安装/配置 SnowLuma，用户只需扫码登录 QQ。
+
+| 项 | 内容 |
+|---|---|
+| 新插件 | `@littly/snowluma`（服务键 `littlySnowluma`）：`install(consent)` / `start` / `stop` / `status` / `qrInfo` / `logs` / `autoconfigure` / `remove`；docker 操作全部 spawn 无 shell，参数固定（SYS_PTRACE、seccomp=unconfined、shm 1g、ulimit、随机 VNC 密码、宿主 UID/GID、端口只绑 127.0.0.1、三块 bind mount） |
+| 自动配置 | 实测官方镜像的 `config/onebot.json` **默认已监听 0.0.0.0:3001 且带随机 accessToken** → 不改 host、不重启；`readOnebotToken()` 读 token（登录后 `onebot_<uin>.json` 优先），`autoconfigure()` 等 3001 可达后用 OneBot `get_login_info` 验证并写 `bots.snowluma_ws_url/token/enabled` |
+| 扫码体验 | noVNC `:6081`（WebUI `:5099`）；远程桌面密码由我们随机生成并存 DB（可展示/复制，支持 `?autoconnect=1&password=` 免密链接）；WebUI 临时密码从首启日志提取；状态机 `not_installed→pulling→installed→starting→waiting_scan→connected` |
+| 前端 | QQ 页 SnowLuma Tab「一键安装（推荐）」四步向导（知情同意 → 安装进度 → 启动并扫码/复制密码/日志 → 已连接自动接线 + 失败降级手动配置）；停止/卸载/日志抽屉，admin 门禁 |
+| API | `GET /api/snowluma/status`、`POST install/start/stop/qr/autoconfigure/remove`、`GET logs`（admin；status 非 admin 剥密码） |
+| 验证 | `verify-snowluma-install` **68/0**（fake docker，含 `restarts=0` 断言）；`build:artifacts` 7/7；`verify-e2e` **87/0**（+4 snowluma）；**3000 真机**：state installed → start → waiting_scan（容器 running、noVNC 200、WebUI 200、configReady=true、hasToken=true），noVNC 免密链接可用 |
+| 合规 | SnowLuma 为第三方非商业自托管软件；安装前必须勾选知情同意（EULA 条款），未同意 API 返回 400 `consent_required` |

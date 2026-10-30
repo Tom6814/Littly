@@ -147,6 +147,19 @@ SnowLuma 是**第三方** QQ 协议运行时，需**你自行安装并启动**�
 容器部署时 `deploy/docker-compose.yml` 已带 `snowluma` 服务（`--profile qq`，官方镜像
 `ghcr.io/snowluma/snowluma`，需 `SYS_PTRACE`；首次用 noVNC `:6081` 扫码）。
 
+### 3.6.1.1 一键安装（推荐，控制台内完成）
+
+SnowLuma 需要 Docker；控制台提供一键安装/启动/扫码引导，用户只需**扫码登录 QQ**：
+
+1. 「连接 → QQ → SnowLuma」→ 点「一键安装」→ 勾选知情同意（第三方非商业自托管软件，遵守其 EULA）→ 自动 `docker pull` 官方镜像（`motricseven7/snowluma`）。
+2. 安装完成后点「启动并扫码」→ 后端自动 `docker run`（SYS_PTRACE / seccomp=unconfined / shm 1g / ulimit / 随机 VNC 密码 / 三块数据卷 bind mount），并读取 `config/onebot.json` 里的 WS accessToken。
+3. 点「打开远程桌面（noVNC）」→ 容器内 QQ 自动启动，用手机 QQ 扫码登录；也可用「免密直连」链接（`?autoconnect=1&password=…`）。
+4. 登录后控制台自动检测 3001 可达 → `autoconfigure` 把 `ws://127.0.0.1:3001` + token 写入该 bot 并启用 → 显示「已连接 @QQ号」。无需手动填 ws/token。
+
+数据卷位置：`LITTLY_DATA_DIR/snowluma/{data,qq-config,qq-data}`（升级/重装不丢登录态）。
+日志与密码：远程桌面密码在控制台可复制（`VNC_PASSWD` 由我们随机生成）；WebUI 临时密码在容器日志里提取（控制台「容器日志」可看）。
+卸载默认保留登录数据卷（二次确认）；真实 QQ 扫码必须由你本人在手机上完成。
+
 ### 3.6.2 官方 QQBot（QQ 开放平台）
 
 1. 在 [QQ 开放平台](https://q.qq.com/) 创建机器人，拿 `AppID` / `AppSecret`。

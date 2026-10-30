@@ -11918,6 +11918,9 @@ importers:
       '@littly/scheduler':
         specifier: workspace:*
         version: link:../scheduler
+      '@littly/snowluma':
+        specifier: workspace:*
+        version: link:../snowluma
       '@littly/storage':
         specifier: workspace:*
         version: link:../storage
@@ -12046,6 +12049,9 @@ importers:
       '@littly/persona':
         specifier: workspace:*
         version: link:../persona
+      '@littly/snowluma':
+        specifier: workspace:*
+        version: link:../snowluma
       '@littly/storage':
         specifier: workspace:*
         version: link:../storage
@@ -12165,6 +12171,18 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+
+  packages/littly/snowluma:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@littly/storage':
+        specifier: workspace:*
+        version: link:../storage
 
   packages/littly/storage:
     dependencies:

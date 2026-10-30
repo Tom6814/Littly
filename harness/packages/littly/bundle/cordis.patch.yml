@@ -57,6 +57,9 @@
       name: '@littly/scheduler'
     - id: littly-channel-telegram
       name: '@littly/channel-telegram'
+    # SnowLuma 一键安装/配置（docker pull/run + noVNC 扫码信息 + token 自动接线）
+    - id: littly-snowluma
+      name: '@littly/snowluma'
     # QQ 双渠道：SnowLuma OneBot v11 + 官方 QQBot（基于 MIT dsh-lane-bridge 重写）
     - id: littly-channel-qq
       name: '@littly/channel-qq'

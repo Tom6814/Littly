@@ -454,6 +454,8 @@ export interface QqStatus {
 
 export interface QqProbeResult {
   ok: boolean
+  /** 后端仍在等待扫码/WS 可达（autoconfigure 长等待中的回归态）。 */
+  waiting: boolean
   selfId: string
   nickname: string
   error: string
@@ -532,12 +534,13 @@ export const qqApi = {
   async probe(kind: 'snowluma' | 'qqbot'): Promise<QqProbeResult> {
     const out = await http.post<unknown>('/api/qq/probe', { kind }, { allowAnyStatus: true })
     if (isRecord(out) && typeof out.__status === 'number') {
-      return { ok: false, selfId: '', nickname: '', error: readErrorEnvelope(out.__body).message }
+      return { ok: false, waiting: false, selfId: '', nickname: '', error: readErrorEnvelope(out.__body).message }
     }
     const rec = isRecord(out) ? out : {}
     return {
       ok: asBool(rec.ok) ?? false,
-      selfId: asStr(rec.selfId) ?? asStr(rec.self_id) ?? '',
+      waiting: asBool(rec.waiting) ?? false,
+      selfId: asStrOrNum(rec.selfId) || asStrOrNum(rec.self_id),
       nickname: asStr(rec.nickname) ?? '',
       error: asStr(rec.error) ?? asStr(rec.message) ?? '',
     }
@@ -565,6 +568,203 @@ export const qqApi = {
     if (typeof rec.logs === 'string') return rec.logs.split('\n')
     if (typeof out === 'string') return out.split('\n')
     return []
+  },
+}
+
+/* ---------------- SnowLuma 一键安装（supervisor） ---------------- */
+
+export interface SnowlumaInstallStatus {
+  /** 接口是否可用（404/未就绪 false，页面据此静默降级）。 */
+  available: boolean
+  /** not_installed | pulling | installed | starting | waiting_scan | connected | error */
+  state: string
+  dockerOk: boolean
+  image: { present: boolean; digest: string; tag: string }
+  container: { exists: boolean; running: boolean; status: string }
+  ports: { novnc: number; webui: number; ws: number }
+  novncUrl: string
+  webuiUrl: string
+  wsUrl: string
+  vncPassword: string
+  webuiPassword: string
+  /** 后端字段：onebot 配置是否已就绪（旧字段 configPatched 兼容保留）。 */
+  configReady: boolean
+  configPatched: boolean
+  configWarning: string
+  hasToken: boolean
+  consent: boolean
+  /** docker pull 流式进度文本（安装中展示）。 */
+  pullProgress: string
+  lastError: string
+  logsTail: string
+}
+
+export interface SnowlumaQrInfo {
+  novncUrl: string
+  vncPassword: string
+  webuiUrl: string
+  webuiPassword: string
+  steps: string[]
+}
+
+export interface SnowlumaAutoResult {
+  ok: boolean
+  /** 后端仍在等待扫码/WS 可达（autoconfigure 长等待中的回归态）。 */
+  waiting: boolean
+  selfId: string
+  nickname: string
+  error: string
+}
+
+function emptySnowlumaInstallStatus(available = false): SnowlumaInstallStatus {
+  return {
+    available,
+    state: 'not_installed',
+    dockerOk: false,
+    image: { present: false, digest: '', tag: '' },
+    container: { exists: false, running: false, status: '' },
+    ports: { novnc: 6081, webui: 5099, ws: 3001 },
+    novncUrl: 'http://127.0.0.1:6081/vnc.html',
+    webuiUrl: 'http://127.0.0.1:5099',
+    wsUrl: 'ws://127.0.0.1:3001',
+    vncPassword: '',
+    webuiPassword: '',
+    configReady: false,
+    configPatched: false,
+    configWarning: '',
+    hasToken: false,
+    consent: false,
+    pullProgress: '',
+    lastError: '',
+    logsTail: '',
+  }
+}
+
+function toSnowlumaInstallStatus(v: unknown): SnowlumaInstallStatus {
+  if (isRecord(v) && typeof v.__status === 'number') return emptySnowlumaInstallStatus(false)
+  const rec = isRecord(v) ? v : {}
+  const image = pickRecord(rec, 'image') ?? {}
+  const container = pickRecord(rec, 'container') ?? {}
+  const ports = pickRecord(rec, 'ports') ?? {}
+  const base = emptySnowlumaInstallStatus(true)
+  return {
+    available: true,
+    state: asStr(rec.state) ?? 'not_installed',
+    dockerOk: asBool(rec.dockerOk) ?? false,
+    image: {
+      present: asBool(image.present) ?? false,
+      digest: asStr(image.digest) ?? '',
+      tag: asStr(image.tag) ?? '',
+    },
+    container: {
+      exists: asBool(container.exists) ?? false,
+      running: asBool(container.running) ?? false,
+      status: asStr(container.status) ?? '',
+    },
+    ports: {
+      novnc: asNum(ports.novnc) ?? base.ports.novnc,
+      webui: asNum(ports.webui) ?? base.ports.webui,
+      ws: asNum(ports.ws) ?? base.ports.ws,
+    },
+    novncUrl: asStr(rec.novncUrl) ?? base.novncUrl,
+    webuiUrl: asStr(rec.webuiUrl) ?? base.webuiUrl,
+    wsUrl: asStr(rec.wsUrl) ?? base.wsUrl,
+    vncPassword: asStr(rec.vncPassword) ?? '',
+    webuiPassword: asStr(rec.webuiPassword) ?? '',
+    configReady: asBool(rec.configReady) ?? asBool(rec.configPatched) ?? false,
+    configPatched: asBool(rec.configPatched) ?? asBool(rec.configReady) ?? false,
+    configWarning: asStr(rec.configWarning) ?? '',
+    hasToken: asBool(rec.hasToken) ?? false,
+    consent: asBool(rec.consent) ?? false,
+    pullProgress: asStr(rec.pullProgress) ?? '',
+    lastError: asStr(rec.lastError) ?? '',
+    logsTail: asStr(rec.logsTail) ?? '',
+  }
+}
+
+/** 异步操作（install/start/stop/remove）的返回值可能是裸 status 或 {ok,status} 包装。 */
+function toSnowlumaInstallStatusFromAction(v: unknown): SnowlumaInstallStatus {
+  if (isRecord(v) && typeof v.__status === 'number') return emptySnowlumaInstallStatus(false)
+  const rec = isRecord(v) ? v : {}
+  const inner = pickRecord(rec, 'status')
+  return toSnowlumaInstallStatus(inner ?? rec)
+}
+
+export const snowlumaInstallApi = {
+  /** GET /api/snowluma/status（required）→ 安装/容器/扫码状态机。 */
+  async status(): Promise<SnowlumaInstallStatus> {
+    const out = await http.get<unknown>('/api/snowluma/status', undefined, {
+      silentUnauthorized: true,
+      allowAnyStatus: true,
+    })
+    return toSnowlumaInstallStatus(out)
+  },
+  /** POST /api/snowluma/install（admin）{consent:true} —— EULA 知情同意是硬前置。 */
+  async install(consent: boolean): Promise<SnowlumaInstallStatus> {
+    const out = await http.post<unknown>('/api/snowluma/install', { consent }, { allowAnyStatus: true })
+    return toSnowlumaInstallStatusFromAction(out)
+  },
+  /** POST /api/snowluma/start（admin）→ 拉容器 + 补丁 onebot 配置。 */
+  async start(): Promise<SnowlumaInstallStatus> {
+    const out = await http.post<unknown>('/api/snowluma/start', undefined, { allowAnyStatus: true })
+    return toSnowlumaInstallStatusFromAction(out)
+  },
+  /** POST /api/snowluma/stop（admin）→ 停止容器（保留数据卷与登录态）。 */
+  async stop(): Promise<SnowlumaInstallStatus> {
+    const out = await http.post<unknown>('/api/snowluma/stop', undefined, { allowAnyStatus: true })
+    return toSnowlumaInstallStatusFromAction(out)
+  },
+  /** POST /api/snowluma/qr（admin）→ noVNC/WebUI 地址 + 密码 + 操作步骤。 */
+  async qr(): Promise<SnowlumaQrInfo | null> {
+    const out = await http.post<unknown>('/api/snowluma/qr', undefined, { allowAnyStatus: true })
+    if (isRecord(out) && typeof out.__status === 'number') return null
+    const rec = isRecord(out) ? out : {}
+    const info = pickRecord(rec, 'qr') ?? rec
+    const stepsRaw = pickArray(info, 'steps')
+    return {
+      novncUrl: asStr(info.novncUrl) ?? 'http://127.0.0.1:6081/vnc.html',
+      vncPassword: asStr(info.vncPassword) ?? '',
+      webuiUrl: asStr(info.webuiUrl) ?? 'http://127.0.0.1:5099',
+      webuiPassword: asStr(info.webuiPassword) ?? '',
+      steps: stepsRaw.map((x) => String(x)).filter((x) => x !== ''),
+    }
+  },
+  /** GET /api/snowluma/logs?tail=N（admin）→ 容器日志（密码/令牌遮罩）。 */
+  async logs(tail = 200): Promise<string[]> {
+    const out = await http.get<unknown>('/api/snowluma/logs', { tail }, { allowAnyStatus: true })
+    if (isRecord(out) && typeof out.__status === 'number') return []
+    const rec = isRecord(out) ? out : {}
+    const lines = pickArray(rec, 'logs', 'lines')
+    if (lines.length > 0) {
+      return lines
+        .map((line) => {
+          if (typeof line === 'string') return line
+          const o = isRecord(line) ? line : {}
+          return asStr(o.text) ?? asStr(o.line) ?? ''
+        })
+        .filter((line) => line !== '')
+    }
+    if (typeof rec.logs === 'string') return rec.logs.split('\n')
+    return []
+  },
+  /** POST /api/snowluma/autoconfigure（admin）→ 探测 WS 并写 bots 的 snowluma_ws_url/enabled。 */
+  async autoconfigure(): Promise<SnowlumaAutoResult> {
+    const out = await http.post<unknown>('/api/snowluma/autoconfigure', undefined, { allowAnyStatus: true })
+    if (isRecord(out) && typeof out.__status === 'number') {
+      return { ok: false, waiting: false, selfId: '', nickname: '', error: readErrorEnvelope(out.__body).message }
+    }
+    const rec = isRecord(out) ? out : {}
+    return {
+      ok: asBool(rec.ok) ?? false,
+      waiting: asBool(rec.waiting) ?? false,
+      selfId: asStrOrNum(rec.selfId) || asStrOrNum(rec.self_id),
+      nickname: asStr(rec.nickname) ?? '',
+      error: asStr(rec.error) ?? asStr(rec.message) ?? '',
+    }
+  },
+  /** POST /api/snowluma/remove（admin）{keepData:true} → 卸载容器，默认保留登录态数据卷。 */
+  async remove(keepData = true): Promise<void> {
+    await http.post('/api/snowluma/remove', { keepData })
   },
 }
 

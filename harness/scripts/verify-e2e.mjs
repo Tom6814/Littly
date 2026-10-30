@@ -265,6 +265,13 @@ const qqData = qqStatus.json?.data ?? {}
 ok(typeof qqData.snowluma?.enabled === 'boolean' && typeof qqData.qqbot?.enabled === 'boolean', 'QQ status 含双渠道（snowluma/qqbot）enabled')
 ok(typeof qqData.snowluma?.configured === 'boolean' && typeof qqData.qqbot?.configured === 'boolean', 'QQ status 含双渠道 configured')
 
+console.log('== SnowLuma 一键安装（@littly/snowluma）==')
+const snowStatus = await api('/api/snowluma/status')
+ok(snowStatus.status === 200, `/api/snowluma/status 200（${snowStatus.status}）`)
+const snowData = snowStatus.json?.data ?? {}
+ok(typeof snowData.state === 'string' && typeof snowData.dockerOk === 'boolean', 'snowluma status 含 state/dockerOk')
+ok(snowData.vncPassword === undefined && snowData.webuiPassword === undefined, '非 admin 的 status 不返回明文密码')
+
 console.log('== 工具按角色启停 ==')
 // 建一个角色用于启停断言：先走 API（管理员），不行就直接写库
 // （测试库里第一个注册的用户才是管理员，这里注册的是第 N 个）
@@ -353,6 +360,8 @@ ok(anon.status === 401, `未登录 /api/plugins → 401（${anon.status}）`)
 ok(anon.json?.error?.code === 'unauthorized', '未登录错误码统一')
 const anonQq = await api('/api/qq/status')
 ok(anonQq.status === 401, `未登录 /api/qq/status → 401（${anonQq.status}）`)
+const anonSnow = await api('/api/snowluma/status')
+ok(anonSnow.status === 401, `未登录 /api/snowluma/status → 401（${anonSnow.status}）`)
 for (const [k, v] of saved) jar.set(k, v)
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)

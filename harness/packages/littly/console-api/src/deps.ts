@@ -11,6 +11,7 @@ import type { PluginManager } from '@deepseek-ai/dsh-plugin-manager'
 import type { SkillRegistry } from '@deepseek-ai/dsh-skill'
 import type { XService } from '@littly/x'
 import type { QqChannelService } from '@littly/channel-qq'
+import type { SnowlumaService } from '@littly/snowluma'
 import type { SessionManager } from './auth.ts'
 import { err, type Router, type ApiRequest } from './http.ts'
 
@@ -125,6 +126,8 @@ export interface Deps {
   x: XService | undefined
   /** QQ 渠道（SnowLuma/官方 QQBot）服务；profile 未启用 @littly/channel-qq 时为 undefined。 */
   qq: QqChannelService | undefined
+  /** SnowLuma 一键安装服务；profile 未启用 @littly/snowluma 时为 undefined。 */
+  snowluma: SnowlumaService | undefined
   /** Bilibili 服务；profile 未启用 @littly/bili 时为 undefined。 */
   bili: BiliServiceLike | undefined
   sessions: SessionManager
