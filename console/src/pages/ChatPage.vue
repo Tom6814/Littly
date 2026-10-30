@@ -106,8 +106,33 @@ async function loadHistory(): Promise<void> {
   }
 }
 
+/**
+ * 一条消息按「单换行 = 分条」拆成多个气泡；空行只作分隔，不产生空气泡。
+ * 后端落库的 assistant 文本常带前导/连续换行（拟人化分片用 \n 拼接），
+ * 所以这里逐行 trim + 过滤空行，既是「分条」也是去掉首尾空白。
+ */
+function bubblesOf(message: ChatMessage): string[] {
+  const lines = String(message.text ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  return lines.length > 0 ? lines : ['']
+}
+
+/**
+ * 合并前清掉「已经拿到真实消息」的乐观气泡。
+ * 发送时先本地插一条 pending 气泡，随后 SSE 会回推同一条已落库消息；
+ * 两者不清理会短暂（甚至整个生成期间）显示两次 —— 就是「发送显示两次」的根因。
+ */
+function pruneOptimistic(incoming: ChatMessage[]): void {
+  const confirmed = new Set(incoming.filter((m) => m.role === 'user').map((m) => m.text))
+  if (confirmed.size === 0) return
+  messages.value = messages.value.filter((m) => !(m.pending === true && confirmed.has(m.text)))
+}
+
 /** 合并消息：按 id 去重，保持已有顺序，新消息追加。 */
 function mergeMessages(incoming: ChatMessage[]): void {
+  pruneOptimistic(incoming)
   const byId = new Map(messages.value.map((m) => [m.id, m]))
   for (const m of incoming) byId.set(m.id, m)
   messages.value = [...byId.values()].sort((a, b) => {
@@ -468,14 +493,18 @@ function goBindWechat(): void {
                 投递失败
               </span>
             </div>
-            <div
-              class="rounded-xl px-4 py-2.5 text-control leading-relaxed whitespace-pre-wrap"
-              :class="
-                message.role === 'user'
-                  ? 'bg-accent text-foreground'
-                  : 'bg-section-card text-foreground'
-              "
-            >{{ message.text }}</div>
+            <div class="flex flex-col gap-1" :class="message.role === 'user' ? 'items-end' : 'items-start'">
+              <div
+                v-for="(line, lineIndex) in bubblesOf(message)"
+                :key="lineIndex"
+                class="rounded-xl px-4 py-2.5 text-control leading-relaxed whitespace-pre-wrap"
+                :class="
+                  message.role === 'user'
+                    ? 'bg-accent text-foreground'
+                    : 'bg-section-card text-foreground'
+                "
+              >{{ line }}</div>
+            </div>
 
             <!-- 思考过程（默认折叠） -->
             <details v-if="message.reasoning" class="mt-1 text-caption text-muted-foreground">
