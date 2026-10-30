@@ -11,7 +11,7 @@ import {
   botChannelsView, applyBotChannelsPatch,
 } from './mapping.ts'
 import { ensureSeed } from './seed.ts'
-import { isAdmin, requireBotAccess, botOwnedBy } from './deps.ts'
+import { requireBotAccess, botOwnedBy } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
 function botById(d: Deps, id: string): BotRow | undefined {
@@ -33,8 +33,9 @@ export const registerBotRoutes: RegisterFn = (r, d) => {
     // 否则全新部署打开控制台是一片空白，聊天页没有对象。
     ensureSeed(d)
     const allRows = d.storage.prepare('SELECT * FROM bots ORDER BY created_at ASC').all() as unknown as BotRow[]
-    // B3：普通用户只看见自己名下的 bot；admin 看全部。
-    const rows = isAdmin(ctx) ? allRows : allRows.filter((b) => b.owner_id !== '' && b.owner_id === ctx.user?.id)
+    // B3 定调：admin 看全部；普通用户看「自己名下的 + 部署默认的她（第一个 bot）+ 未分配 owner 的 bot」。
+    // 复用 botOwnedBy 作为唯一判定源，避免「能读消息却列不出 bot」这种前后端不一致。
+    const rows = allRows.filter((b) => botOwnedBy(ctx, d, b.id))
     json(ctx.res, 200, {
       data: {
         bots: rows.map(botSummaryView),
