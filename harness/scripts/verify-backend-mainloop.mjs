@@ -20,7 +20,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LittlyStorage } from '../packages/littly/storage/src/index.ts'
 import { LittlyHub } from '../packages/littly/agents/src/index.ts'
-import { handleSnowlumaEvent, extractMedia } from '../packages/littly/channel-snowluma/src/inbound.ts'
+import { handleInboundMessage, channelMeta, shouldProcessGroupMessage } from '../packages/littly/channel-qq/src/inbound.ts'
+import { segmentsToText, imagesOf } from '../packages/littly/channel-qq/src/adapters/snowluma.ts'
 
 let pass = 0
 let fail = 0
@@ -255,43 +256,46 @@ storage.prepare("INSERT INTO contacts (id, bot_id, sender, name, created_at, upd
   ok(r.reply.length > 0, 'T-D：安全阀二次仍无内容 → 兜底文案，绝不沉默')
 }
 
-// ================= T-E SnowLuma 入站过滤 =================
-console.log('== T-E SnowLuma 群@门 / 私聊 ==')
+// ================= T-E QQ 渠道入站过滤（channel-qq） =================
+console.log('== T-E QQ 渠道 群@门 / 私聊 / 媒体 ==')
 storage.prepare("INSERT INTO bots (id, name, snowluma_account, created_at) VALUES ('b5','QQ测试','10001',?)").run(nowIso)
 {
   const enqueued = []
-  const snowDeps = {
+  const sentReplies = []
+  const fakeManager = {
+    send: async (...args) => { sentReplies.push(args); return { ok: true, sent: 1 } },
+    noteInbound: () => {},
+    recentMessageId: () => '',
+    lastInbound: () => null,
+    callAction: async () => null,
+    sendPhoto: async () => ({ ok: true }),
+  }
+  const qqDeps = {
     storage,
     hub: { enqueueBufferedMessage: (input) => { enqueued.push(input); return { messageId: 'x', fireAt: nowIso } } },
+    manager: fakeManager,
     log: () => {},
-    onMessage: async () => {},
-    getSelfNickname: async () => '小璃',
     photoPublicUrl: (u) => u,
-    reconnectMs: 5000,
   }
   const bot = storage.prepare("SELECT * FROM bots WHERE id='b5'").get()
-  // 群聊未 @ → 丢弃
-  await handleSnowlumaEvent(snowDeps, bot, {
-    post_type: 'message', message_type: 'group', self_id: 10001, user_id: 20002, message: '大家好',
-  })
-  ok(enqueued.length === 0, 'T-E：SnowLuma 群聊未 @ 机器人 → 忽略')
-  // 群聊 @ → 入缓冲
-  await handleSnowlumaEvent(snowDeps, bot, {
-    post_type: 'message', message_type: 'group', self_id: 10001, user_id: 20002, message: '小璃 你怎么看',
-  })
-  ok(enqueued.length === 1, 'T-E：群聊 @ 机器人 → 入缓冲')
-  // 多账号 self_id 过滤
-  await handleSnowlumaEvent(snowDeps, bot, {
-    post_type: 'message', message_type: 'private', sub_type: 'friend', self_id: 99999, user_id: 20002, message: 'hi',
-  })
-  ok(enqueued.length === 1, 'T-E：非本账号的 self_id 事件 → 忽略')
+  ok(channelMeta('snowluma').hubChannel === 'snowluma' && channelMeta('qqbot').hubChannel === 'qqp', 'T-E：两渠道 hub channelId = snowluma / qqp')
+  ok(channelMeta('snowluma').identityChannel === 'qqp' && channelMeta('qqbot').identityChannel === 'qqp', 'T-E：身份/绑定 channel 统一 qqp（兼容旧绑定）')
+  ok(shouldProcessGroupMessage({ kind: 'group', text: '大家好' }, '') === false, 'T-E：群聊未 @ → 过滤')
+  ok(shouldProcessGroupMessage({ kind: 'group', text: '小璃 在吗', mentionsBot: true }, '') === true, 'T-E：群聊 @ → 放行')
+  // 群聊未 @ → 不入缓冲
+  await handleInboundMessage(qqDeps, bot, 'snowluma', { channel: 'snowluma', kind: 'group', externalId: '9001', senderId: '20002', senderName: '路人', text: '大家好', images: [] })
+  ok(enqueued.length === 0, 'T-E：群聊未 @ → 丢弃')
+  // 群聊 @ → 入缓冲（channelId=snowluma）
+  await handleInboundMessage(qqDeps, bot, 'snowluma', { channel: 'snowluma', kind: 'group', externalId: '9001', senderId: '20002', senderName: '路人', text: '小璃 你怎么看', images: [], mentionsBot: true })
+  ok(enqueued.length === 1 && enqueued[0].channelId === 'snowluma', 'T-E：群聊 @ → 入缓冲（channelId=snowluma）')
   // 私聊好友 → 入缓冲
-  await handleSnowlumaEvent(snowDeps, bot, {
-    post_type: 'message', message_type: 'private', sub_type: 'friend', self_id: 10001, user_id: 20003, message: '在吗',
-  })
-  ok(enqueued.length === 2 && enqueued[1].channelId === 'qqp', 'T-E：私聊好友 → 入缓冲（channelId=qqp）')
-  ok(extractMedia([{ type: 'text', data: { text: '看图' } }, { type: 'image', data: { url: 'https://x/1.png' } }]).images.length === 1, 'T-E：CQ 段图片提取')
-  ok(extractMedia('纯文本').text === '纯文本', 'T-E：纯文本消息兼容')
+  await handleInboundMessage(qqDeps, bot, 'snowluma', { channel: 'snowluma', kind: 'private', externalId: '20003', senderId: '20003', senderName: '好友', text: '在吗', images: [] })
+  ok(enqueued.length === 2 && enqueued[1].channelId === 'snowluma', 'T-E：私聊好友 → 入缓冲')
+  // 官方 QQBot 私聊 → channelId=qqp
+  await handleInboundMessage(qqDeps, bot, 'qqbot', { channel: 'qqbot', kind: 'private', externalId: 'openid-1', senderId: 'openid-1', senderName: 'QQ用户', text: 'hi', images: [] })
+  ok(enqueued.length === 3 && enqueued[2].channelId === 'qqp', 'T-E：官方 QQBot 私聊 → 入缓冲（channelId=qqp）')
+  ok(segmentsToText([{ type: 'text', data: { text: '你好 ' } }, { type: 'at', data: { qq: '123', name: '小明' } }, { type: 'image', data: { url: 'https://x/1.png' } }]) === '你好 @小明 [图片]', 'T-E：OneBot 段 → 文本（@/图片占位）')
+  ok(imagesOf([{ type: 'image', data: { url: 'https://x/1.png' } }, { type: 'text', data: { text: 'hi' } }]).length === 1, 'T-E：OneBot 图片 URL 提取')
 }
 
 globalThis.fetch = realFetch

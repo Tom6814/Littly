@@ -126,6 +126,41 @@ twitter --version                      # 0.8.5
   不支持 DM / 通知 / 投票（上游限制）。
 - **验收**：`node harness/scripts/verify-x.mjs`（fake bin，覆盖允许清单/写预演/开关/限频/审计/错误映射）。
 
+## 3.6 QQ（SnowLuma OneBot v11 + 官方 QQBot）
+
+QQ 渠道是一个插件两个通道：**SnowLuma（个人 QQ 号，OneBot v11）** 与 **官方 QQBot（QQ 开放平台）**。
+实现派生自 [dsh-lane-bridge](https://github.com/CNranger1124/dsh-lane-bridge)（MIT，致谢见
+`harness/packages/littly/channel-qq/NOTICE`），已 TypeScript 化并接入本仓库 hub。
+
+### 3.6.1 SnowLuma（推荐，个人 QQ 号）
+
+SnowLuma 是**第三方** QQ 协议运行时，需**你自行安装并启动**（本仓库不代装、不代启，遵守其 EULA）：
+
+1. 下载 [SnowLuma Releases](https://github.com/SnowLuma/SnowLuma/releases) 完整包解压，`./launcher.sh`（或 `launcher.bat`）。
+2. 打开 WebUI `http://127.0.0.1:5099`（初始密码见首启日志），按引导扫码登录 QQ。
+3. 在 WebUI 里开启 **OneBot：WebSocket 服务端**（默认端口 3001；注意 HTTP token 与 WS token 是两个不同值）。
+4. 控制台「连接 → QQ → SnowLuma」：填 `ws://127.0.0.1:3001` 与 token → 保存 → 点「探测」，
+   状态变「已连接（账号 xxx）」即成功；群聊需 @ 她才回（模型侧按渠道策略）。
+
+容器部署时 `deploy/docker-compose.yml` 已带 `snowluma` 服务（`--profile qq`，官方镜像
+`ghcr.io/snowluma/snowluma`，需 `SYS_PTRACE`；首次用 noVNC `:6081` 扫码）。
+
+### 3.6.2 官方 QQBot（QQ 开放平台）
+
+1. 在 [QQ 开放平台](https://q.qq.com/) 创建机器人，拿 `AppID` / `AppSecret`。
+2. 控制台「连接 → QQ → 官方 QQBot」：填 AppID/AppSecret（保存后只显示掩码）→ 启用 → 探测。
+3. 注意被动回复窗口：QQ 官方要求 `msg_id` 在 **5 分钟**内回复；超时会失败（日志会写清楚）。
+
+### 3.6.3 验收
+
+```sh
+cd harness
+node scripts/verify-channel-qq.mjs     # 适配器单测（假 OneBot WS 服务 + QQBot mock）
+node scripts/verify-e2e.mjs 3000       # 含 /api/qq/status 200、未登录 401
+```
+
+API：`GET /api/qq/status`、`PUT /api/qq/snowluma`、`PUT /api/qq/qqbot`、`POST /api/qq/probe`、`GET /api/qq/logs`。
+
 ## 4. 旧库迁移
 
 旧项目（Next.js 单体）的 `db/custom.db` 一次性迁进新 schema：

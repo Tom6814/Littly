@@ -9,6 +9,19 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 OVERRIDE=/tmp/compose-override.yml
 FAIL=0
 
+echo "############ 0) 新插件本地行为断言（不依赖容器） ############"
+if node "$HERE/verify-channel-qq.mjs"; then
+  echo ">>> channel-qq：通过"
+else
+  echo ">>> channel-qq：失败"; FAIL=1
+fi
+if node "$HERE/verify-x.mjs"; then
+  echo ">>> x：通过"
+else
+  echo ">>> x：失败"; FAIL=1
+fi
+
+echo
 echo "############ 1) 容器验收 ############"
 if "$HERE/verify-container.sh" "$IMAGE" 3488; then
   echo ">>> 容器验收：通过"

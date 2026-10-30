@@ -10,10 +10,7 @@
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../storage" },
-    { "path": "../persona" },
-    { "path": "../llm" },
-    { "path": "../memory" },
-    { "path": "../tools" },
-    { "path": "../agents" }
+    { "path": "../agents" },
+    { "path": "../tools" }
   ]
 }

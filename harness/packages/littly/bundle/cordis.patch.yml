@@ -27,8 +27,6 @@
       name: '@littly/growth'
 
     # bilibili：收敛口（把原始 MCP 工具挡在带护栏的 bili 元工具后面）
-    - id: littly-channel-qq-official
-      name: '@littly/channel-qq-official'
     - id: littly-channel-discord
       name: '@littly/channel-discord'
     - id: littly-channel-wechat-ilink
@@ -59,8 +57,9 @@
       name: '@littly/scheduler'
     - id: littly-channel-telegram
       name: '@littly/channel-telegram'
-    - id: littly-channel-snowluma
-      name: '@littly/channel-snowluma'
+    # QQ 双渠道：SnowLuma OneBot v11 + 官方 QQBot（基于 MIT dsh-lane-bridge 重写）
+    - id: littly-channel-qq
+      name: '@littly/channel-qq'
 
 
     # HTTP 载体：dsh 拒绝 0.0.0.0 通配（容器语义由编排层解析本机 IP 注入，

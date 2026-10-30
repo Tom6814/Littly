@@ -1,0 +1,11 @@
+本包（@littly/channel-qq）的 OneBot v11 WebSocket 客户端、SnowLuma 适配器、
+官方 QQ Bot 适配器与多实例管理逻辑，派生自：
+
+- dsh-lane-bridge (https://github.com/CNranger1124/dsh-lane-bridge) — MIT
+  Copyright (c) CNranger1124 and contributors
+  原始文件：packages/dsh-lane-bridge/lib/channels/{base,onebot-ws,snowluma,snowluma-discovery,qqbot,manager}.js
+- 其上游 qq-bridge (https://github.com/Derpyu520/qq-bridge) — MIT（v0.2.1-r1 及更早）
+  Copyright (c) Derpyu520 and contributors
+
+本仓库的移植/改编（TypeScript 化、去掉 Discord 渠道、接入 littly hub 与业务配置）
+同样以 MIT 许可发布。原始项目的许可与版权声明见各自仓库 LICENSE。

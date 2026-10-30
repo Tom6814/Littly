@@ -1,5 +1,5 @@
 {
-  "name": "@littly/channel-snowluma",
+  "name": "@littly/channel-qq",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,7 +16,9 @@
   },
   "dependencies": {
     "@littly/agents": "workspace:*",
-    "@littly/storage": "workspace:*"
+    "@littly/storage": "workspace:*",
+    "@littly/tools": "workspace:*",
+    "@tencent-connect/qqbot-nodejs": "^1.0.5"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:~",

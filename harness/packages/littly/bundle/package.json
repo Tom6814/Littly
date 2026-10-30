@@ -23,8 +23,6 @@
     "@littly/agents": "workspace:*",
     "@littly/bili": "workspace:*",
     "@littly/channel-discord": "workspace:*",
-    "@littly/channel-qq-official": "workspace:*",
-    "@littly/channel-snowluma": "workspace:*",
     "@littly/channel-telegram": "workspace:*",
     "@littly/channel-wechat-ilink": "workspace:*",
     "@littly/console-api": "workspace:*",
@@ -38,7 +36,8 @@
     "@littly/tools": "workspace:*",
     "@littly/voice": "workspace:*",
     "@littly/voice-call": "workspace:*",
-    "@littly/x": "workspace:*"
+    "@littly/x": "workspace:*",
+    "@littly/channel-qq": "workspace:*"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:~"

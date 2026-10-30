@@ -27,7 +27,8 @@
     "@littly/storage": "workspace:*",
     "@littly/tools": "workspace:*",
     "@littly/voice-call": "workspace:*",
-    "@littly/x": "workspace:*"
+    "@littly/x": "workspace:*",
+    "@littly/channel-qq": "workspace:*"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:~",

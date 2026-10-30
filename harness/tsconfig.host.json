@@ -572,15 +572,15 @@
     { "path": "./packages/littly/memory" },
     { "path": "./packages/littly/tools" },
     { "path": "./packages/littly/agents" },
-    { "path": "./packages/littly/voice" },{ "path": "./packages/littly/console-api" },{ "path": "./packages/littly/channel-telegram" },{ "path": "./packages/littly/channel-snowluma" },{ "path": "./packages/littly/scheduler" },
+    { "path": "./packages/littly/voice" },{ "path": "./packages/littly/console-api" },{ "path": "./packages/littly/channel-telegram" },{ "path": "./packages/littly/channel-qq" },{ "path": "./packages/littly/scheduler" },
     { "path": "./packages/littly/growth" },
     { "path": "./packages/littly/bili" },
     { "path": "./packages/littly/x" },
+    
     { "path": "./packages/littly/mcp" },
     { "path": "./packages/littly/voice-call" },
     { "path": "./packages/littly/channel-wechat-ilink" },
     { "path": "./packages/littly/channel-discord" },
-    { "path": "./packages/littly/channel-qq-official" },
     { "path": "./packages/littly/bundle" },
     { "path": "./apps/cli" }
   ]

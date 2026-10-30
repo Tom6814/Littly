@@ -426,6 +426,148 @@ export const xApi = {
   },
 }
 
+/* ---------------- QQ（SnowLuma OneBot v11 + 官方 QQBot，@littly/channel-qq） ---------------- */
+
+export interface QqChannelState {
+  enabled: boolean
+  configured: boolean
+  connected: boolean
+  selfId: string
+  nickname: string
+  lastError: string
+  /** ISO 时间（后端可能给毫秒时间戳，这里统一转 ISO）。 */
+  lastEventAt: string
+  /** SnowLuma：已保存的 OneBot ws 地址 / 是否已存 token。 */
+  wsUrl: string
+  hasToken: boolean
+  /** 官方 QQBot：已保存的 AppID / 是否已存 secret。 */
+  appId: string
+  hasSecret: boolean
+}
+
+export interface QqStatus {
+  /** 接口是否可用（404/未就绪 false，页面据此静默降级）。 */
+  available: boolean
+  snowluma: QqChannelState
+  qqbot: QqChannelState
+}
+
+export interface QqProbeResult {
+  ok: boolean
+  selfId: string
+  nickname: string
+  error: string
+}
+
+function emptyQqChannel(): QqChannelState {
+  return {
+    enabled: false,
+    configured: false,
+    connected: false,
+    selfId: '',
+    nickname: '',
+    lastError: '',
+    lastEventAt: '',
+    wsUrl: '',
+    hasToken: false,
+    appId: '',
+    hasSecret: false,
+  }
+}
+
+function asIsoTime(v: unknown): string {
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) return new Date(v).toISOString()
+  if (typeof v === 'string' && v !== '') {
+    const t = Date.parse(v)
+    return Number.isFinite(t) ? new Date(t).toISOString() : v
+  }
+  return ''
+}
+
+function toQqChannel(v: unknown): QqChannelState {
+  const rec = isRecord(v) ? v : {}
+  return {
+    enabled: asBool(rec.enabled) ?? false,
+    configured: asBool(rec.configured) ?? false,
+    connected: asBool(rec.connected) ?? false,
+    selfId: asStr(rec.selfId) ?? asStr(rec.self_id) ?? '',
+    nickname: asStr(rec.nickname) ?? '',
+    lastError: asStr(rec.lastError) ?? '',
+    lastEventAt: asIsoTime(rec.lastEventAt),
+    wsUrl: asStr(rec.wsUrl) ?? '',
+    hasToken: asBool(rec.hasToken) ?? false,
+    appId: asStr(rec.appId) ?? '',
+    hasSecret: asBool(rec.hasSecret) ?? false,
+  }
+}
+
+function emptyQqStatus(available = false): QqStatus {
+  return { available, snowluma: emptyQqChannel(), qqbot: emptyQqChannel() }
+}
+
+export const qqApi = {
+  /** GET /api/qq/status（required）→ 两个渠道的 {enabled,connected,selfId?,lastError?,lastEventAt?}。 */
+  async status(): Promise<QqStatus> {
+    const out = await http.get<unknown>('/api/qq/status', undefined, {
+      silentUnauthorized: true,
+      allowAnyStatus: true,
+    })
+    if (isRecord(out) && typeof out.__status === 'number') return emptyQqStatus(false)
+    const rec = isRecord(out) ? out : {}
+    return {
+      available: true,
+      snowluma: toQqChannel(rec.snowluma),
+      qqbot: toQqChannel(rec.qqbot),
+    }
+  },
+  /** PUT /api/qq/snowluma（admin）{enabled, wsUrl?, token?}（token 空=不变）。 */
+  async saveSnowluma(input: { enabled: boolean; wsUrl?: string; token?: string }): Promise<void> {
+    await http.put('/api/qq/snowluma', input)
+  },
+  /** PUT /api/qq/qqbot（admin）{enabled, appId, appSecret?}（appSecret 空=不变）。 */
+  async saveQqbot(input: { enabled: boolean; appId: string; appSecret?: string }): Promise<void> {
+    await http.put('/api/qq/qqbot', input)
+  },
+  /** POST /api/qq/probe（required）{kind} → 真实连接探测。 */
+  async probe(kind: 'snowluma' | 'qqbot'): Promise<QqProbeResult> {
+    const out = await http.post<unknown>('/api/qq/probe', { kind }, { allowAnyStatus: true })
+    if (isRecord(out) && typeof out.__status === 'number') {
+      return { ok: false, selfId: '', nickname: '', error: readErrorEnvelope(out.__body).message }
+    }
+    const rec = isRecord(out) ? out : {}
+    return {
+      ok: asBool(rec.ok) ?? false,
+      selfId: asStr(rec.selfId) ?? asStr(rec.self_id) ?? '',
+      nickname: asStr(rec.nickname) ?? '',
+      error: asStr(rec.error) ?? asStr(rec.message) ?? '',
+    }
+  },
+  /**
+   * GET /api/qq/logs?tail=N（admin）→ 适配器环形缓冲日志（后端脱敏）。
+   * 后端行对象：{at, level, text}；这里渲染成 "[时间] LEVEL text" 单行文本。
+   */
+  async logs(tail = 100): Promise<string[]> {
+    const out = await http.get<unknown>('/api/qq/logs', { tail })
+    const rec = isRecord(out) ? out : {}
+    const lines = pickArray(rec, 'logs', 'lines')
+    if (lines.length > 0) {
+      return lines
+        .map((line) => {
+          if (typeof line === 'string') return line
+          const o = isRecord(line) ? line : {}
+          const text = asStr(o.text) ?? ''
+          const at = asStr(o.at) ?? ''
+          const level = (asStr(o.level) ?? '').toUpperCase()
+          return `${at ? `[${at}] ` : ''}${level ? `${level} ` : ''}${text}`.trim()
+        })
+        .filter((line) => line !== '')
+    }
+    if (typeof rec.logs === 'string') return rec.logs.split('\n')
+    if (typeof out === 'string') return out.split('\n')
+    return []
+  },
+}
+
 /* ---------------- settings（模型 / 语音 / 通用） ---------------- */
 
 export const settingsApi = {

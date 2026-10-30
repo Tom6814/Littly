@@ -17,7 +17,7 @@
   → 三铁律服务端硬校验（证据 ≥2 条 / 单维 ≤±1 级 / 总位移 ≤6 级 / 价值禁区）→ 待审提案 → 人工批准。
   角色卡永远只读；人格以档案形式按月漂移。
 - **主动性双线**：预约/承诺线（履约等级 1/2/3）+ 心声回响线（静默扫描 + 指数退避唤醒）。
-- **五个渠道**：SnowLuma（QQ 账号，OneBot v11）· Telegram · **微信 iLink（扫码绑定 + 名片二维码：
+- **六个渠道**：**QQ（SnowLuma OneBot v11 + 官方 QQBot 双通道，同一插件）** · Telegram · **微信 iLink（扫码绑定 + 名片二维码：
   控制台出码 → 手机微信扫码确认 → 她就在微信里；照 openilink-hub/iLink 协议自研，不依赖外部 hub）**
   · QQ 官方 · Discord。绑定一次，全渠道同一条会话线。
 - **实时语音通话**：同端口 `/call` WebSocket —— 浏览器 PCM → Deepgram 流式 STT → 角色快速回复
@@ -41,11 +41,11 @@
 | 目录 | 内容 |
 |---|---|
 | `harness/` | 基座：[DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) fork（vendor 于固定 commit），继承插件系统 / MCP / skills / 定时任务 / LLM 适配器 |
-| `harness/packages/littly/` | 业务插件（从旧项目逐行移植 / 本轮新增）：`storage` `persona` `memory` `agents` `tools` `voice` `voice-call` `growth` `scheduler` `console-api` `mcp` `bili` `x` + 渠道 `channel-snowluma` `channel-telegram` `channel-wechat-ilink` `channel-qq-official` `channel-discord` |
+| `harness/packages/littly/` | 业务插件（从旧项目逐行移植 / 本轮新增）：`storage` `persona` `memory` `agents` `tools` `voice` `voice-call` `growth` `scheduler` `console-api` `mcp` `bili` `x` + 渠道 `channel-qq`（SnowLuma + 官方 QQBot）`channel-telegram` `channel-wechat-ilink` `channel-discord` |
 | `console/` | Vue 3.5 + Vite + Tailwind 4 + `@felinic/ui` 控制台（真 URL 路由，五组导航 + 首启引导；`packages/ui` 为 vendored 设计系统） |
 | `sidecars/bili/` | bili-cli（bili-agent）HTTP wrapper sidecar —— AI 自己的 bilibili 账号 |
 | `deploy/` | 容器编排（harness + SnowLuma + bili sidecar） |
-| `docs/` | [宪法](docs/PRINCIPLES.md) · [移植指南](docs/PORTING-GUIDE.md) · [部署与验收](docs/DEPLOY.md) · [SnowLuma 契约](docs/SNOWLUMA-CONTRACT.md) · [bilibili 接入](docs/BILI-INTEGRATION.md) |
+| `docs/` | [宪法](docs/PRINCIPLES.md) · [移植指南](docs/PORTING-GUIDE.md) · [部署与验收](docs/DEPLOY.md) · [QQ / SnowLuma 接入](docs/SNOWLUMA-CONTRACT.md) · [bilibili 接入](docs/BILI-INTEGRATION.md) |
 
 ## 跑起来
 

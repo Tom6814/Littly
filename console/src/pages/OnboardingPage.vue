@@ -38,6 +38,7 @@ import {
   channelsApi,
   charactersApi,
   personaApi,
+  qqApi,
   settingsApi,
   wechatApi,
   xApi,
@@ -107,6 +108,14 @@ const accounts = reactive({
   bindings: [] as Array<{ channel: string; externalId: string }>,
   channels: {} as Record<string, { enabled: boolean; hasToken: boolean }>,
   x: { available: true, configured: false, username: '' },
+  /** QQ 双通道（SnowLuma OneBot / 官方 QQBot），任一启用即算已接。 */
+  qq: {
+    available: true,
+    snowlumaEnabled: false,
+    snowlumaConnected: false,
+    qqbotEnabled: false,
+    qqbotConnected: false,
+  },
 })
 /** 当前展开的内联快速配置（一次只开一个）。 */
 const quickPanel = ref<'' | PlatformId>('')
@@ -229,13 +238,26 @@ async function loadAccounts(): Promise<void> {
       try {
         const channels = await botsApi.channels(botId)
         const next: Record<string, { enabled: boolean; hasToken: boolean }> = {}
-        for (const key of ['telegram', 'qq', 'discord']) {
+        // QQ 已改由 SnowLuma 承载，这里只剩 telegram / discord 走 bot 渠道配置。
+        for (const key of ['telegram', 'discord']) {
           const cfg = (channels[key] ?? {}) as Record<string, unknown>
           next[key] = { enabled: cfg.enabled === true, hasToken: cfg.hasToken === true }
         }
         accounts.channels = next
       } catch {
         accounts.channels = {}
+      }
+    })(),
+    (async () => {
+      try {
+        const out = await qqApi.status()
+        accounts.qq.available = out.available
+        accounts.qq.snowlumaEnabled = out.snowluma.enabled
+        accounts.qq.snowlumaConnected = out.snowluma.connected
+        accounts.qq.qqbotEnabled = out.qqbot.enabled
+        accounts.qq.qqbotConnected = out.qqbot.connected
+      } catch {
+        accounts.qq.available = false
       }
     })(),
     (async () => {
@@ -287,10 +309,9 @@ const platforms = computed<PlatformView[]>(() => {
     actionDisabled: accounts.bili.logined || !accounts.bili.connected,
     connected: accounts.bili.logined,
   })
-  // Telegram / QQ / Discord —— 跳转控制台对应页面完成配置
+  // Telegram / Discord —— 跳转控制台对应页面完成官方渠道配置
   const jumpPlatforms: Array<{ id: PlatformId; name: string; icon: typeof MessageCircle }> = [
     { id: 'telegram', name: 'Telegram', icon: Send },
-    { id: 'qq', name: 'QQ', icon: Bot },
     { id: 'discord', name: 'Discord', icon: Gamepad2 },
   ]
   for (const p of jumpPlatforms) {
@@ -307,6 +328,33 @@ const platforms = computed<PlatformView[]>(() => {
       connected: bound,
     })
   }
+  // QQ —— 双通道（SnowLuma OneBot / 官方 QQBot），状态来自 /api/qq/status；任一启用即算已接。
+  const qqEnabled = accounts.qq.snowlumaEnabled || accounts.qq.qqbotEnabled
+  const qqConnected = accounts.qq.snowlumaConnected || accounts.qq.qqbotConnected
+  const qqEnabledNames = [
+    accounts.qq.snowlumaEnabled ? 'SnowLuma' : '',
+    accounts.qq.qqbotEnabled ? '官方 Bot' : '',
+  ].filter(Boolean)
+  const qqConnectedNames = [
+    accounts.qq.snowlumaConnected ? 'SnowLuma' : '',
+    accounts.qq.qqbotConnected ? '官方 Bot' : '',
+  ].filter(Boolean)
+  list.push({
+    id: 'qq',
+    name: 'QQ',
+    icon: Bot,
+    statusText: !accounts.qq.available
+      ? '接口未就绪'
+      : qqConnected
+        ? `${qqConnectedNames.join(' / ')} 已连接`
+        : qqEnabled
+          ? `${qqEnabledNames.join(' / ')} 已启用·待连接`
+          : '未启用',
+    badgeVariant: qqConnected ? 'success' : !accounts.qq.available ? 'warning' : qqEnabled ? 'info' : 'outline',
+    actionLabel: qqEnabled ? '管理 QQ' : '配置 QQ',
+    actionDisabled: false,
+    connected: qqEnabled,
+  })
   // X
   list.push({
     id: 'x',
@@ -344,6 +392,7 @@ function onPlatformAction(platform: PlatformView): void {
     quickPanel.value = quickPanel.value === 'x' ? '' : 'x'
     return
   }
+  // Telegram / Discord / QQ：去控制台对应渠道页完成配置。
   void router.push(`/channels/${platform.id}?from=onboarding`)
 }
 

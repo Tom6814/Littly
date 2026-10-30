@@ -20,6 +20,7 @@
     { "path": "../voice-call" },
     { "path": "../channel-wechat-ilink" },
     { "path": "../x" },
+    { "path": "../channel-qq" },
     { "path": "../../boot/plugin-manager" },
     { "path": "../../skill/skill" }
   ]

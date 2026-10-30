@@ -11888,12 +11888,9 @@ importers:
       '@littly/channel-discord':
         specifier: workspace:*
         version: link:../channel-discord
-      '@littly/channel-qq-official':
+      '@littly/channel-qq':
         specifier: workspace:*
-        version: link:../channel-qq-official
-      '@littly/channel-snowluma':
-        specifier: workspace:*
-        version: link:../channel-snowluma
+        version: link:../channel-qq
       '@littly/channel-telegram':
         specifier: workspace:*
         version: link:../channel-telegram
@@ -11960,14 +11957,8 @@ importers:
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
 
-  packages/littly/channel-qq-official:
+  packages/littly/channel-qq:
     dependencies:
-      '@deepseek-ai/cordis':
-        specifier: workspace:~
-        version: link:../../../vendor/cordis
-      '@deepseek-ai/schemastery':
-        specifier: link:../../../vendor/schemastery
-        version: link:../../../vendor/schemastery
       '@littly/agents':
         specifier: workspace:*
         version: link:../agents
@@ -11977,15 +11968,9 @@ importers:
       '@littly/tools':
         specifier: workspace:*
         version: link:../tools
-
-  packages/littly/channel-snowluma:
-    dependencies:
-      '@littly/agents':
-        specifier: workspace:*
-        version: link:../agents
-      '@littly/storage':
-        specifier: workspace:*
-        version: link:../storage
+      '@tencent-connect/qqbot-nodejs':
+        specifier: ^1.0.5
+        version: 1.0.5
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
@@ -12040,6 +12025,9 @@ importers:
       '@littly/agents':
         specifier: workspace:*
         version: link:../agents
+      '@littly/channel-qq':
+        specifier: workspace:*
+        version: link:../channel-qq
       '@littly/channel-wechat-ilink':
         specifier: workspace:*
         version: link:../channel-wechat-ilink
@@ -19608,6 +19596,18 @@ packages:
   '@tanstack/virtual-core@3.17.8':
     resolution: {integrity: sha512-BfEvehNpOT75r5Ksc5xW6NZuXujTfb7nlSEyVu4XHG3gdxNg1KqXruWbDewXOUaUYIo4oRbSfkjIajz4MAT8tA==}
 
+  '@tencent-connect/qqbot-nodejs@1.0.5':
+    resolution: {integrity: sha512-OAPGoZTtG3soI79lGNQ4YqdAe9xy+lYatUfzZyBPmjaRjH0uLjFeImffMlGVSmhfaM/wJQSIA2g1uZv3eorTRg==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      mpg123-decoder: ^1.0.3
+      silk-wasm: ^3.7.1
+    peerDependenciesMeta:
+      mpg123-decoder:
+        optional: true
+      silk-wasm:
+        optional: true
+
   '@testing-library/dom@10.4.2':
     resolution: {integrity: sha512-yzr2S9HyAIdhz2/6qHgbs665Q7PKVcDF05vsOlHPxG1mo36gKVesdYVeDLnXgfjJ03CrKRk08knc6+E/9m8v2Q==}
     engines: {node: '>=18'}
@@ -25747,6 +25747,13 @@ snapshots:
       react-dom: 18.3.1(react@18.3.1)
 
   '@tanstack/virtual-core@3.17.8': {}
+
+  '@tencent-connect/qqbot-nodejs@1.0.5':
+    dependencies:
+      ws: 8.21.3
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   '@testing-library/dom@10.4.2':
     dependencies:

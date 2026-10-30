@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LittlyStorage } from '../packages/littly/storage/src/index.ts'
 import { createBindToken, genBindCode, genTgNonce } from '../packages/littly/console-api/src/routes-bind.ts'
-import { tryHandleBinding, MSG_SUCCESS_QQ, MSG_EXPIRED, MSG_CONFLICT } from '../packages/littly/channel-snowluma/src/binding.ts'
+import { tryHandleBinding, MSG_SUCCESS_QQ, MSG_EXPIRED, MSG_CONFLICT } from '../packages/littly/channel-qq/src/binding.ts'
 
 let pass = 0
 let fail = 0

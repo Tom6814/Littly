@@ -53,8 +53,6 @@
       "@littly/channel-wechat-ilink/src/*": ["./packages/littly/channel-wechat-ilink/src/*"],
       "@littly/channel-discord": ["./packages/littly/channel-discord/src/index.ts"],
       "@littly/channel-discord/src/*": ["./packages/littly/channel-discord/src/*"],
-      "@littly/channel-qq-official": ["./packages/littly/channel-qq-official/src/index.ts"],
-      "@littly/channel-qq-official/src/*": ["./packages/littly/channel-qq-official/src/*"],
       "@littly/mcp/src/*": ["./packages/littly/mcp/src/*"],
       "@deepseek-ai/dsh-client-ui-entry-customization": ["./packages/client/ui-entry-customization/src/index.ts"],
       "@deepseek-ai/dsh-client-ui-entry-customization/client": ["./packages/client/ui-entry-customization/src/client/index.ts"],
