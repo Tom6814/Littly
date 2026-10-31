@@ -245,6 +245,8 @@ function playFallbackAudio(): void {
   if (fallbackUrl !== '') URL.revokeObjectURL(fallbackUrl)
   fallbackUrl = URL.createObjectURL(blob)
   const audio = new Audio(fallbackUrl)
+  audio.setAttribute('playsinline', '')
+  audio.setAttribute('webkit-playsinline', '')
   audioEl = audio
   audio.addEventListener('play', () => (ttsRunning.value = true))
   audio.addEventListener('ended', () => (ttsRunning.value = false))
@@ -549,6 +551,10 @@ async function start(): Promise<void> {
     }
     try {
       audioCtx = new Ctx()
+      // Safari/iOS：AudioContext 在用户手势之外创建后可能处于 suspended，必须显式 resume。
+      void audioCtx.resume().catch(() => {
+        /* 忽略：下一次用户手势再恢复 */
+      })
     } catch (error) {
       failWith(error instanceof Error ? error.message : '麦克风初始化失败。')
     }

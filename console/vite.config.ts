@@ -34,5 +34,9 @@ export default defineConfig({
   build: {
     sourcemap: false,
     chunkSizeWarningLimit: 1500,
+    // Safari 兼容基线：Tailwind v4 / @felinic/ui 需要 Safari 16.4+（oklch/color-mix/@property）。
+    // 显式指定 target，让 esbuild 把 JS 语法降级、Lightning CSS 按 Safari 前缀处理。
+    target: ['safari16.4', 'chrome111', 'firefox128'],
+    cssTarget: 'safari16',
   },
 })

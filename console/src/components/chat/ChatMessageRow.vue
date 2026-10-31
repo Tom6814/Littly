@@ -11,6 +11,7 @@ import {
   Button,
   ConfirmPopover,
   toast,
+  useClipboard,
 } from '@felinic/ui'
 import { Copy, FileText, Image as ImageIcon, Trash2, Volume2 } from 'lucide-vue-next'
 import type { ChatMessage, ChatMessagePiece } from '@/api/types'
@@ -46,15 +47,16 @@ function pieceLabel(piece: ChatMessagePiece): string {
   return ''
 }
 
+const { copyText: copy } = useClipboard()
+
 async function copyText(): Promise<void> {
   const text = props.message.text.trim()
   if (text === '') return
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.success('已复制')
-  } catch {
-    toast.error('复制失败')
-  }
+  // 走 @felinic/ui 的 clipboard 实现：Safari 下 navigator.clipboard 需要安全上下文/手势，
+  // 失败时它内部会退回 execCommand('copy')，避免 Safari 静默失败。
+  const ok = await copy(text)
+  if (ok) toast.success('已复制')
+  else toast.error('复制失败')
 }
 </script>
 
