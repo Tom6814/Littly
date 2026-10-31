@@ -17,19 +17,30 @@ function messageRowById(d: Deps, id: string): MessageRow | undefined {
   return d.storage.prepare('SELECT * FROM messages WHERE id = ?').get(id) as MessageRow | undefined
 }
 
-/** 最近 limit 条可见消息（升序返回；软删行剔除）。 */
-function visibleRows(d: Deps, botId: string, sender: string | null, limit: number): MessageRow[] {
+/**
+ * 可见消息（升序返回；软删行剔除）。
+ * - 无 before：最近 limit 条；
+ * - 有 before{createdAt,id}：比它更早的 limit 条（created_at,id 双游标，避免同秒消息丢失/重复）。
+ * 返回前多取 1 条用于判断 hasMore。
+ */
+function visibleRows(
+  d: Deps,
+  botId: string,
+  sender: string | null,
+  limit: number,
+  before?: { createdAt: string; id: string } | undefined,
+): { rows: MessageRow[]; hasMore: boolean } {
   const safeLimit = Math.min(2000, Math.max(1, limit))
-  const rows = (
-    sender !== null
-      ? d.storage.prepare(
-        'SELECT * FROM messages WHERE bot_id = ? AND sender = ? ORDER BY created_at DESC, id DESC LIMIT ?',
-      ).all(botId, sender, safeLimit)
-      : d.storage.prepare(
-        'SELECT * FROM messages WHERE bot_id = ? ORDER BY created_at DESC, id DESC LIMIT ?',
-      ).all(botId, safeLimit)
-  ) as unknown as MessageRow[]
-  return rows.filter((m) => parseJsonObject(m.meta)['deleted'] !== true).reverse()
+  const whereSender = sender !== null ? ' AND sender = ?' : ''
+  const args: Array<string | number> = sender !== null ? [botId, sender] : [botId]
+  const beforeSql = before !== undefined ? ' AND (created_at < ? OR (created_at = ? AND id < ?))' : ''
+  if (before !== undefined) args.push(before.createdAt, before.createdAt, before.id)
+  const rows = d.storage.prepare(
+    `SELECT * FROM messages WHERE bot_id = ?${whereSender}${beforeSql} ORDER BY created_at DESC, id DESC LIMIT ?`,
+  ).all(...args, safeLimit + 1) as unknown as MessageRow[]
+  const visible = rows.filter((m) => parseJsonObject(m.meta)['deleted'] !== true)
+  const hasMore = rows.length > safeLimit
+  return { rows: visible.slice(0, safeLimit).reverse(), hasMore }
 }
 
 /** 取该会话给定时刻起的落库消息（chat 响应用）。 */
@@ -240,7 +251,11 @@ export const registerChatRoutes: RegisterFn = (r, d) => {
     const requested = queryStr(ctx, 'sender')
     // 管理员不传 sender → 全部会话；普通用户恒定裁剪到自己的 sender
     const scoped = isAdmin(ctx) ? (requested === undefined ? null : resolveSender(ctx, requested)) : ownSender(ctx)
-    json(ctx.res, 200, { data: { messages: visibleRows(d, botId, scoped, limit).map(messageView) } })
+    const beforeAt = queryStr(ctx, 'before')
+    const beforeId = queryStr(ctx, 'beforeId')
+    const before = beforeAt !== undefined && beforeAt !== '' ? { createdAt: beforeAt, id: beforeId ?? '' } : undefined
+    const page = visibleRows(d, botId, scoped, limit, before)
+    json(ctx.res, 200, { data: { messages: page.rows.map(messageView), hasMore: page.hasMore } })
   })
 
   r.del('/api/messages/:id', 'required', (ctx) => {

@@ -236,6 +236,30 @@ export const chatApi = {
     const out = await http.post<unknown>('/api/chat/edit', input)
     return toChatResponse(out)
   },
+  /** 分页拉取消息：不传 before 取最近一页；传 before 取更早一页（createdAt/id 双游标）。 */
+  async messagesPage(input: {
+    botId: string
+    sender?: string
+    limit?: number
+    before?: { createdAt: string; id: string }
+  }): Promise<{ messages: ChatMessage[]; hasMore: boolean }> {
+    const params: Record<string, string | number> = { botId: input.botId }
+    if (input.sender !== undefined && input.sender !== '') params['sender'] = input.sender
+    if (input.limit !== undefined) params['limit'] = input.limit
+    if (input.before !== undefined) {
+      params['before'] = input.before.createdAt
+      params['beforeId'] = input.before.id
+    }
+    const out = await http.get<unknown>('/api/messages', params)
+    const rec = isRecord(out) ? out : {}
+    return {
+      messages: pickArray(rec, 'messages')
+        .map(toMessage)
+        .filter((m): m is ChatMessage => m !== undefined),
+      hasMore: rec['hasMore'] === true,
+    }
+  },
+
   async messages(input: { botId: string; sender?: string; limit?: number }): Promise<ChatMessage[]> {
     const out = await http.get<unknown>('/api/messages', input)
     const rec = isRecord(out) ? out : {}
