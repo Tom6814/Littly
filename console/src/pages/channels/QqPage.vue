@@ -363,11 +363,34 @@ const slBadge = computed<{ label: string; variant: 'success' | 'info' | 'warning
 const slTransitional = computed(
   () => slState.value === 'pulling' || slState.value === 'starting' || slState.value === 'waiting_scan',
 )
-/** 免密直连 noVNC（密码来自后端 qrInfo，仅本机 URL） */
+/**
+ * noVNC 地址改造：后端返回的是容器侧回环地址（127.0.0.1:6081），
+ * 只有当页面本身也跑在本机时才可直接用；通过域名/公网访问时必须改成同源路径，
+ * 否则浏览器会去连访问者自己的 127.0.0.1（就是「弹出的网址是 127.0.0.1」的原因）。
+ * 部署侧 Caddy/Nginx 已把 /vnc.html、/websockify 等同源路径反代到 6081。
+ */
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '0.0.0.0'])
+function publicNovncUrl(raw: string): string {
+  try {
+    const u = new URL(raw)
+    if (!LOOPBACK_HOSTS.has(u.hostname)) return raw
+    if (typeof location === 'undefined' || LOOPBACK_HOSTS.has(location.hostname)) return raw
+    return `${location.origin}/vnc.html${u.search}${u.hash}`
+  } catch {
+    return raw
+  }
+}
+const novncHref = computed(() =>
+  publicNovncUrl(sl.qr?.novncUrl || sl.status?.novncUrl || 'http://127.0.0.1:6081/vnc.html'),
+)
+
+/** 免密直连 noVNC（密码来自后端 qrInfo；回环地址自动改写为同源） */
 const directNovncUrl = computed(() => {
-  const base = sl.qr?.novncUrl || sl.status?.novncUrl || 'http://127.0.0.1:6081/vnc.html'
+  const base = novncHref.value
   const pwd = sl.qr?.vncPassword ?? ''
   if (pwd === '') return base
+  // 后端 novncUrl 可能已经带 password，避免重复追加
+  if (/[?&]password=/.test(base)) return base
   const sep = base.includes('?') ? '&' : '?'
   return `${base}${sep}autoconnect=1&password=${encodeURIComponent(pwd)}`
 })
@@ -1004,7 +1027,7 @@ onMounted(() => {
             <div class="flex flex-wrap items-center gap-2">
               <Button
                 as="a"
-                :href="sl.qr?.novncUrl ?? sl.status?.novncUrl ?? 'http://127.0.0.1:6081/vnc.html'"
+                :href="novncHref"
                 target="_blank"
               >
                 <Monitor />
