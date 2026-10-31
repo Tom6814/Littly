@@ -10,6 +10,8 @@ import z from '@deepseek-ai/schemastery'
 import type { LittlyStorage, MemoryRow } from '@littly/storage'
 import { chatComplete, embedTexts, encodeEmbedding, getAIConfig } from '@littly/llm'
 import { lexicalRelevance, parseEmbedding, scoreMemory, cosineSimilarity } from './score.ts'
+import { MemoryVault } from './vault/service.ts'
+import { registerMemoryTools, type MemoryToolRegistryLike } from './vault/tools.ts'
 
 export const name = 'littly-memory'
 
@@ -18,12 +20,16 @@ export const inject = ['littlyStorage']
 declare module '@deepseek-ai/cordis' {
   interface Context {
     littlyMemory: LittlyMemory
+    littlyMemoryVault: MemoryVault
   }
 }
 
-export interface Config {}
+export interface Config {
+  /** vault 根目录；默认 LITTLY_DATA_DIR/memory。 */
+  vaultRoot?: string
+}
 
-export const Config: z<Config> = z.object({})
+export const Config: z<Config> = z.object({ vaultRoot: z.string() })
 
 export const RETRIEVAL_POOL = 300
 export const DEFAULT_LIMIT = 30
@@ -425,10 +431,30 @@ function cosine(a: number[], b: number[]): number {
 }
 void cosine
 
-export function apply(ctx: Context, _config: Config): void {
-  const memory = new LittlyMemory(ctx, ctx.littlyStorage as LittlyStorage)
+export function apply(ctx: Context, config: Config = {}): void {
+  const storage = ctx.littlyStorage as LittlyStorage
+  const memory = new LittlyMemory(ctx, storage)
   ctx.provide('littlyMemory', memory)
-  ctx.logger.info('littly memory ready')
+  // 记忆 vault：Markdown 真相 + 派生索引（独立于旧 memories 表，旧表保留只读）
+  const vault = new MemoryVault(storage, {
+    ...(config.vaultRoot !== undefined && config.vaultRoot.trim() !== '' ? { rootDir: config.vaultRoot.trim() } : {}),
+    log: (msg, ...args) => ctx.logger.info(msg, ...args),
+  })
+  ctx.provide('littlyMemoryVault', vault)
+  // hub 稍后装配：工具注册不写进 inject（避免与 agents←memory 形成环）
+  ctx.inject(['littlyHub'], (child) => {
+    const hub = (child as unknown as { littlyHub?: MemoryToolRegistryLike }).littlyHub
+    if (hub === undefined) return
+    registerMemoryTools(hub, vault)
+    child.logger.info('littly memory vault tools registered')
+  })
+  ctx.logger.info('littly memory vault ready (root=%s)', vault.rootDir)
 }
 
 export * from './explain.ts'
+export { MemoryVault } from './vault/service.ts'
+export { runDream, refreshProfileFiles, buildProfileMarkdown, dreamDue } from './vault/dream.ts'
+export { VaultIndex } from './vault/index-db.ts'
+export { registerMemoryTools, MEMORY_TOOLS } from './vault/tools.ts'
+export { MEMORY_DOMAINS, WRITABLE_DOMAINS, VaultError } from './vault/types.ts'
+export { defaultVaultRoot, vaultPaths } from './vault/store.ts'

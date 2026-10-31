@@ -13,4 +13,11 @@ export interface SchedulerDeps {
   log: (msg: string, ...args: unknown[]) => void
   /** B9：成长系统服务（profile 未装配 growth 插件时为 undefined，静默跳过月度评审）。 */
   growth?: GrowthTickLike | undefined
+  /** 记忆 vault（profile 未装配 memory vault 时为 undefined，静默跳过每日 Dream 整理）。 */
+  memoryVault?: MemoryVaultTickLike | undefined
+}
+
+/** 记忆 vault 的定时整理最小结构面（避免 scheduler→memory 的实现耦合）。 */
+export interface MemoryVaultTickLike {
+  consolidateDue(kind: 'threshold' | 'daily', now: Date): Promise<Array<{ status: string; added: number; merged: number; superseded: number; archived: number }>>
 }

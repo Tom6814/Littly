@@ -18,7 +18,7 @@ import { runDiaryTick } from './diary.ts'
 import { runGrowthDailyTick, type GrowthTickLike } from './growth-tick.ts'
 import { tickHeartbeat } from './heartbeat.ts'
 import { processScheduledMessages } from './scheduled.ts'
-import type { SchedulerDeps } from './types.ts'
+import type { SchedulerDeps, MemoryVaultTickLike } from './types.ts'
 
 export const name = 'littly-scheduler'
 
@@ -69,7 +69,27 @@ export async function tick(deps: SchedulerDeps, now: Date, opts: { skipDiary: bo
   // e) B9：成长系统月度评审（每日一次；仅在月底窗口内真正调用 growthTick）
   const growthResult = await runGrowthDailyTick(deps, now)
   if (growthResult.ran) deps.log('[scheduler] 成长月度评审已触发（evaluated=%d）', growthResult.evaluated)
+
+  // f) 记忆 vault：每日 03:00 Dream 整理（每实例每天一次；staging 太少的 vault 自动跳过）
+  if (now.getHours() === 3 && deps.memoryVault !== undefined) {
+    const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`
+    if (lastDreamDay !== dayKey) {
+      lastDreamDay = dayKey
+      try {
+        const reports = await deps.memoryVault.consolidateDue('daily', now)
+        const ok = reports.filter((r) => r.status === 'ok')
+        if (ok.length > 0) {
+          deps.log('[scheduler] memory dream 整理 %d 个 vault（新增 %d）', ok.length, ok.reduce((sum, r) => sum + r.added, 0))
+        }
+      } catch (error) {
+        deps.log('[scheduler] memory dream 整理失败（下个周期重试）: %s', String(error))
+      }
+    }
+  }
 }
+
+/** 每日 Dream 去重（模块级：每个进程每天最多触发一次 03:00 整理）。 */
+let lastDreamDay = ''
 
 export function apply(ctx: Context, config: Config): void {
   const deps: SchedulerDeps = {
@@ -79,6 +99,7 @@ export function apply(ctx: Context, config: Config): void {
     // B9：成长服务用 ctx.get 取（不写进 inject）—— growth 未装配时静默降级，
     // 不让「装不装成长插件」决定调度器能否启动。
     growth: ctx.get('littlyGrowth') as GrowthTickLike | undefined,
+    memoryVault: ctx.get('littlyMemoryVault') as MemoryVaultTickLike | undefined,
     log: (msg, ...args) => ctx.logger.info(msg, ...args),
   }
   const tickMs = Math.max(5_000, Math.round(config.tickMs) || 60_000)

@@ -215,6 +215,36 @@ API：`GET /api/mcp/servers`、`POST /api/mcp/servers`、`PATCH/DELETE /api/mcp/
 API：`GET /api/mail/status`、`PUT /api/mail/account`（密码空=不改、`***`=保持）、`POST /api/mail/test`、
 `POST /api/mail/cmd`、`PUT /api/mail/settings`、`DELETE /api/mail/account`。
 
+## 3.9 记忆系统（个人档案 vault）
+
+每个「角色 × 真人」一个文件夹，**Markdown 是唯一真相**，SQLite 索引（FTS5 trigram + 向量，RRF 融合）只是派生、可重建。
+
+```
+数据目录/
+  memory/<botId>/<contactId>/
+    PROFILE.md          # 常驻档案（自动生成，≤2000 字，自动区外人工可改）
+    RULES.md            # 相处规则（feedback 汇总；人可改）
+    domains/
+      about-user/ interests/ projects/ life/ relationships/ feedback/ notes/ health/
+    threads/            # 线索页（thread 字段汇总，可重建）
+    _staging/           # 暂存区：聊天中的候选记忆
+    _history/           # 墓碑（失效/被取代）
+  memory/index.sqlite   # 派生索引（删除后会自动重建）
+```
+
+- **写**：append-only、同 id 冲突 409、路径穿越拒绝、临时文件+rename 原子写；旧 `memories` 表保留只读。
+- **时间**：机器层存 `event_time`（含时区）/`record_raw`（原话）/`record_time`；展示层生成自然语言标签
+  （「两个月前（2026-08）」随索引重建自动老化），关键日期保留绝对；衰减按发生时间。
+- **整理（Dream）**：`_staging` ≥25 条且距上次 ≥30min、每天 03:00、或控制台「立即整理」触发；
+  用成长模型批量抽取→归类→去重→`supersede`/墓碑→写条目→重建 PROFILE→刷新索引与时间标签→写报告；
+  有并发锁与 token 预算，失败保留暂存可重试，绝不物理删原文。
+- **迁移旧记忆**：`POST /api/memory/migrate`（admin，可带 `botId`；幂等，重复调用跳过已迁条目）——
+  旧 category 映射：profile/fact→about-user、detail→life、relationship→relationships、value→feedback、
+  thought→notes（标记推断）。迁移后建议打开「记忆 → 档案」点一次「重建」。
+- **AI 工具**：`memory_profile` / `memory_rules` / `memory_domains` / `memory_index` / `memory_search` /
+  `memory_get` / `memory_write` / `memory_stage` / `memory_forget`（旧 `remember`/`recall` 保留兼容）。
+- **备份**：`memory/` 目录可直接 `tar` 带走；索引删掉也能从 md 重建。
+
 ## 4. 旧库迁移
 
 旧项目（Next.js 单体）的 `db/custom.db` 一次性迁进新 schema：

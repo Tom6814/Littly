@@ -431,3 +431,20 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 | 群聊 external_id 会污染私聊投递地址 | `resolveContact({persistExternal:false})`：群聊只建联系人、不落投递地址 |
 
 验证：`verify-contacts` **52/0**（web 首聊、跨平台只一行、未绑定→绑定补齐、不同 bot 隔离、repair 幂等、不误伤）；`build:artifacts` 7/7；`verify-e2e` **96/0**（+2 contacts 断言）；3000 真机：新建角色 → web 首聊 → 联系人行为 `name=tori / sender=用户id / channel=web / is_owner=1 / user_id=用户id`（不再是 UUID 陌生人）；存量 goldwhale 行已被 repair 补齐 `user_id`。
+
+### 11.7 记忆系统重设计：个人档案 vault（2026-10-31）
+
+用户要求：重新设计记忆系统，参考 memex / MUSE / mem0，按「每个人一个文件夹」组织，适合 AI 长期记忆并兼顾简洁。
+对齐结论：每 bot×人一个文件夹；Markdown 真相 + SQLite 派生索引；暂存区 + 后台整理；9 域；自然语言时间、按发生时间衰减；自动迁移旧记忆。
+
+| 项 | 内容 |
+|---|---|
+| 真相层 | `data/memory/<bot>/<contact>/`：`PROFILE.md`（自动生成 ≤2000 字、区间保护）、`RULES.md`、9 域条目（`domains/*/*.md`，frontmatter：id/domain/kind/event_time/event_raw/record_time/provenance/volatility/supersedes/related/thread/tags/source_ref）、`threads/`、`_staging/`、`_history/`；append-only、同 id 同内容幂等、同 id 异内容 409、路径穿越拒绝、临时文件+rename |
+| 索引层 | `memory/index.sqlite`：entries / entry_fts(FTS5 trigram) / entry_vec / time_labels / staging / dream_reports / meta(source_digest,build_id)；FTS+向量 RRF(k=60)，结果带 path+line+layer；可重建 |
+| 时间与淡忘 | 展示层自然语言标签（「11 小时前」「6 天前（10-24）」「2 个月前（2026-08）」）随重建老化；关键时间保留绝对；衰减按 event_time（state 7 天 / about-user 365 天…）；失效进 `_history` 墓碑 |
+| 工具 | 9 个 `memory_*`（profile/rules/domains/index/search/get/write/stage/forget）；旧 `remember`/`recall` 保留兼容 |
+| 后台整理 | Dream：`_staging`≥25 且 ≥30min / 每日 03:00（scheduler）/ 手动；抽取→归类→去重→supersede+墓碑→写条目→重建 PROFILE→刷新索引/时间→报告（`_meta/dream-log.jsonl` + `dream_reports` 表）；并发锁、token 预算、失败保留暂存 |
+| API | `GET /api/memory/{profile(rebuild),domains,entries,entries/:id,search,staging,dream/status}`、`PUT entries/:id`（含 invalid=标记失效）、`POST /api/memory/{entries/:id/forget,staging/consolidate,migrate}`；旧 `/api/memories*` 保留 |
+| 迁移 | 旧 200 条记忆按 category→域映射，scope 一律用 `contacts.sender`（跨平台同一人一个文件夹）；幂等二次迁移 0 新增；旧表未动；生成 3 个 scope 的 PROFILE（小璃/tori 163 条、小璃/goldwhale 34、优香/tori 3） |
+| 前端 | 记忆页改 vault 浏览器：角色+联系人切换、6 Tab（档案/域/暂存/墓碑/时间线/淡忘池）、条目详情 Drawer（自然语言时间/来源/取代链/编辑与标记失效）、Dream 状态与报告、旧淡忘池保留 |
+| 验证 | `verify-memory-vault` **145/0**（vault/索引/RRF/时间老化/PROFILE/Dream/迁移/工具/锁）；`build:artifacts` 7/7；`verify-e2e` **109/0**（含 memory_* 工具、profile/domains/search/401）；3000 真机迁移 200 条、9 域、档案 1963 字、检索命中带时间标签、页面真机截图通过 |

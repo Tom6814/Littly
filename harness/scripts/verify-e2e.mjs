@@ -81,6 +81,7 @@ ok(sess.status === 200 && sess.json?.data?.user?.username === username, '会话�
     const { readFileSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
     const { join } = await import('node:path')
+    const { LittlyStorage } = await import('../packages/littly/storage/src/index.ts')
     const info = JSON.parse(readFileSync(join(tmpdir(), `littly-runtime-${port}.json`), 'utf8'))
     if (typeof info?.dbFile === 'string' && info.dbFile !== '') runtimeDb = info.dbFile
   } catch {
@@ -119,6 +120,7 @@ ok(toolNames.includes('remember'), 'Littly 内置工具在清单里')
 ok(toolNames.includes('bili'), 'bili 元工具在清单里')
 ok(toolNames.includes('x'), 'x 元工具在清单里（@littly/x 已装配）')
 ok(toolNames.includes('mail'), 'mail 元工具在清单里（@littly/mail 已装配）')
+ok(toolNames.includes('memory_search') && toolNames.includes('memory_write'), 'memory_* 工具在清单里（vault 已装配）')
 ok(toolNames.includes('case_convert'), '★ dsh 社区插件工具 case_convert 可见（Littly↔dsh 桥）')
 const caseTool = (pdata.tools ?? []).find((t) => t.name === 'case_convert')
 ok(typeof caseTool?.description === 'string' && caseTool.description.length > 0, 'dsh 工具描述透传')
@@ -185,6 +187,36 @@ if (botIdQ) {
   const mine = (contacts.json?.data?.contacts ?? []).find((c) => c.id === myId)
   ok(contacts.status === 200 && mine?.userId === myId, 'web 首聊后联系人 user_id 关联到登录用户（不再是无关联新联系人）')
   ok(mine?.name === username && mine?.name !== myId, '联系人 name = username（不是用户 UUID/邮箱）')
+
+  // 记忆 vault：迁移一条旧 memories → 档案/9 域/检索
+  console.log('== 记忆 vault（档案 / 9 域 / 检索）==')
+  try {
+    const { readFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { LittlyStorage } = await import('../packages/littly/storage/src/index.ts')
+    let memDbFile = process.env.LITTLY_DB_FILE ?? 'data/littly.db'
+    try {
+      const info = JSON.parse(readFileSync(join(tmpdir(), `littly-runtime-${port}.json`), 'utf8'))
+      if (typeof info?.dbFile === 'string' && info.dbFile !== '') memDbFile = info.dbFile
+    } catch { /* fallback */ }
+    const store = new LittlyStorage({ logger: { info: () => {} } }, { file: memDbFile })
+    const memId = `e2e-mem-${Date.now()}`
+    store.prepare('INSERT OR REPLACE INTO memories (id, bot_id, contact_id, sender, category, content, importance, event_time, event_time_raw, recorded_at, provenance, volatility, tags, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(memId, botIdQ, myId, myId, 'fact', 'e2e 记忆锚点：最近在准备考研（记忆 vault 验收）', 3, new Date().toISOString(), '', new Date().toISOString(), 'user-stated', 'stable', '[]', new Date().toISOString())
+    store.close()
+  } catch {
+    // 容器里库可能在别的卷：迁移断言降级为端点可用性
+  }
+  const memMigrate = await api('/api/memory/migrate', { method: 'POST', body: { botId: botIdQ } })
+  ok(memMigrate.status === 200, `/api/memory/migrate 200（${memMigrate.status}）`)
+  const memProfile = await api(`/api/memory/profile?botId=${encodeURIComponent(botIdQ)}&contactId=${encodeURIComponent(myId)}`)
+  ok(memProfile.status === 200 && typeof memProfile.json?.data?.profile === 'string', `/api/memory/profile 200 返回 Markdown 档案（${memProfile.status}）`)
+  const memDomains = await api(`/api/memory/domains?botId=${encodeURIComponent(botIdQ)}&contactId=${encodeURIComponent(myId)}`)
+  ok(memDomains.status === 200 && memDomains.json?.data?.domains?.length === 9, 'memory domains 返回 9 域')
+  const memSearch = await api(`/api/memory/search?botId=${encodeURIComponent(botIdQ)}&contactId=${encodeURIComponent(myId)}&q=${encodeURIComponent('考研')}`)
+  ok(memSearch.status === 200 && Array.isArray(memSearch.json?.data?.results), `/api/memory/search 200（${memSearch.status}）`)
+  ok((memSearch.json?.data?.count ?? 0) >= 1, 'memory search 命中迁移条目（含时间标签）')
 } else {
   console.log('  （跳过：库里没有 bot）')
 }
@@ -399,6 +431,8 @@ const anonMcp = await api('/api/mcp/servers')
 ok(anonMcp.status === 401, `未登录 /api/mcp/servers → 401（${anonMcp.status}）`)
 const anonMail = await api('/api/mail/status')
 ok(anonMail.status === 401, `未登录 /api/mail/status → 401（${anonMail.status}）`)
+const anonVault = await api('/api/memory/profile?botId=x&contactId=y')
+ok(anonVault.status === 401, `未登录 /api/memory/profile → 401（${anonVault.status}）`)
 for (const [k, v] of saved) jar.set(k, v)
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)

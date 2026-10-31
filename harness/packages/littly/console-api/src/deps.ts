@@ -13,6 +13,7 @@ import type { XService } from '@littly/x'
 import type { QqChannelService } from '@littly/channel-qq'
 import type { SnowlumaService } from '@littly/snowluma'
 import type { MailService } from '@littly/mail'
+import type { MemoryVault } from '@littly/memory'
 import type { SessionManager } from './auth.ts'
 import { err, type Router, type ApiRequest } from './http.ts'
 
@@ -131,6 +132,8 @@ export interface Deps {
   snowluma: SnowlumaService | undefined
   /** 邮箱服务；profile 未启用 @littly/mail 时为 undefined。 */
   mail: MailService | undefined
+  /** 记忆 vault 服务；profile 未启用 @littly/memory 时为 undefined。 */
+  memoryVault: MemoryVault | undefined
   /** Bilibili 服务；profile 未启用 @littly/bili 时为 undefined。 */
   bili: BiliServiceLike | undefined
   sessions: SessionManager
