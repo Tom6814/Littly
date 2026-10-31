@@ -272,10 +272,16 @@ async function regenerate(): Promise<void> {
   error.value = ''
   agentStatus.value = 'thinking'
   try {
+    // 后端 regenerate 会物理删除「最后一条用户消息及其后」再重跑；本地必须同步丢掉旧气泡，
+    // 否则旧用户消息 + 旧回复会和新的一起显示，看起来像「重新生成后重复显示」。
+    const lastUserIndex = messages.value.map((m) => m.role).lastIndexOf('user')
+    if (lastUserIndex >= 0) messages.value = messages.value.slice(0, lastUserIndex)
     const res = await chatApi.regenerate({ botId: botId.value, sender: sender.value })
     mergeMessages(res.messages)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '重生成失败'
+    // 失败时把本地被裁掉的历史拉回来，避免界面缺消息
+    await loadHistory()
   } finally {
     sending.value = false
     agentStatus.value = ''

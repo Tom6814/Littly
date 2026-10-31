@@ -103,6 +103,14 @@ async function loadAll(): Promise<void> {
   loading.value = false
 }
 
+/**
+ * 打码占位符（••••abcd）只是展示用；聚焦时清空，避免用户把新密钥粘贴到占位符后面，
+ * 造成「保存后看起来又变回原来的字」（其实是含 • 的脏输入被后端跳过/拒绝）。
+ */
+function clearMaskedApiKey(target: { apiKey: string }, key: 'apiKey'): void {
+  if (target[key].includes('•')) target[key] = ''
+}
+
 async function saveModel(): Promise<void> {
   savingModel.value = true
   try {
@@ -193,7 +201,12 @@ async function rerunOnboarding(): Promise<void> {
             <Input v-model="model.baseURL" placeholder="https://…/v1" />
           </SettingsRow>
           <SettingsRow label="API Key" description="已保存的密钥以打码形式回显；不修改则不会覆盖" stack="sm">
-            <Input v-model="model.apiKey" type="password" :placeholder="model.apiKeySet ? '已设置，留空表示不修改' : 'sk-…'" />
+            <Input
+              v-model="model.apiKey"
+              type="password"
+              :placeholder="model.apiKeySet ? '已设置，输入完整新密钥以替换' : 'sk-…'"
+              @focus="clearMaskedApiKey(model, 'apiKey')"
+            />
           </SettingsRow>
           <SettingsRow label="聊天模型" description="她平时对话使用的模型" stack="sm">
             <Input v-model="model.chatModel" placeholder="provider/model" />
@@ -227,7 +240,12 @@ async function rerunOnboarding(): Promise<void> {
             <Input v-model.number="voice.speed" type="number" step="0.1" min="0.5" max="2" />
           </SettingsRow>
           <SettingsRow label="语音 API Key" description="打码回显；留空表示不修改" stack="sm">
-            <Input v-model="voice.apiKey" type="password" :placeholder="voice.apiKeySet ? '已设置，留空表示不修改' : 'sk-…'" />
+            <Input
+              v-model="voice.apiKey"
+              type="password"
+              :placeholder="voice.apiKeySet ? '已设置，输入完整新密钥以替换' : 'sk-…'"
+              @focus="clearMaskedApiKey(voice, 'apiKey')"
+            />
           </SettingsRow>
           <template #footer>
             <Button :loading="savingVoice" @click="saveVoice">保存语音设置</Button>

@@ -8,7 +8,7 @@ import { invalidateAIConfigCache } from '@littly/llm'
 import { parseChanges, parseProposalMeta } from '@littly/growth'
 import { getDisabledTools, toggleDisabledTool } from '@littly/tools'
 import { json, err, bodyRecord, reqStr, reqNum, reqBool, fire } from './http.ts'
-import { maskSecret, isMaskedInput } from './mapping.ts'
+import { maskSecret, isMaskedInput, hasMaskPlaceholder } from './mapping.ts'
 import { ensureSeed } from './seed.ts'
 import { isAdmin, ownSender, senderAllowed, loadBot, queryStr, nowIso, botOwnedBy, requireBotAccess } from './deps.ts'
 import type { Deps, RegisterFn } from './deps.ts'
@@ -176,7 +176,11 @@ function aiSettingsView(d: Deps): Record<string, unknown> {
 function applyAiSettings(d: Deps, body: Record<string, unknown>): void {
   const put = (key: string, value: unknown): void => {
     if (typeof value !== 'string') return
+    // 密钥字段：纯打码串 = 保持原值；混入打码占位符 = 输入被污染（粘贴到占位符后面），必须报错。
     if (key.endsWith('api_key') && isMaskedInput(value)) return
+    if (key.endsWith('api_key') && hasMaskPlaceholder(value)) {
+      throw new Error('密钥里含有打码占位符（••••），请清空输入框后重新粘贴完整密钥')
+    }
     if (value === '' && key.endsWith('base_url') && d.storage.getSetting(key) !== null) return
     d.storage.setSetting(key, value)
   }
@@ -236,7 +240,12 @@ export const registerAdminRoutes: RegisterFn = (r, d) => {
 
   r.put('/api/settings/ai', 'admin', (ctx) => {
     const body = bodyRecord(ctx.body)
-    applyAiSettings(d, body)
+    try {
+      applyAiSettings(d, body)
+    } catch (e) {
+      err(ctx.res, 400, 'bad_request', e instanceof Error ? e.message : String(e))
+      return
+    }
     invalidateAIConfigCache()
     json(ctx.res, 200, { data: aiSettingsView(d) })
   })

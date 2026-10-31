@@ -39,9 +39,18 @@ export function maskSecret(value: string): string {
   return `••••${tail}`
 }
 
-/** 掩码判定：含掩码点号的输入 → 保持原值（前端回传的是打码串，不能回写）。 */
+/**
+ * 掩码判定：只有「完整的打码串」才算掩码（`••••` + 末 4 位，前端回传时保持原值）。
+ * 以前用 `includes('•')` 太宽：用户把新密钥粘贴在打码占位符后面（`••••abcdsk-new`）时，
+ * 会被静默当成掩码跳过 → 保存后看起来「变回原样走了」，这是 API Key 保存失败的根因。
+ */
 export function isMaskedInput(value: string): boolean {
-  return value.includes('•')
+  return /^•{4}[A-Za-z0-9_-]{0,8}$/.test(value)
+}
+
+/** 含打码占位符但不是纯掩码 → 输入被污染，必须拒绝而不是静默跳过。 */
+export function hasMaskPlaceholder(value: string): boolean {
+  return value.includes('•') && !isMaskedInput(value)
 }
 
 // ---- 基础行映射 ----
