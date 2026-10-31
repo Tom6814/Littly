@@ -2,6 +2,9 @@
 node_modules/
 dist/
 lib/
+# 例外：vendored UI 的源码目录（源码，不是构建产物）
+!console/packages/ui/src/lib/
+!console/packages/ui/src/lib/**
 *.tsbuildinfo
 
 # env & secrets
