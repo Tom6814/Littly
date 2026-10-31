@@ -1,323 +1,168 @@
 <script setup lang="ts">
 /**
- * 对话页 —— 与她直接聊天。
- * - 历史：GET /api/messages?botId&sender
- * - 发送：POST /api/chat（响应含本轮落库消息 + 回复/工具/思考/沉默）
- * - 实时：GET /api/stream SSE（message / buffer / agent-status / tool-call）
- * - 重生成：POST /api/chat/regenerate；删除：DELETE /api/messages/:id
- * 页面只做布局 + 业务编排；气泡、按钮、确认框全部来自 @felinic/ui。
+ * 对话页（2026-10 重写）—— 与她直接聊天。
+ *
+ * 数据/状态全部收敛在 useChatSession：
+ *   - 单一消息列表（id 去重 + 稳定排序）、乐观发送、SSE 合并、断线重连补齐；
+ *   - 首屏最近一页 + 上滑按游标加载更早（chatApi.messagesPage）；
+ *   - 失败回滚（草稿恢复 + 重试）、重生成失败回滚、删除同步。
+ * 页面本身只做布局、通话浮层与来电轮询。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Button,
   CalloutBanner,
-  ConfirmPopover,
   Dialog,
   DialogBody,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogPanel,
   DialogTitle,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-  Spinner,
-  Textarea,
   toast,
 } from '@felinic/ui'
-import { MoreHorizontal, Phone, RefreshCw, SendHorizontal, Trash2, WifiOff } from 'lucide-vue-next'
-import { ApiError } from '@/api/client'
-import { callApi, chatApi, type PendingCall } from '@/api/endpoints'
-import type { ChatMessage, StreamToolCall } from '@/api/types'
+import { Phone } from 'lucide-vue-next'
+import { callApi, type PendingCall } from '@/api/endpoints'
 import { useAuthStore } from '@/stores/auth'
 import { useBots } from '@/stores/bots'
 import CallOverlay from '@/components/call/CallOverlay.vue'
+import ChatHeader from '@/components/chat/ChatHeader.vue'
+import ChatMessageList from '@/components/chat/ChatMessageList.vue'
+import ChatComposer from '@/components/chat/ChatComposer.vue'
+import { useChatSession } from '@/pages/chat/useChatSession'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 const bots = useBots()
 
-const messages = ref<ChatMessage[]>([])
-const loading = ref(false)
-const sending = ref(false)
-const error = ref('')
-const draft = ref('')
-const agentStatus = ref('')
-const buffer = ref<{ buffered: boolean; count: number }>({ buffered: false, count: 0 })
-const toolCalls = ref<StreamToolCall[]>([])
-const silentNotice = ref(false)
-/** 非 bot 所有者/管理员：可发消息，但历史与实时流会被归属守卫拒绝（403）。 */
-const historyDenied = ref(false)
-const streamState = ref<'connecting' | 'open' | 'offline'>('connecting')
-/** 语音通话浮层开关（token/WS/麦克风全部由 CallOverlay 自包含处理）。 */
-const callOpen = ref(false)
-/** 她主动打来的未接来电（voice-call 的 pending queue）。 */
-const pendingCall = ref<PendingCall | null>(null)
-/** 接听 AI 来电时传给浮层的 callId/reason。 */
-const aiCall = ref<{ id: string; reason: string } | null>(null)
-/** 已忽略的来电 id：轮询不再重复弹出同一通。 */
-const dismissedCallIds = new Set<string>()
-let callPollTimer: ReturnType<typeof setInterval> | null = null
-
 // 联系人页通过 /chat?sender=<id> 打开某人的会话；缺省用当前登录用户。
 const routeSender = computed(() => (typeof route.query.sender === 'string' ? route.query.sender : ''))
 const sender = computed(() => routeSender.value || auth.state.user?.id || '')
 const botId = computed(() => bots.state.currentBotId ?? '')
 const botName = computed(() => bots.currentBot.value?.name ?? '她')
-const hasContent = computed(() => messages.value.length > 0)
+const botAvatar = computed(() => bots.currentBot.value?.avatarUrl ?? '')
+const canCall = computed(() => botId.value !== '' && sender.value !== '')
 
-const scroller = ref<HTMLElement | null>(null)
+const session = useChatSession(botId, sender)
+const {
+  messages,
+  loadingEarlier,
+  historyError,
+  historyDenied,
+  sending,
+  sendError,
+  lastFailedText,
+  streamState,
+  toolCalls,
+  agentStatus,
+  buffer,
+  silentNotice,
+  statusText,
+  canLoadEarlier,
+} = session
 
-// 触屏没有物理 Enter/Shift+Enter 语义：提示语按指针类型切换，避免给手机用户
-// 一条做不到的按键说明（布局与行为不变）。
-const coarsePointer = ref(
-  typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false,
-)
-const composerPlaceholder = computed(() =>
-  coarsePointer.value
-    ? '和她说点什么…'
-    : '和她说点什么…（Enter 发送，Shift+Enter 换行）',
-)
-let es: EventSource | null = null
-let silentTimer: ReturnType<typeof setTimeout> | null = null
+const draft = ref('')
+const listRef = ref<InstanceType<typeof ChatMessageList> | null>(null)
+const composerRef = ref<InstanceType<typeof ChatComposer> | null>(null)
+const deleteLastOpen = ref(false)
 
-/* ---------------- 数据加载 ---------------- */
-async function loadHistory(): Promise<void> {
-  if (!botId.value) return
-  loading.value = true
-  error.value = ''
-  try {
-    messages.value = await chatApi.messages({ botId: botId.value, sender: sender.value })
-    await scrollToBottom()
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 403) {
-      // 归属守卫拒绝：不把它当页面错误（发送仍可用），只做安静提示。
-      historyDenied.value = true
-      messages.value = []
-    } else {
-      error.value = e instanceof Error ? e.message : '加载消息失败'
-    }
-  } finally {
-    loading.value = false
-  }
-}
-
-/**
- * 一条消息按「单换行 = 分条」拆成多个气泡；空行只作分隔，不产生空气泡。
- * 后端落库的 assistant 文本常带前导/连续换行（拟人化分片用 \n 拼接），
- * 所以这里逐行 trim + 过滤空行，既是「分条」也是去掉首尾空白。
- */
-function bubblesOf(message: ChatMessage): string[] {
-  const lines = String(message.text ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '')
-  return lines.length > 0 ? lines : ['']
-}
-
-/**
- * 合并前清掉「已经拿到真实消息」的乐观气泡。
- * 发送时先本地插一条 pending 气泡，随后 SSE 会回推同一条已落库消息；
- * 两者不清理会短暂（甚至整个生成期间）显示两次 —— 就是「发送显示两次」的根因。
- */
-function pruneOptimistic(incoming: ChatMessage[]): void {
-  const confirmed = new Set(incoming.filter((m) => m.role === 'user').map((m) => m.text))
-  if (confirmed.size === 0) return
-  messages.value = messages.value.filter((m) => !(m.pending === true && confirmed.has(m.text)))
-}
-
-/** 合并消息：按 id 去重，保持已有顺序，新消息追加。 */
-function mergeMessages(incoming: ChatMessage[]): void {
-  pruneOptimistic(incoming)
-  const byId = new Map(messages.value.map((m) => [m.id, m]))
-  for (const m of incoming) byId.set(m.id, m)
-  messages.value = [...byId.values()].sort((a, b) => {
-    if (a.createdAt === b.createdAt) return a.id.localeCompare(b.id)
-    return a.createdAt.localeCompare(b.createdAt)
-  })
-  void scrollToBottom()
-}
-
-async function scrollToBottom(): Promise<void> {
-  await nextTick()
-  const el = scroller.value
-  if (el) el.scrollTop = el.scrollHeight
-}
-
-/* ---------------- SSE ---------------- */
-function connectStream(): void {
-  disconnectStream()
-  if (!botId.value || !sender.value) return
-  streamState.value = 'connecting'
-  const url = chatApi.streamUrl({ botId: botId.value, sender: sender.value })
-  es = new EventSource(url, { withCredentials: true })
-
-  es.addEventListener('open', () => {
-    streamState.value = 'open'
-  })
-  es.addEventListener('message', (ev: MessageEvent<string>) => {
-    try {
-      const msg = JSON.parse(ev.data) as ChatMessage
-      if (msg?.id) mergeMessages([msg])
-    } catch {
-      /* 单条事件解析失败不影响流 */
-    }
-  })
-  es.addEventListener('buffer', (ev: MessageEvent<string>) => {
-    try {
-      const data = JSON.parse(ev.data) as { buffered?: boolean; count?: number }
-      buffer.value = { buffered: Boolean(data.buffered), count: Number(data.count ?? 0) }
-    } catch {
-      /* ignore */
-    }
-  })
-  es.addEventListener('agent-status', (ev: MessageEvent<string>) => {
-    try {
-      const data = JSON.parse(ev.data) as { status?: string }
-      agentStatus.value = data.status ?? ''
-      if (agentStatus.value !== '') silentNotice.value = false
-    } catch {
-      /* ignore */
-    }
-  })
-  es.addEventListener('tool-call', (ev: MessageEvent<string>) => {
-    try {
-      const data = JSON.parse(ev.data) as StreamToolCall
-      if (!data.id) return
-      const idx = toolCalls.value.findIndex((t) => t.id === data.id)
-      if (idx >= 0) toolCalls.value[idx] = data
-      else toolCalls.value.push(data)
-    } catch {
-      /* ignore */
-    }
-  })
-  es.addEventListener('error', () => {
-    streamState.value = 'offline'
-  })
-}
-
-function disconnectStream(): void {
-  if (es) {
-    es.close()
-    es = null
-  }
-}
-
-/* ---------------- 发送 / 重生成 / 删除 ---------------- */
-async function send(): Promise<void> {
+/* ---------------- 发送 / 建议 / 删除 ---------------- */
+async function handleSend(): Promise<void> {
   const text = draft.value.trim()
   if (text === '' || sending.value) return
-  if (!sender.value) {
-    error.value = '登录状态已失效，请重新登录'
-    return
-  }
-  error.value = ''
-  silentNotice.value = false
-  toolCalls.value = []
-  agentStatus.value = 'thinking'
-  sending.value = true
-  draft.value = ''
-
-  const optimistic: ChatMessage = {
-    id: `local-${Date.now()}`,
-    role: 'user',
-    sender: sender.value,
-    botId: botId.value,
-    createdAt: new Date().toISOString(),
-    text,
-    pieces: [{ type: 'text', text }],
-    pending: true,
-  }
-  messages.value.push(optimistic)
-  void scrollToBottom()
-
-  try {
-    const res = await chatApi.send({ botId: botId.value, text, sender: sender.value })
-    // 空库首聊：后端在 /api/chat 里播种默认 bot，响应消息里带 botId。
-    // 先采纳它（非 owner 账号的 /api/bots 可能被裁剪为空），再刷新列表兜底。
-    if (botId.value === '') {
-      const inferred = res.messages.find((m) => m.botId !== '')?.botId
-      if (inferred) {
-        bots.adopt(inferred)
-      } else {
-        await bots.refresh()
-      }
-    }
-    messages.value = messages.value.filter((m) => m.pending !== true)
-    mergeMessages(res.messages)
-    if (res.silent) {
-      silentNotice.value = true
-      if (silentTimer) clearTimeout(silentTimer)
-      silentTimer = setTimeout(() => {
-        silentNotice.value = false
-      }, 6000)
-    }
-  } catch (e) {
-    messages.value = messages.value.filter((m) => m.pending !== true)
+  const outcome = await session.send(text)
+  if (outcome.ok) {
+    draft.value = ''
+    composerRef.value?.resetHeight()
+    await nextTick()
+    listRef.value?.scrollToBottom(false)
+  } else if (outcome.error !== '') {
+    // 草稿恢复：失败不吞用户输入，保留原文方便重试
     draft.value = text
-    error.value = e instanceof Error ? e.message : '发送失败，请稍后再试'
-  } finally {
-    sending.value = false
-    agentStatus.value = ''
+    composerRef.value?.focus()
   }
 }
 
-async function regenerate(): Promise<void> {
-  if (sending.value || !botId.value) return
-  sending.value = true
-  error.value = ''
-  agentStatus.value = 'thinking'
-  try {
-    // 后端 regenerate 会物理删除「最后一条用户消息及其后」再重跑；本地必须同步丢掉旧气泡，
-    // 否则旧用户消息 + 旧回复会和新的一起显示，看起来像「重新生成后重复显示」。
-    const lastUserIndex = messages.value.map((m) => m.role).lastIndexOf('user')
-    if (lastUserIndex >= 0) messages.value = messages.value.slice(0, lastUserIndex)
-    const res = await chatApi.regenerate({ botId: botId.value, sender: sender.value })
-    mergeMessages(res.messages)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '重生成失败'
-    // 失败时把本地被裁掉的历史拉回来，避免界面缺消息
-    await loadHistory()
-  } finally {
-    sending.value = false
-    agentStatus.value = ''
-  }
+function retrySend(): void {
+  const text = lastFailedText.value
+  if (text === '') return
+  session.clearSendError()
+  draft.value = text
+  void handleSend()
 }
 
-async function removeMessage(id: string): Promise<void> {
-  try {
-    await chatApi.removeMessage(id)
-    messages.value = messages.value.filter((m) => m.id !== id)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '删除失败'
-  }
+function onSuggest(text: string): void {
+  draft.value = text
+  composerRef.value?.focus()
 }
 
-/* ---------------- 主动来电 ---------------- */
+function onDelete(id: string): void {
+  void session.removeMessage(id)
+}
+
+function onRegenerate(): void {
+  void session.regenerate().then((ok) => {
+    if (ok) void nextTick(() => listRef.value?.scrollToBottom(false))
+  })
+}
+
+function onRefresh(): void {
+  void session.loadHistory().then(() => {
+    void nextTick(() => listRef.value?.scrollToBottom(false))
+  })
+}
+
+function askDeleteLast(): void {
+  if (messages.value.length === 0) return
+  deleteLastOpen.value = true
+}
+
+const lastPreview = computed(() => {
+  const last = [...messages.value].reverse().find((m) => m.pending !== true)
+  if (last === undefined) return ''
+  const text = last.text.trim().replace(/\s+/g, ' ')
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text
+})
+
+async function confirmDeleteLast(): Promise<void> {
+  deleteLastOpen.value = false
+  const ok = await session.removeLastMessage()
+  if (ok) toast.success('已删除最近一条消息')
+}
+
+function goBindWechat(): void {
+  void router.push('/channels/wechat')
+}
+
+/* ---------------- 语音通话（浮层自包含 / 来电轮询） ---------------- */
+const callOpen = ref(false)
+const pendingCall = ref<PendingCall | null>(null)
+const aiCall = ref<{ id: string; reason: string } | null>(null)
+const dismissedCallIds = new Set<string>()
+let callPollTimer: ReturnType<typeof setInterval> | null = null
+
 async function pollCalls(): Promise<void> {
-  if (!botId.value || !sender.value || callOpen.value || pendingCall.value) return
+  if (botId.value === '' || sender.value === '' || callOpen.value || pendingCall.value !== null) return
   if (document.visibilityState !== 'visible') return
   try {
     const calls = await callApi.requests(botId.value)
     const next = calls.find((c) => !dismissedCallIds.has(c.id))
-    if (next) pendingCall.value = next
+    if (next !== undefined) pendingCall.value = next
   } catch {
     /* 轮询失败静默：下次再试，不打扰正常聊天 */
   }
 }
 
 function declineCall(): void {
-  if (pendingCall.value) dismissedCallIds.add(pendingCall.value.id)
+  if (pendingCall.value !== null) dismissedCallIds.add(pendingCall.value.id)
   pendingCall.value = null
 }
 
 async function acceptCall(): Promise<void> {
   const call = pendingCall.value
-  if (!call) return
+  if (call === null) return
   dismissedCallIds.add(call.id)
   try {
     const accepted = await callApi.accept(call.id)
@@ -334,262 +179,104 @@ async function acceptCall(): Promise<void> {
 function onCallEnd(): void {
   callOpen.value = false
   aiCall.value = null
-  void loadHistory()
+  onRefresh()
 }
 
-/* ---------------- 生命周期 ---------------- */
+/* ---------------- 会话装载 ---------------- */
+let conversationKey = ''
+
+async function loadConversation(): Promise<void> {
+  if (botId.value === '' || sender.value === '') return
+  const key = `${botId.value}::${sender.value}`
+  if (key === conversationKey) return
+  conversationKey = key
+  callOpen.value = false
+  pendingCall.value = null
+  session.reset()
+  await session.loadHistory()
+  await nextTick()
+  listRef.value?.scrollToBottom(false)
+  session.connect()
+}
+
 onMounted(async () => {
   await bots.bootstrap()
-  await loadHistory()
-  connectStream()
+  await loadConversation()
   callPollTimer = setInterval(() => void pollCalls(), 10_000)
   void pollCalls()
 })
 
 watch(
-  () => botId.value,
-  async (next, prev) => {
-    if (next === prev || next === '') return
-    await loadHistory()
-    connectStream()
+  [botId, sender],
+  async ([nextBot, nextSender], [prevBot, prevSender]) => {
+    if (nextBot === '' || nextSender === '') return
+    if (nextBot === prevBot && nextSender === prevSender) return
+    await loadConversation()
   },
 )
 
-// 切换会话对象（联系人 → 去聊天）时重载历史并重连 SSE；通话中的对象变了先挂断。
-watch(sender, async (next, prev) => {
-  if (next === prev || next === '') return
-  callOpen.value = false
-  await loadHistory()
-  connectStream()
-})
-
-watch(botId, async (next, prev) => {
-  callOpen.value = false
-  // 首次播种后 botId 由 '' 变为默认 bot：重新对齐历史与实时流。
-  if (next === '' || next === prev) return
-  await loadHistory()
-  connectStream()
-})
-
 onBeforeUnmount(() => {
   callOpen.value = false
-  if (callPollTimer) clearInterval(callPollTimer)
-  disconnectStream()
-  if (silentTimer) clearTimeout(silentTimer)
+  if (callPollTimer !== null) clearInterval(callPollTimer)
+  session.dispose()
 })
-
-/** 通话需要已知的 bot 与会话发送方；缺一不可，避免点了才报错。 */
-const canCall = computed(() => botId.value !== '' && sender.value !== '')
-
-function onComposerKeydown(e: KeyboardEvent): void {
-  // Enter 发送，Shift+Enter 换行（中文输入法组合态不触发）。
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-    e.preventDefault()
-    void send()
-  }
-}
-
-const statusText = computed(() => {
-  if (agentStatus.value === 'thinking') return '她在想…'
-  if (agentStatus.value === 'tool' || toolCalls.value.length > 0) return '她在用工具…'
-  if (buffer.value.buffered) return '正在输入…'
-  return ''
-})
-
-function goBindWechat(): void {
-  void router.push('/channels/wechat')
-}
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
-    <!-- 对话头部 -->
-    <header class="flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-border px-6">
-      <div class="min-w-0">
-        <div class="flex items-center gap-2">
-          <h1 class="truncate text-control font-semibold text-foreground">{{ botName }}</h1>
-          <span
-            v-if="streamState === 'offline'"
-            class="flex items-center gap-1 text-caption text-muted-foreground"
-            title="实时连接已断开"
-          >
-            <WifiOff class="size-3" />
-            离线
-          </span>
-        </div>
-        <div class="truncate text-caption text-muted-foreground">
-          {{ statusText || (streamState === 'open' ? '在线，随时可以说话' : '连接中…') }}
-        </div>
-      </div>
-      <div class="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          data-testid="chat-call"
-          aria-label="语音通话"
-          :disabled="!canCall"
-          @click="callOpen = true"
-        >
-          <Phone />
-          通话
-        </Button>
-        <Button variant="ghost" size="sm" :disabled="sending || !hasContent" @click="regenerate">
-          <RefreshCw />
-          重新生成
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <Button variant="ghost" size="icon-sm" aria-label="更多操作">
-              <MoreHorizontal />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem @select="goBindWechat">接入微信</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem disabled>导出对话（后续支持）</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </header>
+  <div class="flex h-full min-h-0 flex-col bg-background">
+    <ChatHeader
+      :bot-name="botName"
+      :bot-avatar="botAvatar"
+      :status-text="statusText"
+      :stream-state="streamState"
+      :can-call="canCall"
+      :sending="sending"
+      :has-messages="messages.length > 0"
+      @call="callOpen = true"
+      @regenerate="onRegenerate"
+      @delete-last="askDeleteLast"
+      @refresh="onRefresh"
+      @bind-wechat="goBindWechat"
+    />
 
-    <!-- 消息区 -->
-    <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-      <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 md:px-6">
-        <CalloutBanner v-if="error" tone="destructive" :description="error" size="sm" />
-        <CalloutBanner
-          v-if="historyDenied"
-          tone="neutral"
-          size="sm"
-          description="当前账号不是这个 bot 的所有者：历史记录与实时同步不可用，但仍可以给她发消息。"
-        />
+    <ChatMessageList
+      ref="listRef"
+      :messages="messages"
+      :has-more="canLoadEarlier"
+      :load-earlier="session.loadEarlier"
+      :loading="session.loading.value"
+      :loading-earlier="loadingEarlier"
+      :history-error="historyError"
+      :history-denied="historyDenied"
+      :bot-name="botName"
+      :bot-avatar="botAvatar"
+      :sending="sending"
+      :agent-status="agentStatus"
+      :tool-calls="toolCalls"
+      :buffered="buffer.buffered"
+      :buffer-count="buffer.count"
+      :silent-notice="silentNotice"
+      @delete="onDelete"
+      @suggest="onSuggest"
+    />
 
-        <!-- 加载占位：保持消息区框架，不让页面塌陷 -->
-        <div v-if="loading" class="flex items-center gap-2 py-10 text-label text-muted-foreground">
-          <Spinner class="size-4" />
-          正在载入对话…
-        </div>
-
-        <!-- 空态：仍是同一个对话框架，只是没有行 -->
-        <div v-else-if="!hasContent" class="flex flex-col items-center gap-3 py-16 text-center">
-          <div class="flex size-10 items-center justify-center rounded-full bg-accent text-foreground">
-            <SendHorizontal class="size-4" />
-          </div>
-          <p class="text-control font-medium text-foreground">还没有对话</p>
-          <p class="max-w-sm text-label text-muted-foreground">
-            说点什么吧。她记得你们之前聊过的一切。
-          </p>
-        </div>
-
-        <!-- 消息行 -->
-        <div
-          v-for="message in messages"
-          :key="message.id"
-          data-testid="chat-message"
-          :data-role="message.role"
-          class="group flex w-full gap-3"
-          :class="message.role === 'user' ? 'flex-row-reverse' : ''"
-        >
-          <div class="min-w-0 max-w-[85%]">
-            <div class="mb-1 flex items-center gap-2" :class="message.role === 'user' ? 'justify-end' : ''">
-              <span class="text-caption text-muted-foreground">
-                {{ message.role === 'user' ? '你' : botName }}
-              </span>
-              <span v-if="message.pending" class="text-caption text-muted-foreground">发送中…</span>
-              <span v-if="message.deliveryStatus === 'failed'" class="text-caption text-destructive">
-                投递失败
-              </span>
-            </div>
-            <div class="flex flex-col gap-1" :class="message.role === 'user' ? 'items-end' : 'items-start'">
-              <div
-                v-for="(line, lineIndex) in bubblesOf(message)"
-                :key="lineIndex"
-                class="rounded-xl px-4 py-2.5 text-control leading-relaxed whitespace-pre-wrap"
-                :class="
-                  message.role === 'user'
-                    ? 'bg-accent text-foreground'
-                    : 'bg-section-card text-foreground'
-                "
-              >{{ line }}</div>
-            </div>
-
-            <!-- 思考过程（默认折叠） -->
-            <details v-if="message.reasoning" class="mt-1 text-caption text-muted-foreground">
-              <summary class="cursor-pointer select-none">思考过程</summary>
-              <p class="mt-1 whitespace-pre-wrap">{{ message.reasoning }}</p>
-            </details>
-
-            <!-- 消息操作 -->
-            <div
-              class="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
-              :class="message.role === 'user' ? 'justify-end' : ''"
-            >
-              <ConfirmPopover
-                title="删除这条消息？"
-                message="删除后对话历史里不再显示。"
-                confirm-text="删除"
-                cancel-text="取消"
-                variant="destructive"
-                @confirm="removeMessage(message.id)"
-              >
-                <template #trigger>
-                  <Button variant="ghost" size="icon-sm" aria-label="删除消息">
-                    <Trash2 />
-                  </Button>
-                </template>
-              </ConfirmPopover>
-            </div>
-          </div>
-        </div>
-
-        <!-- 工具调用（实时） -->
-        <div v-if="toolCalls.length > 0" class="flex flex-wrap gap-2">
-          <span
-            v-for="tool in toolCalls"
-            :key="tool.id"
-            class="rounded-sm bg-muted-soft px-2 py-1 text-caption text-muted-foreground"
-          >
-            {{ tool.status === 'running' ? '正在执行' : '已执行' }} · {{ tool.name }}
-          </span>
-        </div>
-
-        <!-- 沉默态：她选择不回复 -->
-        <div v-if="silentNotice" data-testid="chat-silent" class="flex items-center gap-2 text-caption text-muted-foreground">
-          <span class="size-1.5 rounded-full bg-muted-foreground" />
-          她这次没有回复（沉默）。
-        </div>
+    <!-- 发送失败：保留草稿并提供重试（不静默吞掉） -->
+    <div v-if="sendError !== ''" class="px-3 md:px-6">
+      <div class="mx-auto w-full max-w-3xl pb-2">
+        <CalloutBanner tone="destructive" size="sm" title="操作没有完成" :description="sendError">
+          <Button variant="outline" size="sm" @click="retrySend">重试</Button>
+        </CalloutBanner>
       </div>
     </div>
 
-    <!-- 输入区 -->
-    <div class="shrink-0 border-t border-border bg-background px-4 py-3 md:px-6">
-      <div class="mx-auto w-full max-w-3xl">
-        <div class="flex items-end gap-2">
-          <Textarea
-            v-model="draft"
-            data-testid="chat-composer"
-            rows="1"
-            :placeholder="composerPlaceholder"
-            class="max-h-40 min-h-9 flex-1 resize-none"
-            @keydown="onComposerKeydown"
-          />
-          <Button
-            variant="brand"
-            size="icon"
-            data-testid="chat-send"
-            aria-label="发送"
-            :disabled="sending || draft.trim() === ''"
-            @click="send"
-          >
-            <Spinner v-if="sending" class="size-4" />
-            <SendHorizontal v-else />
-          </Button>
-        </div>
-        <div class="mt-1 flex items-center justify-between text-caption text-muted-foreground">
-          <span>{{ buffer.buffered ? `她在等你把话说完（${buffer.count}/…）` : statusText }}</span>
-          <span v-if="streamState === 'offline'">实时连接断开，消息仍会通过刷新同步</span>
-        </div>
-      </div>
-    </div>
+    <ChatComposer
+      ref="composerRef"
+      v-model="draft"
+      :sending="sending"
+      :status-text="statusText"
+      :offline="streamState === 'offline'"
+      @send="handleSend"
+    />
 
     <!-- 语音通话浮层：组件内部自管 token/WS/麦克风/播放，open=false 或卸载即释放资源。 -->
     <CallOverlay
@@ -601,11 +288,35 @@ function goBindWechat(): void {
       @close="onCallEnd"
     />
 
+    <!-- 删除最近一条（顶部菜单入口 + 二次确认） -->
+    <Dialog :open="deleteLastOpen" @update:open="(value: boolean) => (deleteLastOpen = value)">
+      <DialogPanel width="lg" footer>
+        <DialogHeader>
+          <DialogTitle>删除最近一条消息？</DialogTitle>
+          <DialogDescription class="sr-only">删除后对话历史里不再显示（服务端为软删，可恢复）。</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <p class="text-label text-muted-foreground">最近一条：</p>
+          <p class="mt-1 whitespace-pre-wrap break-words text-control text-foreground">
+            {{ lastPreview || '（空消息）' }}
+          </p>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" @click="deleteLastOpen = false">取消</Button>
+          <Button variant="destructive" @click="confirmDeleteLast">删除</Button>
+        </DialogFooter>
+      </DialogPanel>
+    </Dialog>
+
     <!-- 她主动打来电话：接听走 accept（消费 pending），再以 AI 来电模式拨号。 -->
-    <Dialog :open="pendingCall !== null" @update:open="(v: boolean) => { if (!v) declineCall() }">
+    <Dialog
+      :open="pendingCall !== null"
+      @update:open="(value: boolean) => { if (!value) declineCall() }"
+    >
       <DialogPanel width="lg" footer>
         <DialogHeader>
           <DialogTitle>她打来电话了</DialogTitle>
+          <DialogDescription class="sr-only">接听后进入语音通话浮层。</DialogDescription>
         </DialogHeader>
         <DialogBody>
           <p class="text-control text-foreground">
@@ -618,7 +329,7 @@ function goBindWechat(): void {
         <DialogFooter>
           <Button variant="outline" @click="declineCall">挂掉</Button>
           <Button variant="brand" @click="acceptCall">
-            <Phone />
+            <Phone class="size-4" />
             接听
           </Button>
         </DialogFooter>
