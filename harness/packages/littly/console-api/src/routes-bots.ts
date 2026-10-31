@@ -9,6 +9,7 @@ import { json, err, bodyRecord, reqStr } from './http.ts'
 import {
   botSummaryView, botSettingsView, applyBotSettingsPatch,
   botChannelsView, applyBotChannelsPatch,
+  findMaskPollutedSecrets, BOT_SETTING_GROUPS, BOT_CHANNEL_GROUPS,
 } from './mapping.ts'
 import { ensureSeed } from './seed.ts'
 import { requireBotAccess, botOwnedBy } from './deps.ts'
@@ -84,6 +85,11 @@ export const registerBotRoutes: RegisterFn = (r, d) => {
     const body = bodyRecord(ctx.body)
     let settings = bodyRecord(body['settings'])
     if (Object.keys(settings).length === 0) settings = body
+    const pollutedSettings = findMaskPollutedSecrets(BOT_SETTING_GROUPS, settings)
+    if (pollutedSettings.length > 0) {
+      err(ctx.res, 400, 'mask_placeholder_mixed', `密钥输入里混入了打码占位符（••••）：${pollutedSettings.join('、')}。请清空输入框后只粘贴完整新密钥。`)
+      return
+    }
     const patch = applyBotSettingsPatch(row, settings)
     applyPatch(d, row.id, patch.columns, patch.values)
     const updated = botById(d, row.id)
@@ -126,6 +132,11 @@ export const registerBotRoutes: RegisterFn = (r, d) => {
     const body = bodyRecord(ctx.body)
     let channels = bodyRecord(body['channels'])
     if (Object.keys(channels).length === 0) channels = body
+    const pollutedChannels = findMaskPollutedSecrets(BOT_CHANNEL_GROUPS, channels)
+    if (pollutedChannels.length > 0) {
+      err(ctx.res, 400, 'mask_placeholder_mixed', `密钥输入里混入了打码占位符（••••）：${pollutedChannels.join('、')}。请清空输入框后只粘贴完整新密钥。`)
+      return
+    }
     const patch = applyBotChannelsPatch(row, channels)
     applyPatch(d, row.id, patch.columns, patch.values)
     const updated = botById(d, row.id)

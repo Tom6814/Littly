@@ -173,6 +173,14 @@ if (botIdQ) {
   const texts = (hist.json?.data?.messages ?? []).map((m) => m.text ?? m.content ?? '')
   ok(texts.includes(probe), '以登录用户身份发的消息进了历史')
   // 联系人身份关联：web 首聊后联系人应关联到登录用户（user_id=用户id、name=username，不是 UUID）
+  // 重新生成：先删「最后一条用户消息及其后」再重跑 → 旧 id 必须消失、总数不增（不重复显示）
+  const beforeMsgs = hist.json?.data?.messages ?? []
+  const beforeIds = beforeMsgs.map((m) => m.id)
+  const regen = await api('/api/chat/regenerate', { method: 'POST', body: { botId: botIdQ, sender: myId } })
+  const hist2 = await api(`/api/messages?botId=${encodeURIComponent(botIdQ)}&sender=${encodeURIComponent(myId)}`)
+  const afterMsgs = hist2.json?.data?.messages ?? []
+  ok(!afterMsgs.some((m) => beforeIds.includes(m.id)), `重新生成后旧消息 id 已被删除（不重复显示；regen=${regen.status}）`)
+  ok(afterMsgs.length <= beforeMsgs.length + 1, `重新生成后 messages 总数不增（前 ${beforeMsgs.length} / 后 ${afterMsgs.length}）`)
   const contacts = await api(`/api/contacts?botId=${encodeURIComponent(botIdQ)}`)
   const mine = (contacts.json?.data?.contacts ?? []).find((c) => c.id === myId)
   ok(contacts.status === 200 && mine?.userId === myId, 'web 首聊后联系人 user_id 关联到登录用户（不再是无关联新联系人）')

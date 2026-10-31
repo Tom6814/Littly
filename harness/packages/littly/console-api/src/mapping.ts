@@ -53,6 +53,30 @@ export function hasMaskPlaceholder(value: string): boolean {
   return value.includes('•') && !isMaskedInput(value)
 }
 
+/**
+ * 在 settings/channels 补丁里找「含打码占位符但不是纯掩码」的密钥字段（返回字段 key 列表）。
+ * 前端回显打码串；用户把新密钥粘贴在占位符后面时（`••••abcdsk-new`），
+ * 旧实现按 isMaskedInput 跳过 → 看起来保存成功但实际没更新；必须 400 让用户清空重填。
+ */
+export function findMaskPollutedSecrets(
+  groups: Array<{ group?: string; channel?: string; fields: Array<{ key: string; secret?: boolean }> }>,
+  input: Record<string, unknown>,
+): string[] {
+  const out: string[] = []
+  for (const g of groups) {
+    const groupName = g.group ?? g.channel ?? ''
+    const groupVal = input[groupName]
+    if (typeof groupVal !== 'object' || groupVal === null || Array.isArray(groupVal)) continue
+    const rec = groupVal as Record<string, unknown>
+    for (const f of g.fields) {
+      if (f.secret !== true) continue
+      const value = rec[f.key]
+      if (typeof value === 'string' && hasMaskPlaceholder(value)) out.push(f.key)
+    }
+  }
+  return out
+}
+
 // ---- 基础行映射 ----
 
 export function userView(row: UserRow): Record<string, unknown> {
@@ -351,7 +375,8 @@ export function applyBotSettingsPatch(row: BotRow, settings: Record<string, unkn
       if (!(f.key in rec)) continue
       const incoming = rec[f.key]
       if (f.secret === true) {
-        if (typeof incoming !== 'string' || isMaskedInput(incoming)) continue
+        // 纯掩码 = 保持；含占位符的混合串 = 被污染（路由层会 400，这里兜底不落库）
+        if (typeof incoming !== 'string' || isMaskedInput(incoming) || hasMaskPlaceholder(incoming)) continue
         columns.push(String(f.column))
         values.push(incoming)
         continue
@@ -466,7 +491,8 @@ export function applyBotChannelsPatch(row: BotRow, channels: Record<string, unkn
       if (!(f.key in rec)) continue
       const incoming = rec[f.key]
       if (f.secret === true) {
-        if (typeof incoming !== 'string' || isMaskedInput(incoming)) continue
+        // 纯掩码 = 保持；含占位符的混合串 = 被污染（路由层会 400，这里兜底不落库）
+        if (typeof incoming !== 'string' || isMaskedInput(incoming) || hasMaskPlaceholder(incoming)) continue
         columns.push(String(f.column))
         values.push(incoming)
         continue
