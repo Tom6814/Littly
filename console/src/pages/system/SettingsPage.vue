@@ -38,6 +38,10 @@ const savingPlatform = ref(false)
 const error = ref('')
 const denied = ref(false)
 
+const modelKeyMask = ref('')
+const editingModelKey = ref(false)
+const voiceKeyMask = ref('')
+const editingVoiceKey = ref(false)
 const model = reactive({
   baseURL: '',
   apiKey: '',
@@ -69,7 +73,8 @@ async function loadAll(): Promise<void> {
   try {
     const ai = await settingsApi.getAi()
     model.baseURL = String(ai.baseURL ?? '')
-    model.apiKey = String(ai.apiKey ?? '')
+    modelKeyMask.value = String(ai.apiKey ?? '')
+    model.apiKey = ''
     model.apiKeySet = Boolean(ai.apiKeySet)
     model.chatModel = String(ai.chatModel ?? '')
     model.growthModel = String(ai.growthModel ?? '')
@@ -94,7 +99,8 @@ async function loadAll(): Promise<void> {
       voice.referenceId = String(v.referenceId ?? '')
       voice.temperature = Number(v.temperature ?? 1)
       voice.speed = Number(v.speed ?? 1)
-      voice.apiKey = String(v.apiKey ?? '')
+      voiceKeyMask.value = String(v.apiKey ?? '')
+      voice.apiKey = ''
       voice.apiKeySet = Boolean(v.apiKeySet)
     } catch {
       /* 静默：语音设置读取失败不阻塞页面 */
@@ -104,25 +110,52 @@ async function loadAll(): Promise<void> {
 }
 
 /**
- * 打码占位符（••••abcd）只是展示用；聚焦时清空，避免用户把新密钥粘贴到占位符后面，
- * 造成「保存后看起来又变回原来的字」（其实是含 • 的脏输入被后端跳过/拒绝）。
+ * 打码串不再放进可编辑输入框：只展示「已设置（尾号 abcd）」，点「更换」才出现空输入框。
+ * 这样无论用户怎么粘贴/聚焦，都不可能出现「打码占位符 + 新密钥」的混合脏值，
+ * 也不会出现「保存后输入框又变回原来那串」的观感问题。
  */
-function clearMaskedApiKey(target: { apiKey: string }, key: 'apiKey'): void {
-  if (target[key].includes('•')) target[key] = ''
+function maskTail(mask: string): string {
+  const tail = mask.replace(/[^A-Za-z0-9_-]+/g, '').slice(-4)
+  return tail
+}
+function startEditModelKey(): void {
+  editingModelKey.value = true
+  model.apiKey = ''
+}
+function cancelEditModelKey(): void {
+  editingModelKey.value = false
+  model.apiKey = ''
+}
+function startEditVoiceKey(): void {
+  editingVoiceKey.value = true
+  voice.apiKey = ''
+}
+function cancelEditVoiceKey(): void {
+  editingVoiceKey.value = false
+  voice.apiKey = ''
 }
 
 async function saveModel(): Promise<void> {
+  // 编辑态：必须输入完整新密钥；非编辑态：回传打码串 → 后端保持原值。
+  const nextKey = editingModelKey.value ? model.apiKey.trim() : modelKeyMask.value
+  if (editingModelKey.value && nextKey === '') {
+    toast.error('请输入完整的新 API Key，或点「取消」保持原密钥')
+    return
+  }
   savingModel.value = true
   try {
     await settingsApi.saveAi({
       baseURL: model.baseURL,
-      apiKey: model.apiKey,
+      apiKey: nextKey,
       chatModel: model.chatModel,
       growthModel: model.growthModel,
       webSearch: model.webSearch,
     })
-    toast.success('模型设置已保存')
+    editingModelKey.value = false
+    model.apiKey = ''
     await loadAll()
+    const tail = maskTail(modelKeyMask.value)
+    toast.success(`模型设置已保存${tail !== '' ? `（密钥尾号 ${tail}）` : ''}`)
   } catch (e) {
     toast.error(e instanceof Error ? e.message : '保存失败')
   } finally {
@@ -136,6 +169,11 @@ async function saveVoice(): Promise<void> {
     toast.error('还没有可保存的 bot')
     return
   }
+  const nextVoiceKey = editingVoiceKey.value ? voice.apiKey.trim() : voiceKeyMask.value
+  if (editingVoiceKey.value && nextVoiceKey === '') {
+    toast.error('请输入完整的新语音 API Key，或点「取消」保持原密钥')
+    return
+  }
   savingVoice.value = true
   try {
     await botsApi.patch(botId, {
@@ -145,11 +183,14 @@ async function saveVoice(): Promise<void> {
         referenceId: voice.referenceId,
         temperature: voice.temperature,
         speed: voice.speed,
-        apiKey: voice.apiKey,
+        apiKey: nextVoiceKey,
       },
     })
-    toast.success('语音设置已保存')
+    editingVoiceKey.value = false
+    voice.apiKey = ''
     await loadAll()
+    const tail = maskTail(voiceKeyMask.value)
+    toast.success(`语音设置已保存${tail !== '' ? `（密钥尾号 ${tail}）` : ''}`)
   } catch (e) {
     toast.error(e instanceof Error ? e.message : '保存失败')
   } finally {
@@ -200,13 +241,23 @@ async function rerunOnboarding(): Promise<void> {
           <SettingsRow label="Base URL" description="OpenAI 兼容接口地址" stack="sm">
             <Input v-model="model.baseURL" placeholder="https://…/v1" />
           </SettingsRow>
-          <SettingsRow label="API Key" description="已保存的密钥以打码形式回显；不修改则不会覆盖" stack="sm">
-            <Input
-              v-model="model.apiKey"
-              type="password"
-              :placeholder="model.apiKeySet ? '已设置，输入完整新密钥以替换' : 'sk-…'"
-              @focus="clearMaskedApiKey(model, 'apiKey')"
-            />
+          <SettingsRow
+            label="API Key"
+            :description="model.apiKeySet ? '密钥只显示尾号；点「更换」输入完整新密钥，保存成功后尾号会更新' : '尚未设置，点「更换」粘贴完整密钥'"
+            stack="sm"
+          >
+            <div class="flex w-full items-center gap-2">
+              <template v-if="!editingModelKey">
+                <span class="flex-1 text-label text-muted-foreground">
+                  {{ model.apiKeySet ? `已设置${maskTail(modelKeyMask) !== '' ? `（尾号 ${maskTail(modelKeyMask)}）` : ''}` : '未设置' }}
+                </span>
+                <Button variant="outline" size="sm" @click="startEditModelKey">更换</Button>
+              </template>
+              <template v-else>
+                <Input v-model="model.apiKey" type="password" placeholder="粘贴完整新密钥" class="flex-1" />
+                <Button variant="ghost" size="sm" @click="cancelEditModelKey">取消</Button>
+              </template>
+            </div>
           </SettingsRow>
           <SettingsRow label="聊天模型" description="她平时对话使用的模型" stack="sm">
             <Input v-model="model.chatModel" placeholder="provider/model" />
@@ -239,13 +290,23 @@ async function rerunOnboarding(): Promise<void> {
           <SettingsRow label="语速" description="0.5–2.0" stack="sm">
             <Input v-model.number="voice.speed" type="number" step="0.1" min="0.5" max="2" />
           </SettingsRow>
-          <SettingsRow label="语音 API Key" description="打码回显；留空表示不修改" stack="sm">
-            <Input
-              v-model="voice.apiKey"
-              type="password"
-              :placeholder="voice.apiKeySet ? '已设置，输入完整新密钥以替换' : 'sk-…'"
-              @focus="clearMaskedApiKey(voice, 'apiKey')"
-            />
+          <SettingsRow
+            label="语音 API Key"
+            :description="voice.apiKeySet ? '密钥只显示尾号；点「更换」输入完整新密钥' : '尚未设置，点「更换」粘贴完整密钥'"
+            stack="sm"
+          >
+            <div class="flex w-full items-center gap-2">
+              <template v-if="!editingVoiceKey">
+                <span class="flex-1 text-label text-muted-foreground">
+                  {{ voice.apiKeySet ? `已设置${maskTail(voiceKeyMask) !== '' ? `（尾号 ${maskTail(voiceKeyMask)}）` : ''}` : '未设置' }}
+                </span>
+                <Button variant="outline" size="sm" @click="startEditVoiceKey">更换</Button>
+              </template>
+              <template v-else>
+                <Input v-model="voice.apiKey" type="password" placeholder="粘贴完整新密钥" class="flex-1" />
+                <Button variant="ghost" size="sm" @click="cancelEditVoiceKey">取消</Button>
+              </template>
+            </div>
           </SettingsRow>
           <template #footer>
             <Button :loading="savingVoice" @click="saveVoice">保存语音设置</Button>
