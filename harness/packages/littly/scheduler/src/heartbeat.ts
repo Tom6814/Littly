@@ -4,13 +4,21 @@
  * 逐字移植自旧项目 src/internal/bot/heartbeat.ts（DB 层改 SQL；工具层改走 hub.tools）。
  * 在 scheduler tick 中作为第 4 步运行。对每个启用「心声回响」的 bot 的每个联系人：
  *   1. 派生静默时长（自最后一条任意角色消息）
- *   2. 派生退避等级（自最后一条用户消息以来已发送的 proactive 条数）
- *   3. 静默 ≥ 退避阈值 且无 pending proactive SM → 调轻量决策 LLM
- *   4. 决策 JSON: { action: "speak"|"memory"|"diary"|"silent", reason, content? }
+ *   2. 派生退避等级（自最后一条用户消息以来的唤醒/决策尝试次数）
+ *   3. 距上次决策（首轮：自最后一条任意消息）≥ 退避阈值、距上次决策 ≥ 短冷却、
+ *      未触发「未回硬停」且无 pending proactive SM → 调轻量决策 LLM
+ *   4. 决策 JSON: { action: "speak"|"memory"|"diary"|"silent"|"schedule"|"qzone", reason, content? }
  *      - speak  → mint ScheduledMessage(origin=proactive, fireAt=now) → 下个 tick 由 gate 全量过滤
+ *      - schedule → mint 一条 fireAt = now + random[min,max] 的 proactive（不做整点预约）
  *      - memory → 记一条 thought 记忆（角色对这段沉默的内心反思）
  *      - diary  → 触发日记写作
  * 非阻塞：任何失败静默降级，绝不阻断 tick 管线。
+ *
+ * P0 修复（旧实现缺陷）：退避此前只数 scheduled_messages.status='sent' 的主动消息。
+ * gate 因 proactive_min_interval 把刚 mint 的排期判 cancelled 时不计，silent 动作也不计，
+ * 于是静默期每个 60s tick 都满足阈值、反复唤醒决策 LLM（含工具循环）纯烧钱。
+ * 新语义：每次真正进入决策 = 一次尝试（先写 audit action='decision' 再调模型），
+ * silent / gate-cancelled / speak 全部计入；另有 5 分钟短冷却兜底。
  *
  * 与「主动/定时消息」的分工（用户心智模型）：
  *   - schedule_message 管线：对话中已有明确依据（用户约定 / 明显暗示）的未来预约
@@ -23,6 +31,15 @@ import { randomUUID } from 'node:crypto'
 import type { BotRow, ContactRow, MessageRow } from '@littly/storage'
 import { chatComplete, type ChatMessage, type ChatResult } from '@littly/llm'
 import { audit } from './audit.ts'
+import {
+  HEARTBEAT_WAKE_COOLDOWN_SEC,
+  PROACTIVE_MAX_UNANSWERED,
+  countUnansweredProactive,
+  heartbeatDetail,
+  nextProactiveFireAt,
+  readWakeAttempts,
+  senderDetailNeedle,
+} from './proactive.ts'
 import { shanghaiHour } from './time.ts'
 import type { SchedulerDeps } from './types.ts'
 
@@ -76,21 +93,35 @@ export function inQuietHours(bot: Pick<BotRow, 'quiet_start' | 'quiet_end'>, now
 
 /**
  * 退避判定（纯函数，便于回归锁定）。
- * - backoffLevel = 自最后一条用户消息以来已发的 proactive 条数 + 用户静默等级（每 12h +1）
+ * - backoffLevel = 自最后一条用户消息以来的决策尝试次数 + 用户静默等级（每 12h +1）
  * - threshold = min(10min × 2^level, grownMax)；grownMax 随用户静默逐日放宽（+2h/天，封顶 12h）
+ *   —— 它是「距上一次唤醒」的最小间隔，不是「总静默时长」的下限。
+ * - 旧实现拿总静默时长和阈值比：阈值封顶后总静默永远 ≥ 阈值，于是每个 60s tick 都空转。
+ *   现在改为按「距上次决策的间隔」判定，见面即 `isBackoffElapsed()`。
+ *
+ * 尝试次数包含 silent / gate-cancelled / speak（旧实现只数已发送的 proactive）。
  */
 export function computeBackoff(input: {
-  proactiveSinceUser: number
+  attemptsSinceUser: number
   userSilenceSec: number
 }): { backoffLevel: number; thresholdSec: number; grownMaxSec: number } {
   const userSilenceLevel = Math.floor(input.userSilenceSec / (USER_SILENCE_LEVEL_HOURS * 3600))
-  const backoffLevel = input.proactiveSinceUser + userSilenceLevel
+  const attempts = Number.isFinite(input.attemptsSinceUser) ? Math.max(0, Math.round(input.attemptsSinceUser)) : 0
+  const backoffLevel = attempts + userSilenceLevel
   const grownMax = Math.min(
     MAX_BACKOFF_SEC + Math.floor(input.userSilenceSec / 86400) * MAX_BACKOFF_GROW_HOURS * 3600,
     MAX_BACKOFF_CAP_HOURS * 3600,
   )
   const threshold = Math.min(BASE_BACKOFF_SEC * Math.pow(BACKOFF_FACTOR, backoffLevel), grownMax)
   return { backoffLevel, thresholdSec: threshold, grownMaxSec: grownMax }
+}
+
+/**
+ * 退避闸门：距上一次决策（首轮为自最后一条消息的静默时长）达到阈值才允许下一次唤醒。
+ * 单独抽成纯函数，锁住「阈值封顶后不会每个 tick 都唤醒」这条 P0 回归。
+ */
+export function isBackoffElapsed(input: { sinceLastWakeSec: number; thresholdSec: number }): boolean {
+  return input.sinceLastWakeSec >= input.thresholdSec
 }
 
 export type HeartbeatActionKind = 'speak' | 'memory' | 'diary' | 'silent' | 'schedule' | 'qzone'
@@ -101,6 +132,10 @@ export interface HeartbeatAction {
   action: HeartbeatActionKind
   reason: string
   content?: string | undefined
+  /**
+   * 兼容字段：旧决策输出里的「模型挑的时刻」。新语义下 schedule 的 fire_at 由系统在
+   * [min,max] 内随机生成（见 proactive.ts），这里仅保留解析，不再作为排期依据。
+   */
   fireAt?: string | undefined
   photo?: boolean | undefined
   silenceSec: number
@@ -170,26 +205,41 @@ async function maybeWakeOne(
 
   const silenceSec = (now.getTime() - new Date(lastAnyMsg.created_at).getTime()) / 1000
 
-  // 自最后一条用户消息以来已发送的 proactive 条数 → 退避等级
+  // 自最后一条用户消息以来的「唤醒/决策尝试」次数 → 退避等级。
+  // 旧实现只数 status='sent' 的 proactive：silent 与 gate-cancelled 都不涨退避 → 空转。
   const lastUserMsg = deps.storage
     .prepare("SELECT * FROM messages WHERE bot_id = ? AND sender = ? AND role = 'user' ORDER BY created_at DESC LIMIT 1")
     .get(botId, sender) as MessageRow | undefined
-  const proactiveSinceUser = deps.storage
-    .prepare(
-      "SELECT COUNT(*) AS c FROM scheduled_messages WHERE bot_id = ? AND sender = ? AND origin = 'proactive' AND status = 'sent' AND fired_at IS NOT NULL" +
-        (lastUserMsg ? ' AND fired_at >= ?' : ''),
-    )
-    .get(...(lastUserMsg ? [botId, sender, lastUserMsg.created_at] : [botId, sender])) as { c: number }
+  const lastUserAt = lastUserMsg?.created_at ?? null
+  const wakeAttempts = readWakeAttempts(deps.storage, botId, sender, lastUserAt)
+  // 距上一次决策的间隔；从未决策过则从「最后一条任意消息」起算（首轮静默）。
+  const sinceLastWakeSec = wakeAttempts.lastAt
+    ? (now.getTime() - new Date(wakeAttempts.lastAt).getTime()) / 1000
+    : silenceSec
+
+  // §唤醒冷却 — 距上次决策不足 5 分钟不再唤醒（防多个 tick 在阈值边界抖动）。
+  if (wakeAttempts.lastAt && sinceLastWakeSec < HEARTBEAT_WAKE_COOLDOWN_SEC) return null
+
+  // §未回硬停 — 连续 N 条主动消息没回复：不再唤醒决策 LLM，直到用户再开口。
+  // 用户一发言，lastUserAt 右移，计数自然归零（不需要额外清零任务）。
+  const unanswered = countUnansweredProactive(deps.storage, botId, sender, lastUserAt)
+  if (unanswered >= PROACTIVE_MAX_UNANSWERED) {
+    auditUnansweredCapOnce(deps, botId, sender, lastUserAt, unanswered, now)
+    return null
+  }
+
   // 用户静默时长因子：对方越久没来，等级越高（间隔翻倍）——"惦记渐渐放下"
-  const userSilenceSec = lastUserMsg
-    ? (now.getTime() - new Date(lastUserMsg.created_at).getTime()) / 1000
+  const userSilenceSec = lastUserAt
+    ? (now.getTime() - new Date(lastUserAt).getTime()) / 1000
     : 0
   const { backoffLevel, thresholdSec: threshold } = computeBackoff({
-    proactiveSinceUser: proactiveSinceUser?.c ?? 0,
+    attemptsSinceUser: wakeAttempts.attempts,
     userSilenceSec,
   })
 
-  if (silenceSec < threshold) return null
+  // 退避闸门：距上次决策的间隔达到阈值才再唤醒（首轮以静默时长起算）。
+  // 不能拿「总静默时长」比阈值——阈值封顶后总静默永远更大，会退回每 60s 空转。
+  if (!isBackoffElapsed({ sinceLastWakeSec, thresholdSec: threshold })) return null
 
   // 检查是否已有 pending proactive SM（避免重复唤醒）
   const pending = deps.storage
@@ -197,8 +247,48 @@ async function maybeWakeOne(
     .get(botId, sender) as { id: string } | undefined
   if (pending) return null
 
+  // 先记「决策尝试」再调模型：silent / gate-cancelled / speak / 解析失败 / 调用失败都算一次。
+  // 这正是退避的计数来源，也是旧实现「已发送才算」bug 的修复点。
+  audit(
+    deps,
+    botId,
+    'heartbeat',
+    'decision',
+    heartbeatDetail(sender, { silence: Math.round(silenceSec), level: backoffLevel }),
+    now,
+  )
+
   // 唤醒 → 调决策 LLM
   return runDecision(deps, botId, sender, now, silenceSec, backoffLevel, bot.ai_model || undefined, !!bot.ai_humanize_enabled)
+}
+
+/** 未回硬停只审计一次（用户重新开口前的同一轮沉默里不刷屏）。 */
+function auditUnansweredCapOnce(
+  deps: SchedulerDeps,
+  botId: string,
+  sender: string,
+  lastUserAt: string | null,
+  unanswered: number,
+  now: Date,
+): void {
+  try {
+    const existing = deps.storage
+      .prepare(
+        "SELECT 1 AS x FROM audit_logs WHERE bot_id = ? AND category = 'heartbeat' AND action = 'unanswered_cap' AND created_at >= ? AND instr(detail, ?) > 0 LIMIT 1",
+      )
+      .get(botId, lastUserAt ?? '1970-01-01T00:00:00.000Z', senderDetailNeedle(sender))
+    if (existing) return
+  } catch {
+    // 查询失败继续审计（宁可多一条，不阻断硬停）
+  }
+  audit(
+    deps,
+    botId,
+    'heartbeat',
+    'unanswered_cap',
+    heartbeatDetail(sender, { unanswered, cap: PROACTIVE_MAX_UNANSWERED, stage: 'wake_skipped' }),
+    now,
+  )
 }
 
 /** 从模型输出中稳健地取出第一个完整 JSON 对象（移植旧 ai/json-extract.ts）。 */
@@ -292,7 +382,7 @@ async function runDecision(
       content: `你是角色心声系统。角色此刻正处在静默期——没有和对方说话，但心里可能惦记着什么。请根据「对方是谁 + 当前时间 + 最近对话 + 角色性格」判断角色此刻心里该发生什么。
 只回 JSON，不要任何其他文字：
 {"action":"speak","reason":"...","content":"要发的话"}
-{"action":"schedule","reason":"...","content":"到点生成消息用的提示词","fireAt":"目标触发时间 ISO"}
+{"action":"schedule","reason":"...","content":"到点生成消息用的提示词"}
 {"action":"memory","reason":"...","content":"内心反思的内容"}
 {"action":"diary","reason":"..."}
 {"action":"qzone","reason":"...","content":"动态正文","photo":"true|false"}
@@ -301,7 +391,7 @@ async function runDecision(
 判断原则：
 - 回响的本质是「自发惦记」：角色因为性格和牵挂想找 TA——不需要太多理由，但至少要有一点点依据。比如：上次的话说到一半还没说完、TA 突然沉默让你放心不下、TA 上次提到的事还没下文、你们的关系让你自然而然地想起 TA。
 - speak：想到了什么想跟 TA 说，或惦记 TA 想主动关心。content 是要发给 TA 的话（口语化、像真人微信）。对主人（唯一喜欢的人）可以更主动、更黏。
-- schedule：惦记 TA，但现在不是发的时机（TA 在忙/深夜不该打扰/在等某件事发生）——预约一个未来时刻主动发。fireAt 是你打算发的时间（ISO），挑合适的时刻：对方大概有空、事情大概有下文的时候，一般不要超过未来几天；content 是到点生成消息用的提示词（像「他最近忙，等他忙完这周约他吃饭」）。
+- schedule：惦记 TA，但现在不是发的时机（TA 在忙/深夜不该打扰/在等某件事发生）——预约未来主动发一次。具体时刻由系统在「最小主动间隔 ~ 3 倍（最长 12 小时）」内随机挑（避免整点打卡），你不用给时间；content 是到点生成消息用的提示词（像「他最近忙，等他忙完这周约他吃饭」）。
 - memory：这段静默让角色产生了内心感受或反思，值得记住但不一定要现在发出去。content 是角色的内心独白。
 - diary：觉得今天值得写一篇日记记录这段时间的状态和感受。
 - qzone：想发一条 QQ 空间动态分享此刻的心情/生活片段（不一定要和对方有关——你是独立的个人，有自己的生活）。photo 为 true 时系统会从相册挑一张配图。
@@ -462,25 +552,27 @@ export async function executeHeartbeatAction(
       }
 
       // §回响预约 — 惦记 TA 但现在不是发的时机：预约到未来时刻主动发。
-      // 投递时不设静默时段限制（静默时段只作用于回响自身），预约到深夜/明早都能准时到。
+      // 时刻不再采用模型给的整点/固定值：在 [proactive_min_interval, 3×min（≤12h）] 内随机，
+      // 随机结果直接落 scheduled_messages.fire_at（旧库无需新列）。
       case 'schedule': {
         if (!action.content?.trim()) return
-        let fireAt = action.fireAt ? new Date(action.fireAt) : new Date(now.getTime() + 3600 * 1000)
-        if (Number.isNaN(fireAt.getTime())) fireAt = new Date(now.getTime() + 3600 * 1000)
-        // 防呆：预约不能早于 10 分钟内，不能晚于 7 天
-        const minFire = new Date(now.getTime() + 10 * 60 * 1000)
-        const maxFire = new Date(now.getTime() + 7 * 24 * 3600 * 1000)
-        if (fireAt < minFire) fireAt = minFire
-        if (fireAt > maxFire) fireAt = maxFire
+        const plan = nextProactiveFireAt(now, bot.proactive_min_interval, deps.rng ?? Math.random)
         mintProactive(deps, {
           botId,
           sender: action.sender,
           prompt: action.content.trim(),
-          fireAt: fireAt.toISOString(),
+          fireAt: plan.fireAt.toISOString(),
           // 回响预约 = 自发惦记类，宽松等级（可迟到/失约）
           strictness: 3,
         })
-        audit(deps, botId, 'heartbeat', 'schedule', `fireAt=${fireAt.toISOString()} reason=${action.reason}`)
+        audit(
+          deps,
+          botId,
+          'heartbeat',
+          'schedule',
+          `fireAt=${plan.fireAt.toISOString()} delay=${plan.delaySec}s range=[${plan.minSec},${plan.maxSec}] reason=${action.reason}`,
+          now,
+        )
         break
       }
     }

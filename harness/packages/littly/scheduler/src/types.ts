@@ -11,6 +11,8 @@ export interface SchedulerDeps {
   hub: LittlyHub
   memory: LittlyMemory
   log: (msg: string, ...args: unknown[]) => void
+  /** 可注入随机源（主动排期抖动；测试传定值，生产缺省用 Math.random）。 */
+  rng?: (() => number) | undefined
   /** B9：成长系统服务（profile 未装配 growth 插件时为 undefined，静默跳过月度评审）。 */
   growth?: GrowthTickLike | undefined
   /** 记忆 vault（profile 未装配 memory vault 时为 undefined，静默跳过每日 Dream 整理）。 */

@@ -235,7 +235,8 @@ API：`GET /api/mail/status`、`PUT /api/mail/account`（密码空=不改、`***
 - **写**：append-only、同 id 冲突 409、路径穿越拒绝、临时文件+rename 原子写；旧 `memories` 表保留只读。
 - **时间**：机器层存 `event_time`（含时区）/`record_raw`（原话）/`record_time`；展示层生成自然语言标签
   （「两个月前（2026-08）」随索引重建自动老化），关键日期保留绝对；衰减按发生时间。
-- **整理（Dream）**：`_staging` ≥25 条且距上次 ≥30min、每天 03:00、或控制台「立即整理」触发；
+- **整理（Dream）**：`_staging` ≥25 条、或 `_staging` 非空且距上次整理 ≥6h（低流量兜底）、每天 03:00、
+  或控制台「立即整理」触发；
   用成长模型批量抽取→归类→去重→`supersede`/墓碑→写条目→重建 PROFILE→刷新索引与时间标签→写报告；
   有并发锁与 token 预算，失败保留暂存可重试，绝不物理删原文。
 - **迁移旧记忆**：`POST /api/memory/migrate`（admin，可带 `botId`；幂等，重复调用跳过已迁条目）——
@@ -297,7 +298,7 @@ node scripts/verify-onboarding.mjs 3000
 | `verify-memory.mjs` | 记忆打分 / 历史窗口 / 拟人化分片 / 出口后处理 / 工具兜底（32 项） |
 | `verify-memory-v2.mjs` | explain 台账 / protected 能力位 / 幂等回执 + 漂移检测（41 项） |
 | `verify-growth.mjs` | 三铁律硬校验 / 月底窗口 / 提议-审批全链路 / 版本冲突 / 回滚（86 项） |
-| `verify-heartbeat.mjs` | 退避序列 / 静默时段 / JSON 稳健提取 / 决策落地 / 扫描守卫（50 项） |
+| `verify-heartbeat.mjs` | 退避序列（按决策尝试）/ 静默时段 / JSON 稳健提取 / 决策落地 / 未回硬停 / 随机排期 / 扫描守卫（87 项） |
 | `verify-bili.mjs` | bilibili-cli 壳：允许清单 / 写默认 dry-run / audio 输出目录 / JSON 信封与错误码 / 扫码三态与凭证 0600 / 限频 / 审计脱敏 / 工具注册与 MCP 收敛门（fake bin + mock passport，140 项） |
 | `verify-mcp.mjs` | 服务器清单解析 / 工具命名 / 按角色启停集合（18 项） |
 | `verify-events.mjs` | 对话过程事件订阅/退订/异常隔离/按会话路由（9 项） |

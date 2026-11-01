@@ -108,7 +108,7 @@ export class MemoryVault {
     return index
   }
 
-  /** 重新扫描文件重建该 scope 的索引（返回 source_digest/build_id）。 */
+  /** 重新扫描文件重建该 scope 的索引（返回 source_digest/build_id；未变化条目的向量原样保留）。 */
   rebuildIndex(scope: VaultScope): { count: number; sourceDigest: string; buildId: string } {
     const index = this.index()
     const items = listAllEntries(this.paths(scope.botId, scope.contactId))
@@ -251,7 +251,10 @@ export class MemoryVault {
     return next
   }
 
-  /** 跨域检索（FTS + 向量 RRF）。 */
+  /**
+   * 跨域检索：FTS + 向量 → RRF 融合 → 加权排序（0.55 相关度 + 0.25 重要度 + 0.20 新鲜度）。
+   * minScore 过滤最终加权分（0..1）；没有向量的条目仍走 FTS。
+   */
   async search(scope: VaultScope, query: string, options: { domain?: string | undefined; limit?: number | undefined; minScore?: number | undefined } = {}): Promise<Array<Record<string, unknown>>> {
     const index = this.ensureIndex(scope)
     const q = String(query ?? '').trim()

@@ -17,8 +17,9 @@ import {
 import { relativeLabel, timeLabelsFor } from '../packages/littly/memory/src/vault/time.ts'
 import {
   acquireDreamLock, releaseDreamLock, buildProfileMarkdown, buildDreamPrompt, dreamDue, estimateTokens,
-  parseDreamOutput, DREAM_MIN_STAGING,
+  parseDreamOutput, DREAM_COOLDOWN_MS, DREAM_MIN_STAGING,
 } from '../packages/littly/memory/src/vault/dream.ts'
+import { RANK_WEIGHTS, halfLifeDays, importanceWeight, recencyWeight } from '../packages/littly/memory/src/vault/rank.ts'
 import { MEMORY_TOOLS, registerMemoryTools } from '../packages/littly/memory/src/vault/tools.ts'
 
 let pass = 0
@@ -145,6 +146,66 @@ console.log('== 索引：重建 / source_digest / FTS / 行号 / 时间标签 ==
   ok(relativeLabel('2026-10-20T00:00:00+08:00', new Date('2026-11-01T00:00:00+08:00'), { keyDate: true }).includes('（'), '关键时间保留绝对日期')
 }
 
+console.log('== 写路径保留向量（entry_id + sha256）==')
+{
+  const vecScope = { botId: 'bot-1', contactId: 'vec-user' }
+  const vecVault = new MemoryVault(storage, { rootDir: root, now, embed: fakeEmbed, complete: async () => '[]' })
+  const first = vecVault.write(vecScope, { domain: 'life', title: '向量甲', body: '第一条正文。' })
+  const second = vecVault.write(vecScope, { domain: 'life', title: '向量乙', body: '第二条正文。' })
+  vecVault.index().setVector(first.entry.id, 'fake', [0, 1, 0])
+  vecVault.index().setVector(second.entry.id, 'fake', [1, 0, 0])
+  ok(vecVault.index().vectorCount(vecScope) === 2, '初始化两条向量')
+  // memory_write → rebuildIndex → rebuildScope：不能把该 scope 的向量全清掉（历史 bug）
+  vecVault.write(vecScope, { domain: 'life', title: '向量丙', body: '第三条正文。' })
+  ok(vecVault.index().vectorCount(vecScope) === 2, 'memory_write 后向量数不归零（未变化条目保留）', `2 → ${vecVault.index().vectorCount(vecScope)}`)
+  ok(vecVault.index().getVector(first.entry.id)?.length === 3, '未变化条目的向量原样保留')
+  // 内容变化 → 旧向量删除（不凭空重算），等下次 Dream 重建
+  vecVault.update(vecScope, first.entry.id, { body: '改过的正文（内容变化）。' })
+  ok(vecVault.index().getVector(first.entry.id) === null, '正文变化的条目向量被删除（等 Dream 重建）')
+  ok(vecVault.index().getVector(second.entry.id) !== null, '其它条目向量不受影响')
+  const noVec = await vecVault.search(vecScope, '改过的正文')
+  ok(noVec.some((h) => h.entryId === first.entry.id), '无向量条目仍可被 FTS 召回')
+}
+
+console.log('== 检索加权：相关度 / 重要度 / 新鲜度 ==')
+{
+  ok(RANK_WEIGHTS.relevance === 0.55 && RANK_WEIGHTS.importance === 0.25 && RANK_WEIGHTS.recency === 0.20, '权重 0.55/0.25/0.20')
+  ok(halfLifeDays('relationships', 'stable') === 365 && halfLifeDays('feedback', 'stable') === 365, 'relationships/feedback 半衰期 365 天')
+  ok(halfLifeDays('life', 'stable') === 30 && halfLifeDays('health', 'stable') === 30, 'life/health 半衰期 30 天')
+  ok(halfLifeDays('projects', 'stable') === 180 && halfLifeDays('interests', 'stable') === 180 && halfLifeDays('about-user', 'stable') === 180, 'projects/interests/about-user 半衰期 180 天')
+  ok(halfLifeDays('notes', 'stable') === 90, '未列出的域默认 90 天')
+  ok(halfLifeDays('relationships', 'state') === 7 && halfLifeDays('life', 'state') === 7, 'volatility=state 半衰期封顶 7 天')
+  ok(Math.abs(recencyWeight(new Date(now().getTime() - 30 * 86_400_000).toISOString(), now(), 'life', 'stable') - 0.5) < 1e-9, '生活域 30 天新鲜度衰减到 0.5')
+  ok(recencyWeight('不是时间', now(), 'life', 'stable') === 0, '时间不可解析 → 新鲜度 0（不奖励脏数据）')
+  ok(importanceWeight(5) === 1 && Math.abs(importanceWeight(1) - 0.2) < 1e-9 && importanceWeight(99) === 1, '重要度归一 1-5 → 0.2-1')
+
+  const rankScope = { botId: 'bot-1', contactId: 'rank-user' }
+  const rankVault = new MemoryVault(storage, { rootDir: root, now, embed: fakeEmbed, complete: async () => '[]' })
+  // 两条都命中「登山」：旧 + 低重要度 vs 新 + 高重要度
+  rankVault.write(rankScope, { domain: 'life', title: '登山旧事', body: '去年和朋友去登山，很累。', event_time: '2026-01-01T10:00:00+08:00', importance: 1 })
+  rankVault.write(rankScope, { domain: 'projects', title: '登山计划', body: '下个月去登山，正在做攻略。', event_time: '2026-10-29T10:00:00+08:00', importance: 5 })
+  const ranked = await rankVault.search(rankScope, '登山')
+  ok(ranked.length === 2, '加权检索命中两条同等相关条目')
+  ok(ranked[0].title === '登山计划', 'importance/recency 高者排前', ranked.map((h) => h.title).join(' > '))
+  ok(typeof ranked[0].scoreBreakdown === 'object' && ranked[0].scoreBreakdown !== null, '结果带 scoreBreakdown')
+  ok(ranked[0].scoreBreakdown.importance > ranked[1].scoreBreakdown.importance, '分项 importance 反映 5 vs 1')
+  ok(ranked[0].scoreBreakdown.recency > ranked[1].scoreBreakdown.recency, '分项 recency 按 event_time 衰减')
+  ok(ranked.every((h) => h.score >= 0 && h.score <= 1), '最终分归一到 0..1')
+  ok(ranked[0].score === ranked[0].scoreBreakdown.final, 'score 与 scoreBreakdown.final 一致')
+  ok((await rankVault.search(rankScope, '登山', { minScore: 1.01 })).length === 0, 'minScore 过滤最终加权分（>1 全过滤）')
+  ok((await rankVault.search(rankScope, '登山', { minScore: 0.5 })).length >= 1, 'minScore 低于最终分时保留命中')
+  // 同等相关/重要度，只让 event_time 不同
+  rankVault.write(rankScope, { domain: 'interests', title: '跑步旧习惯', body: '以前每周跑步三次。', event_time: '2025-01-01T00:00:00+08:00', importance: 3 })
+  rankVault.write(rankScope, { domain: 'interests', title: '跑步比赛', body: '刚报名了跑步比赛。', event_time: '2026-10-28T00:00:00+08:00', importance: 3 })
+  const byRecency = await rankVault.search(rankScope, '跑步')
+  ok(byRecency.length === 2 && byRecency[0].title === '跑步比赛', '同等相关/重要度 → event_time 新者排前', byRecency.map((h) => h.title).join(' > '))
+  // 同等相关/时间，只让 importance 不同
+  rankVault.write(rankScope, { domain: 'life', title: '养猫日常', body: '家里养猫，日常铲屎。', event_time: '2026-10-20T00:00:00+08:00', importance: 1 })
+  rankVault.write(rankScope, { domain: 'life', title: '养猫开销', body: '养猫每月花费不少。', event_time: '2026-10-20T00:00:00+08:00', importance: 5 })
+  const byImportance = await rankVault.search(rankScope, '养猫')
+  ok(byImportance.length === 2 && byImportance[0].title === '养猫开销', '同等相关/时间 → importance 高者排前', byImportance.map((h) => h.title).join(' > '))
+}
+
 console.log('== 9 域地图 / 条目列表 / 详情 / 人工编辑 ==')
 {
   const domains = vault.domains(scope)
@@ -192,15 +253,24 @@ console.log('== PROFILE / RULES（预算截断 / 区间保护）==')
 
 console.log('== 暂存区 / Dream 整理（fake LLM）==')
 {
+  // 预置一次「一小时前刚整理过」的报告：新的冷却触发（6h）因此不会在 stage() 时自动起跑，
+  // 让下面的断言保持确定性；dreamDue 的 OR 行为在紧随其后的单元断言里单独覆盖。
+  vault.index().insertDreamReport({
+    id: 'seed-recent-dream', bot_id: 'bot-1', contact_id: 'user-1', at: new Date(now().getTime() - 60 * 60_000).toISOString(),
+    added: 0, merged: 0, superseded: 0, archived: 0, duration_ms: 0, tokens: 0, status: 'ok', error: '',
+  })
   const stage = vault.stage(scope, '用户说最近搬到杭州了', 'message:m1')
   ok(typeof stage.staging.id === 'string' && stage.stagingCount === 1, 'memory_stage 写入 _staging')
   ok(listStaging(vault.paths('bot-1', 'user-1')).length === 1, '暂存文件落盘')
   ok(listStaging(vault.paths('bot-1', 'user-1'))[0].source_ref === 'message:m1', '暂存保留 source_ref')
-  ok(dreamDue(24, '', now()) === false, 'staging<25 不自动整理')
   ok(DREAM_MIN_STAGING === 25, '阈值常量 25')
-  ok(dreamDue(25, '', now()) === true, 'staging≥25 且无上次整理 → due')
-  ok(dreamDue(25, new Date(now().getTime() - 10 * 60_000).toISOString(), now()) === false, '距上次<30min 不整理')
-  ok(dreamDue(25, new Date(now().getTime() - 31 * 60_000).toISOString(), now()) === true, '距上次≥30min → due')
+  ok(DREAM_COOLDOWN_MS === 6 * 60 * 60_000, '冷却常量 6h')
+  ok(dreamDue(0, '', now()) === false, '无暂存 → 不整理')
+  ok(dreamDue(24, '', now()) === true, '有暂存但无上次记录 → due（低流量首次兜底）')
+  ok(dreamDue(1, new Date(now().getTime() - 7 * 60 * 60_000).toISOString(), now()) === true, '低 staging 但超过冷却 → due（OR）')
+  ok(dreamDue(1, new Date(now().getTime() - 60 * 60_000).toISOString(), now()) === false, '低 staging 且未到冷却 → 不整理')
+  ok(dreamDue(25, new Date(now().getTime() - 60_000).toISOString(), now()) === true, 'staging≥25 → due（不看冷却）')
+  ok(dreamDue(24, new Date(now().getTime() - 7 * 60 * 60_000).toISOString(), now()) === true, '24 条 + 过了冷却 → due（阈值/冷却取或）')
   // 构造一条旧条目供 supersede
   const old = vault.write(scope, { domain: 'life', title: '旧作息：两点睡', body: '经常两点睡。', event_time: '2026-08-01T00:00:00+08:00' }).entry
   // 模型输出含 supersede
@@ -328,9 +398,14 @@ console.log('== dreamStatus / 自动触发 / 定时 ==')
   ok(typeof status.running === 'boolean' && typeof status.stagingCount === 'number', 'dreamStatus 基础字段')
   ok('lastRunAt' in status && 'nextRunAt' in status, 'dreamStatus 含 lastRunAt/nextRunAt（fe 契约）')
   const scopeX = { botId: 'bot-1', contactId: 'auto-user' }
+  // 预置 10 分钟前刚整理过：阈值优先于冷却——25 条仍然 due，且前 24 条不会提前触发后台整理
+  vault.index().insertDreamReport({
+    id: 'seed-auto-user', bot_id: 'bot-1', contact_id: 'auto-user', at: new Date(now().getTime() - 10 * 60_000).toISOString(),
+    added: 0, merged: 0, superseded: 0, archived: 0, duration_ms: 0, tokens: 0, status: 'ok', error: '',
+  })
   for (let i = 0; i < 25; i++) vault.stage(scopeX, `候选 ${i}`)
   const auto = vault.dreamStatus(scopeX)
-  ok(auto.stagingCount === 25 && auto.due === true, 'staging≥25 → due=true（自动整理触发条件）')
+  ok(auto.stagingCount === 25 && auto.due === true, 'staging≥25 → due=true（阈值优先于冷却）')
   // consolidateDue 只在 03:00 跑 daily
   const notThree = await vault.consolidateDue('daily', new Date('2026-10-30T10:00:00+08:00'))
   ok(notThree.length === 0, '非 03:00 不跑 daily 整理')

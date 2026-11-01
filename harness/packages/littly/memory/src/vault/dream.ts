@@ -1,7 +1,8 @@
 /**
  * Dream：暂存区后台整理 + PROFILE/RULES 生成 + 报告。
  *
- * 触发：staging≥25 且距上次≥30min / 每日 03:00 / 手动。
+ * 触发（OR，不是 AND）：staging≥25（阈值）**或** staging>0 且距上次成功整理≥DREAM_COOLDOWN_MS（冷却）；
+ * 另有每日 03:00 定时与手动。低流量联系人攒不到 25 条，靠冷却兜底也能被整理。
  * 保护：同一 vault 并发锁（_meta/dream.lock，30min 陈旧可抢占）；token 预算（默认 60k）；
  * 失败保留 staging（可重试）；条目文件原子写；绝不物理删除原文（只墓碑）。
  */
@@ -15,8 +16,10 @@ import {
 import type { VaultIndex } from './index-db.ts'
 import { normalizeWriteInput, type VaultEntry, type VaultWriteInput, WRITABLE_DOMAINS } from './types.ts'
 
+/** 攒够这么多条暂存就直接整理（不看冷却）。 */
 export const DREAM_MIN_STAGING = 25
-export const DREAM_MIN_INTERVAL_MS = 30 * 60_000
+/** 冷却：有暂存但不够阈值时，距上次成功整理超过它也要跑（低流量兜底）。 */
+export const DREAM_COOLDOWN_MS = 6 * 60 * 60_000
 export const DREAM_LOCK_STALE_MS = 30 * 60_000
 export const PROFILE_BUDGET = 2000
 export const DREAM_TOKEN_BUDGET = 60_000
@@ -326,9 +329,17 @@ function applyDreamItems(deps: DreamDeps, scope: { botId: string; contactId: str
   return { added, merged, superseded, archived }
 }
 
-/** 是否应自动触发整理。 */
+/**
+ * 是否应自动触发整理：暂存 ≥ DREAM_MIN_STAGING（阈值，先到先跑），
+ * 或者「有暂存且距上次成功整理 ≥ DREAM_COOLDOWN_MS」（冷却兜底）。
+ *
+ * 没有上次整理记录（首次 / 从没成功过）时视为冷却已过——否则低流量联系人永远
+ * 攒不到 25 条、也就永远不整理。每日 03:00 定时与手动整理不走这里。
+ */
 export function dreamDue(stagingCount: number, lastDreamAt: string, now: Date): boolean {
-  if (stagingCount < DREAM_MIN_STAGING) return false
-  const last = lastDreamAt === '' ? 0 : Date.parse(lastDreamAt)
-  return Number.isNaN(last) || now.getTime() - last >= DREAM_MIN_INTERVAL_MS
+  if (stagingCount <= 0) return false
+  if (stagingCount >= DREAM_MIN_STAGING) return true
+  const last = lastDreamAt.trim() === '' ? Number.NaN : Date.parse(lastDreamAt)
+  if (Number.isNaN(last)) return true
+  return now.getTime() - last >= DREAM_COOLDOWN_MS
 }

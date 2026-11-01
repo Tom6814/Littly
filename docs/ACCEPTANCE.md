@@ -46,7 +46,7 @@
 | Telegram | `@littly/channel-telegram`：轮询/Webhook、去重游标、绑定深链拦截 |
 | 绑定 / 身份归一 | **闭环完整**：控制台发码（`POST /api/bind/:channel/code`，6 位码 / TG deep-link，10 分钟有效、同 kind 旧码作废）→ 渠道侧 `binding.ts` 消费（限频、一次性、冲突不抢占）→ 写 `channel_identities` + 联系人晋升 → 状态可见 → 可解绑（不删历史与记忆）。`verify-bind.mjs` 22 项 |
 | scheduler 挂 dsh 定时任务 | `@littly/scheduler`：60s tick（僵死批次恢复 / 到期缓冲兜底 / 预约门控 / 日记） |
-| 心跳（心声回响） | `@littly/scheduler/src/heartbeat.ts`：静默扫描 + 指数退避唤醒（10min→2h 封顶）、失败冷却 30min、决策落地为预约/记忆/日记。`verify-heartbeat.mjs` 42 项 |
+| 心跳（心声回响） | `@littly/scheduler/src/heartbeat.ts`：静默扫描 + 指数退避唤醒（按决策尝试次数，silent/取消也计入；10min→2h 封顶）+ 5min 唤醒冷却、失败冷却 30min、连续 4 条未回硬停、决策落地为预约/记忆/日记。`verify-heartbeat.mjs` 87 项 |
 
 ## 4. M3 —— 全渠道、语音、bilibili
 
@@ -228,7 +228,7 @@ Telegram 给深链，显示有效期与操作说明，已绑定列表带解绑�
 |---|---|---|
 | B6 Discord DM 判据 | 无 `guild_id` 即 DM（`channel_type` 缺失不再恒丢）；fixture 改真实 Gateway 形状 | `verify-discord.mjs`（75） |
 | B7 QQ event_id | 按 `(bot,openid)` 记 60min 入站 event_id，主链路出站自动带（被动回复窗口） | `verify-qq-official.mjs`（69） |
-| B8 qzone 参数 | `{content,imageUrl}` → `{text,photoIds}`（工具真签名） | `verify-heartbeat.mjs`（50） |
+| B8 qzone 参数 | `{content,imageUrl}` → `{text,photoIds}`（工具真签名） | `verify-heartbeat.mjs`（87） |
 | B9 growth 月度 tick | scheduler tick 接 `growthTick`（每日一次 + 月底窗口内才真跑） | `verify-growth.mjs`（86） |
 | B10 value_exclusions | 提案创建 + 审批双路径硬校验（空列表 no-op），新增 `PUT /api/growth/value-exclusions` | `verify-growth.mjs`（86） |
 | B11 上传目录持久化 | `LITTLY_DATA_DIR/downloads`（默认 `<cwd>/data/downloads`）+ 旧 `public/downloads` 只读回退；`/api/photos/file/*` URL 不变；entrypoint/compose 设 `/app/data` | `verify-e2e` 静态/相册路径；手工写文件验证 |
