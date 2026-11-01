@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { downloadsDir, type LittlyStorage, type MemoryRow } from '@littly/storage'
+import { downloadsDir, memeIdsForBot, type LittlyStorage, type MemoryRow, type PhotoRow } from '@littly/storage'
 import { chatComplete, generateImage, webSearch } from '@littly/llm'
 import type { LittlyMemory } from '@littly/memory'
 import { ALL_TOOLS, type ToolDef } from './defs.ts'
@@ -56,6 +56,45 @@ function shanghaiDateKey(now: Date): string {
     timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(now)
   return parts
+}
+
+/** SQL LIKE 转义（用户输入里的 % / _ / \ 按字面量匹配）。 */
+function likePattern(value: string): string {
+  return `%${value.replace(/[\\%_]/g, (match) => `\\${match}`)}%`
+}
+
+function parsePhotoTags(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (Array.isArray(parsed)) return parsed.map((tag) => String(tag)).filter((tag) => tag !== '')
+  } catch {
+    // 老数据可能是逗号分隔
+  }
+  return raw.split(/[,，]/).map((tag) => tag.trim()).filter((tag) => tag !== '')
+}
+
+/** 工具侧照片视图：只暴露模型选图/回忆需要的字段，meme 是选图凭证。 */
+function photoToolView(row: PhotoRow, meme: string): Record<string, unknown> {
+  return {
+    id: row.id,
+    meme,
+    url: row.url,
+    caption: row.caption,
+    tags: parsePhotoTags(row.tags),
+    sha256: row.sha256,
+    mime: row.mime,
+    category: row.category,
+    semanticStatus: row.semantic_status,
+    semanticAt: row.semantic_at,
+    semanticError: row.semantic_error,
+    createdAt: row.created_at,
+  }
+}
+
+/** `meme:<hex>` / 裸 hex → 小写裸串；格式不合法直接返回空串。 */
+function normalizeMeme(raw: string): string {
+  const value = raw.trim().replace(/^meme:/i, '').trim().toLowerCase()
+  return /^[0-9a-z-]{1,64}$/.test(value) ? value : ''
 }
 
 class Registry implements LittlyToolRegistry {
@@ -305,15 +344,62 @@ class Registry implements LittlyToolRegistry {
         return { result: { ok: true, sleepUntil: until.toISOString() } }
       }
       case 'view_album': {
-        const rows = s('id')
-          ? this.all<Record<string, unknown>>('SELECT * FROM photos WHERE bot_id = ? AND id = ?', ctx.botId, s('id'))
-          : this.all<Record<string, unknown>>('SELECT * FROM photos WHERE bot_id = ? ORDER BY created_at DESC LIMIT ?', ctx.botId, Number(args.limit) || 20)
-          .filter((p) => !s('tag') || String((p as { tags: string }).tags).includes(s('tag')))
-        return { result: { ok: true, photos: rows } }
+        const memes = memeIdsForBot(this.storage, ctx.botId)
+        const id = s('id')
+        if (id !== '') {
+          const row = this.get<PhotoRow>('SELECT * FROM photos WHERE bot_id = ? AND id = ?', ctx.botId, id)
+          return { result: { ok: true, photos: row === null ? [] : [photoToolView(row, memes.get(row.id) ?? '')] } }
+        }
+        const where = ['bot_id = ?']
+        const params: unknown[] = [ctx.botId]
+        const tag = s('tag').trim()
+        if (tag !== '') {
+          where.push("tags LIKE ? ESCAPE '\\'")
+          params.push(likePattern(tag))
+        }
+        const query = s('query').trim()
+        if (query !== '') {
+          where.push("(caption LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR category LIKE ? ESCAPE '\\')")
+          const pattern = likePattern(query)
+          params.push(pattern, pattern, pattern)
+        }
+        const category = s('category').trim()
+        if (category !== '') {
+          where.push("category LIKE ? ESCAPE '\\'")
+          params.push(likePattern(category))
+        }
+        const requested = Number(args.limit)
+        const limit = Math.min(100, Math.max(1, Number.isFinite(requested) && requested > 0 ? Math.trunc(requested) : 20))
+        const rows = this.all<PhotoRow>(
+          `SELECT * FROM photos WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT ?`,
+          ...params, limit,
+        )
+        return { result: { ok: true, photos: rows.map((row) => photoToolView(row, memes.get(row.id) ?? '')) } }
       }
       case 'tag_photo': {
-        this.storage.prepare('UPDATE photos SET caption = COALESCE(NULLIF(?, \'\'), caption), tags = ? WHERE id = ? AND bot_id = ?')
-          .run(s('caption'), JSON.stringify((args.tags as string[] | undefined) ?? []), s('id'), ctx.botId)
+        const id = s('id')
+        const columns: string[] = []
+        const values: unknown[] = []
+        const caption = s('caption')
+        if (caption !== '') {
+          columns.push('caption')
+          values.push(caption)
+        }
+        if (Array.isArray(args.tags)) {
+          const tags = (args.tags as unknown[]).map((tag) => String(tag).trim()).filter((tag) => tag !== '')
+          columns.push('tags')
+          values.push(JSON.stringify(tags))
+        }
+        const category = s('category')
+        if (category !== '') {
+          columns.push('category')
+          values.push(category)
+        }
+        if (columns.length === 0) throw new Error('没有要修改的字段：caption / tags / category 至少给一个')
+        const r = this.storage
+          .prepare(`UPDATE photos SET ${columns.map((column) => `${column} = ?`).join(', ')} WHERE id = ? AND bot_id = ?`)
+          .run(...values, id, ctx.botId)
+        if (r.changes === 0) throw new Error('照片不存在；先调用 view_album 拿准确 id')
         return { result: { ok: true } }
       }
       case 'delete_photo': {
@@ -321,11 +407,28 @@ class Registry implements LittlyToolRegistry {
         return { result: { ok: true } }
       }
       case 'send_photo': {
-        const photo = this.get<{ url: string }>('SELECT url FROM photos WHERE id = ? AND bot_id = ?', s('id'), ctx.botId)
-        if (!photo) throw new Error('照片不存在')
+        const memes = memeIdsForBot(this.storage, ctx.botId)
+        const memeRaw = s('meme')
+        const idRaw = s('id')
+        if (memeRaw === '' && idRaw === '') {
+          throw new Error('需要提供 meme：先调用 view_album 查看相册、拿准确的 meme id，禁止编造')
+        }
+        let photo: PhotoRow | null = null
+        if (memeRaw !== '') {
+          const meme = normalizeMeme(memeRaw)
+          if (meme === '') throw new Error('meme 格式不对：应为 "meme:<hex>" 或裸 hex，先用 view_album 获取')
+          photo = this.all<PhotoRow>('SELECT * FROM photos WHERE bot_id = ?', ctx.botId)
+            .find((row) => memes.get(row.id) === meme) ?? null
+          if (photo === null) {
+            throw new Error(`相册里没有 meme「${meme}」。请先调用 view_album 查看可用照片并拿准确的 meme id，禁止编造`)
+          }
+        } else {
+          photo = this.get<PhotoRow>('SELECT * FROM photos WHERE id = ? AND bot_id = ?', idRaw, ctx.botId)
+          if (photo === null) throw new Error('照片不存在；先调用 view_album 查看可用照片和 meme id')
+        }
         const r = await this.bridge.sendPhoto(ctx.channelId ?? 'web', ctx.botId, ctx.sender, this.bridge.photoPublicUrl(photo.url), s('caption'))
         if (!r.ok) throw new Error(r.error ?? '发送失败')
-        return { result: { ok: true } }
+        return { result: { ok: true, photo: photoToolView(photo, memes.get(photo.id) ?? '') } }
       }
       case 'send_message': {
         const r = await this.bridge.sendText(s('channel'), ctx.botId, s('target') || ctx.sender, s('text'))

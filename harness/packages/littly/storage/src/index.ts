@@ -15,6 +15,7 @@ import { MIGRATIONS } from './schema.ts'
 
 export * from './rows.ts'
 export * from './paths.ts'
+export * from './photos.ts'
 export { MIGRATIONS }
 
 export const name = 'littly-storage'

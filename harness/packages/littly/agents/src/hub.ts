@@ -17,6 +17,7 @@ import { getActiveGrowthText } from '@littly/growth'
 import { createToolRegistry, extractTextToolCall, getDisabledTools, type ChannelBridge, type ToolExecCtx, type ToolExecResult } from '@littly/tools'
 import { HUMANIZE_CHAT_STYLE, pieceDelays, sleep, splitHumanized, type HumanizeConfig } from './humanize.ts'
 import { fixParenPerson, looksCrisis, looksGarbled, stripThinkingText } from './postprocess.ts'
+import { UNTRUSTED_DATA_GUARD, wrapExternalToolResult } from './external-data.ts'
 import { resolveContact } from './contacts.ts'
 import { historyCharBudget, resolveHistoryTake, trimHistoryByBudget } from './history.ts'
 import type { DshToolBridge } from './dsh-bridge.ts'
@@ -392,6 +393,9 @@ export class LittlyHub {
     if (botRow.ai_humanize_enabled) {
       postHistoryMsg = postHistoryMsg ? `${postHistoryMsg}\n\n${HUMANIZE_CHAT_STYLE}` : HUMANIZE_CHAT_STYLE
     }
+    // 不可信外部数据边界（C3）：固定追加在收尾槽位末尾 —— 每轮都在、位置固定、文案恒定。
+    // 刻意不塞进 built.system：系统前缀保持原样，不破坏 prompt/prefix cache。
+    postHistoryMsg = postHistoryMsg ? `${postHistoryMsg}\n\n${UNTRUSTED_DATA_GUARD}` : UNTRUSTED_DATA_GUARD
     const messages: ChatMessage[] = [
       { role: 'system', content: built.system },
       ...(character?.first_mes && orderedHistory.length === 0 ? [{ role: 'assistant' as const, content: character.first_mes }] : []),
@@ -440,7 +444,7 @@ export class LittlyHub {
           toolCallLog.push({ name: tc.name, ok: result.ok })
           if (result.artifact) artifacts.push(result.artifact)
           this.emitEvent({ type: 'tool-call', botId: req.botId, sender: req.sender, id: tc.id, name: tc.name, status: result.ok ? 'done' : 'failed', ok: result.ok })
-          messages.push({ role: 'tool', content: result.result, tool_call_id: tc.id })
+          messages.push({ role: 'tool', content: wrapExternalToolResult(tc.name, result.result), tool_call_id: tc.id })
         }
         continue
       }
@@ -457,7 +461,7 @@ export class LittlyHub {
             toolCallLog.push({ name: tc.name, ok: result.ok })
             if (result.artifact) artifacts.push(result.artifact)
             this.emitEvent({ type: 'tool-call', botId: req.botId, sender: req.sender, id: toolCallId, name: tc.name, status: result.ok ? 'done' : 'failed', ok: result.ok })
-            messages.push({ role: 'tool', content: result.result, tool_call_id: toolCallId })
+            messages.push({ role: 'tool', content: wrapExternalToolResult(tc.name, result.result), tool_call_id: toolCallId })
           }
           if (textCalls.cleaned.trim()) lastNonEmpty = textCalls.cleaned.trim()
           continue

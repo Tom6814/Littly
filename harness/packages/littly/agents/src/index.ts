@@ -55,3 +55,13 @@ export type { ContactRowLite, ResolveContactHints, ResolvedContact } from './con
 export { createDshToolBridge, renderDshResult } from './dsh-bridge.ts'
 export type { DshToolBridge, DshToolsLike } from './dsh-bridge.ts'
 export type { LittlyHub as LittlyHubType, ChatRequest, ChatResponse, ChannelSender } from './hub.ts'
+
+export {
+  EXTERNAL_TOOL_NAMES,
+  EXTERNAL_TOOL_PREFIXES,
+  UNTRUSTED_DATA_GUARD,
+  UNTRUSTED_WRAP_TAG,
+  externalSourceOf,
+  isExternalTool,
+  wrapExternalToolResult,
+} from './external-data.ts'

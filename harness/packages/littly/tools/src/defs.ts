@@ -344,14 +344,16 @@ export const VIEW_ALBUM_TOOL: ToolDef = {
   function: {
     name: 'view_album',
     description: `查看你的相册——你和 TA 一起积攒的照片库（TA 从任何渠道发给你的图、你生成/收下的图都会自动收进来）。
-- 不带参数：列出最近的照片（id、描述、标签、时间）。
-- tag：按标签筛选（如"合照"）；id：看单张详情。
-- 相册是你的生活素材：回忆、挑照片发出去、整理归类都可以。`,
+- 不带参数：列出最近 20 张照片，每张带 meme（选图凭证）、id、描述、标签、分类、语义状态。
+- query：按描述/标签/分类搜索（如"海边"）；category：按分类筛选（开心/无语/撒娇/生气/可爱/日常/其他）；tag：按标签筛选；id：看单张详情。
+- **选图必须先用本工具拿 meme，再调用 send_photo 传 meme；禁止编造 meme。**`,
     parameters: {
       type: 'object',
       properties: {
         id: { type: 'string', description: '看单张照片详情' },
         tag: { type: 'string', description: '按标签筛选' },
+        query: { type: 'string', description: '按描述/标签/分类模糊搜索' },
+        category: { type: 'string', description: '按分类筛选（开心/无语/撒娇/生气/可爱/日常/其他）' },
         limit: { type: 'integer', description: '返回条数，默认 20' },
       },
     },
@@ -362,7 +364,8 @@ export const TAG_PHOTO_TOOL: ToolDef = {
   type: 'function',
   function: {
     name: 'tag_photo',
-    description: `整理相册照片：写描述 / 打标签（标签用逗号分隔，如"自拍,日常,猫"）。
+    description: `整理相册照片：写描述 / 打标签 / 改分类。
+- 标签用逗号分隔，如"自拍,日常,猫"；category 用「开心/无语/撒娇/生气/可爱/日常/其他」之一。
 - 结合语境描述照片：谁拍的、什么时候、有什么故事，让以后想起来更立体。
 - 先 view_album 拿到照片 id 再整理。适合批量把照片分类归档。`,
     parameters: {
@@ -371,6 +374,7 @@ export const TAG_PHOTO_TOOL: ToolDef = {
         id: { type: 'string' },
         caption: { type: 'string', description: '照片描述（可选）' },
         tags: { type: 'array', items: { type: 'string' }, description: '标签列表（可选）' },
+        category: { type: 'string', description: '照片分类（可选，开心/无语/撒娇/生气/可爱/日常/其他）' },
       },
       required: ['id'],
     },
@@ -396,15 +400,16 @@ export const SEND_PHOTO_TOOL: ToolDef = {
   function: {
     name: 'send_photo',
     description: `把相册里的照片发给当前聊天的人（通过你们正在用的渠道：网页/微信/Telegram/QQ/Discord 都能发）。
-- 先 view_album 选好照片，再用 id 发送；caption 可配一句话。
-- 场景：TA 想看某张照片、你想分享回忆、把 TA 之前发你的照片回发、换头像前先发一张给 TA 看看。`,
+- **选图必须先用 view_album 拿 meme id，禁止编造。** meme 传 "meme:<hex>" 或裸 hex；也兼容照片 id。
+- 没先查相册、凭印象编一个 meme，一定发送失败。
+- caption 可配一句话；场景：TA 想看某张照片、你想分享回忆、把 TA 之前发你的照片回发。`,
     parameters: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: '相册照片 id' },
+        meme: { type: 'string', description: 'view_album 返回的 meme（"meme:<hex>" 或裸 hex），优先于 id' },
+        id: { type: 'string', description: '相册照片 id（没有 meme 时的兼容入口）' },
         caption: { type: 'string', description: '配图的一句话（可选）' },
       },
-      required: ['id'],
     },
   },
 }

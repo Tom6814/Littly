@@ -6,15 +6,34 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, basename, extname } from 'node:path'
-import { downloadsDir, type ContactRow, type ContactRelationRow, type DiaryRow, type MemoryRow, type PhotoRow, type ScheduledMessageRow } from '@littly/storage'
+import {
+  downloadsDir, memeIdsForBot, sha256Hex,
+  type ContactRow, type ContactRelationRow, type DiaryRow, type MemoryRow, type PhotoRow, type ScheduledMessageRow,
+} from '@littly/storage'
 import { chatComplete } from '@littly/llm'
 import { json, err, bodyRecord, reqStr, reqNum, reqBool } from './http.ts'
 import { contactView, relationView, memoryView, diaryView, photoView, scheduledView, parseJsonArray } from './mapping.ts'
 import { isAdmin, resolveSender, senderAllowed, ownSender, loadBot, queryStr, nowIso, botOwnedBy, requireRowBotAccess, requireBotAccess } from './deps.ts'
+import { analyzePhotos, resolveVisionConfig, scheduleSemanticAnalysis } from './photos-semantic.ts'
 import type { Deps, RegisterFn } from './deps.ts'
 
 /** ⑨ newest-N 硬保护条数（与 memory 包同口径）。 */
 const HARD_PROTECT_COUNT = 5
+
+const MIME_BY_EXT: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+}
+
+/** 上传文件 mime：优先浏览器给的 image/*，否则按扩展名兜底。 */
+function normalizeImageMime(contentType: string, filename: string): string {
+  const declared = contentType.split(';')[0]?.trim().toLowerCase() ?? ''
+  if (declared.startsWith('image/')) return declared
+  return MIME_BY_EXT[extname(filename).toLowerCase()] ?? 'application/octet-stream'
+}
 
 function savePhotoFile(filename: string, data: Buffer): string {
   const safeBase = basename(filename).replace(/[^\w.-]/g, '_') || 'photo'
@@ -25,6 +44,18 @@ function savePhotoFile(filename: string, data: Buffer): string {
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, name), data)
   return `/api/photos/file/photos/${name}`
+}
+
+/** 单张照片的接口视图：meme 按整个相册去重分配，保证与 view_album 一致。 */
+function photoData(d: Deps, row: PhotoRow): Record<string, unknown> {
+  const memes = memeIdsForBot(d.storage, row.bot_id)
+  return photoView(row, memes.get(row.id) ?? '')
+}
+
+/** botId 缺省时的「当前 bot」：部署里最早创建的她（与 onboarding 同口径）。 */
+function defaultBotId(d: Deps): string {
+  const row = d.storage.prepare('SELECT id FROM bots ORDER BY created_at ASC LIMIT 1').get() as { id: string } | undefined
+  return row?.id ?? ''
 }
 
 function memoryRow(d: Deps, id: string): MemoryRow | undefined {
@@ -415,10 +446,11 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
   r.get('/api/photos', 'required', (ctx) => {
     const botId = queryStr(ctx, 'botId') ?? ''
     const rows = d.storage.prepare('SELECT * FROM photos WHERE bot_id = ? ORDER BY created_at DESC LIMIT 500').all(botId) as unknown as PhotoRow[]
-    json(ctx.res, 200, { data: { photos: rows.map(photoView) } })
+    const memes = memeIdsForBot(d.storage, botId)
+    json(ctx.res, 200, { data: { photos: rows.map((row) => photoView(row, memes.get(row.id) ?? '')) } })
   })
 
-  r.post('/api/photos', 'required', (ctx) => {
+  r.post('/api/photos', 'required', async (ctx) => {
     const botId = queryStr(ctx, 'botId') ?? ctx.fields['botId'] ?? ''
     const bot = loadBot(d, botId)
     if (bot === null) {
@@ -430,17 +462,58 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       err(ctx.res, 400, 'bad_request', '缺少上传文件')
       return
     }
+    // 内容指纹去重：同 bot 同一文件只入库一次（第二次直接回已有记录，不再写文件）。
+    const sha256 = sha256Hex(file.data)
+    const existing = d.storage
+      .prepare('SELECT * FROM photos WHERE bot_id = ? AND sha256 = ? ORDER BY created_at ASC LIMIT 1')
+      .get(botId, sha256) as PhotoRow | undefined
+    if (existing !== undefined) {
+      json(ctx.res, 200, { data: { photo: photoData(d, existing), deduplicated: true } })
+      return
+    }
+    const visionReady = (await resolveVisionConfig(d.storage, bot)) !== null
     const url = savePhotoFile(file.filename, file.data)
     const caption = ctx.fields['caption'] ?? ''
     const id = randomUUID()
-    d.storage.prepare('INSERT INTO photos (id, bot_id, url, caption, tags, created_at) VALUES (?,?,?,?,?,?)')
-      .run(id, botId, url, caption, '[]', nowIso())
+    d.storage
+      .prepare('INSERT INTO photos (id, bot_id, url, caption, tags, sha256, mime, category, semantic_status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(id, botId, url, caption, '[]', sha256, normalizeImageMime(file.contentType, file.filename), '', visionReady ? 'pending' : 'none', nowIso())
     const row = d.storage.prepare('SELECT * FROM photos WHERE id = ?').get(id) as PhotoRow | undefined
     if (row === undefined) {
       err(ctx.res, 500, 'internal', '上传失败')
       return
     }
-    json(ctx.res, 200, { data: { photo: photoView(row) } })
+    json(ctx.res, 200, { data: { photo: photoData(d, row), deduplicated: false } })
+    // 语义分析在响应之后异步跑；失败只落 semantic_status/error，不影响上传结果。
+    if (visionReady) scheduleSemanticAnalysis(d, botId, id)
+  })
+
+  // 手动/批量触发语义分析（admin）。botId 缺省 = 当前 bot；ids 缺省 = 待处理（非 done）。
+  r.post('/api/photos/analyze', 'admin', async (ctx) => {
+    const body = bodyRecord(ctx.body)
+    const botId = reqStr(body, 'botId') ?? queryStr(ctx, 'botId') ?? defaultBotId(d)
+    if (botId === '') {
+      err(ctx.res, 400, 'bad_request', '还没有可用的机器人')
+      return
+    }
+    const bot = loadBot(d, botId)
+    if (bot === null) {
+      err(ctx.res, 400, 'bad_request', '机器人不存在')
+      return
+    }
+    const rawIds = body['ids']
+    const ids = Array.isArray(rawIds) ? rawIds.map((id) => String(id)).filter((id) => id !== '') : []
+    const limit = reqNum(body, 'limit')
+    const params: { botId: string; ids?: string[]; limit?: number } = { botId }
+    if (ids.length > 0) params.ids = ids
+    if (limit !== undefined) params.limit = limit
+    try {
+      const result = await analyzePhotos(d, params)
+      json(ctx.res, 200, { data: result })
+    } catch (error) {
+      d.log('[photos] analyze failed: %s', String(error))
+      err(ctx.res, 500, 'internal', '语义分析失败')
+    }
   })
 
   r.patch('/api/photos/:id', 'required', (ctx) => {
@@ -466,11 +539,16 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       columns.push('tags')
       values.push(JSON.stringify((body['tags'] as unknown[]).map((t) => String(t))))
     }
+    const category = reqStr(body, 'category')
+    if (category !== undefined) {
+      columns.push('category')
+      values.push(category)
+    }
     if (columns.length > 0) {
       d.storage.prepare(`UPDATE photos SET ${columns.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...values, row.id)
     }
     const updated = d.storage.prepare('SELECT * FROM photos WHERE id = ?').get(row.id) as PhotoRow | undefined
-    json(ctx.res, 200, { data: { photo: updated === undefined ? photoView(row) : photoView(updated) } })
+    json(ctx.res, 200, { data: { photo: photoData(d, updated ?? row) } })
   })
 
   r.del('/api/photos/:id', 'required', (ctx) => {
@@ -481,8 +559,9 @@ export const registerDataRoutes: RegisterFn = (r, d) => {
       return
     }
     if (!requireRowBotAccess(ctx, d, row.bot_id)) return
+    const view = photoData(d, row)
     d.storage.prepare('DELETE FROM photos WHERE id = ?').run(row.id)
-    json(ctx.res, 200, { data: { photo: photoView(row) } })
+    json(ctx.res, 200, { data: { photo: view } })
   })
 
   // ---- 定时消息 ----

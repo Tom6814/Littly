@@ -256,13 +256,34 @@ export const growthApi = {
 
 /* ---------------- 相册 ---------------- */
 
+export type PhotoSemanticStatus = 'none' | 'pending' | 'done' | 'failed'
+
 export interface Photo {
   id: string
   botId: string
   url: string
   caption: string
   tags: string[]
+  sha256: string
+  mime: string
+  category: string
+  semanticStatus: PhotoSemanticStatus
+  semanticAt: string
+  semanticError: string
+  meme: string
   createdAt?: string
+}
+
+export interface PhotoAnalyzeResult {
+  analyzed: number
+  failed: number
+  skipped: number
+  configured: boolean
+  error: string
+}
+
+function toPhotoStatus(raw: string | undefined): PhotoSemanticStatus {
+  return raw === 'pending' || raw === 'done' || raw === 'failed' ? raw : 'none'
 }
 
 function toPhoto(v: unknown): Photo | undefined {
@@ -275,6 +296,13 @@ function toPhoto(v: unknown): Photo | undefined {
     url: asStr(v.url) ?? '',
     caption: asStr(v.caption) ?? '',
     tags: pickArray(v, 'tags').map((t) => String(t ?? '')).filter(Boolean),
+    sha256: asStr(v.sha256) ?? '',
+    mime: asStr(v.mime) ?? '',
+    category: asStr(v.category) ?? '',
+    semanticStatus: toPhotoStatus(asStr(v.semanticStatus)),
+    semanticAt: asStr(v.semanticAt) ?? '',
+    semanticError: asStr(v.semanticError) ?? '',
+    meme: asStr(v.meme) ?? '',
     createdAt: asStr(v.createdAt),
   }
 }
@@ -295,6 +323,17 @@ export const albumApi = {
   },
   async update(id: string, botId: string, patch: { caption?: string; tags?: string[] }): Promise<void> {
     await http.patch(`/api/photos/${encodeURIComponent(id)}`, patch, { query: { botId } })
+  },
+  async analyze(botId: string, opts: { ids?: string[]; limit?: number } = {}): Promise<PhotoAnalyzeResult> {
+    const out = await http.post<unknown>('/api/photos/analyze', { botId, ...opts })
+    const rec = isRecord(out) ? out : {}
+    return {
+      analyzed: asNum(rec.analyzed) ?? 0,
+      failed: asNum(rec.failed) ?? 0,
+      skipped: asNum(rec.skipped) ?? 0,
+      configured: asBool(rec.configured) ?? true,
+      error: asStr(rec.error) ?? '',
+    }
   },
   async remove(id: string, botId: string): Promise<void> {
     await http.del(`/api/photos/${encodeURIComponent(id)}`, { query: { botId } })

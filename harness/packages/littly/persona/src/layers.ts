@@ -194,19 +194,27 @@ export function buildRelationSkeleton(
 
 // ---- [5] 当前联系人全量层 ----
 
+function channelLabelOf(channel: string): string {
+  return channel === 'wechat' ? '微信' :
+    channel === 'tg' ? 'Telegram' :
+    channel === 'qq' || channel === 'qqp' || channel === 'snowluma' ? 'QQ' :
+    channel === 'discord' ? 'Discord' : '网页'
+}
+
 export function buildCurrentContactLayer(contact: ContactRow | null, memories: MemoryRow[]): string {
   const lines: string[] = []
   lines.push('# 正在和你聊天的这个人')
   const displayName = contact ? (contact.name || contact.sender) : '这个人'
+  // §身份确认 — 防串档：历史里别的联系人（旧名字/旧称呼）不能被安到当前说话者头上。
+  const currentChannelLabel = contact ? channelLabelOf(contact.channel) : '当前渠道'
+  lines.push(
+    `【身份确认】现在和你说话的人就是「${displayName}」（${currentChannelLabel}）；历史里提到的其他名字/旧联系人不是当前说话者，不要用他们称呼现在的人。`,
+  )
   if (!contact) {
     lines.push('（你暂时还不认识这个人，可以视情况用 upsert_contact 工具记住 TA。）')
   } else {
     const tag = contact.is_owner ? '★你喜欢的人/主人（唯一且不可改变）' : '普通认识的人'
-    const chLabel =
-      contact.channel === 'wechat' ? '微信' :
-      contact.channel === 'tg' ? 'Telegram' :
-      contact.channel === 'qq' || contact.channel === 'qqp' || contact.channel === 'snowluma' ? 'QQ' :
-      contact.channel === 'discord' ? 'Discord' : '网页'
+    const chLabel = channelLabelOf(contact.channel)
     const idParts = [`${chLabel}: ${contact.sender}`]
     if (contact.tg_username) idParts.push(`TG: ${contact.tg_username}`)
     if (contact.external_id && contact.external_id !== contact.sender) idParts.push(`平台 id: ${contact.external_id}`)
@@ -269,6 +277,18 @@ export function buildCurrentContactLayer(contact: ContactRow | null, memories: M
   return lines.join('\n')
 }
 
+// ---- [2.45] 内心状态 ----
+
+export function buildInnerStateLayer(text: string): string {
+  const body = text.trim()
+  if (!body) return ''
+  return [
+    '# 内心状态',
+    body,
+    '（状态只影响语气与主动性，不要向对方报数值；也不要向对方解释这份状态本身。）',
+  ].join('\n')
+}
+
 // ---- [0] 当前时间 ----
 
 export function nowTimeLine(): string {
@@ -299,6 +319,7 @@ export interface PersonaLayers {
   contextStreamHeader?: string | undefined
   relationSkeleton?: string | undefined
   currentContact?: string | undefined
+  innerState?: string | undefined
   historyDigest?: string | undefined
   mesExample?: string | undefined
   authorNote?: string | undefined
@@ -330,6 +351,7 @@ export function assembleSystemPrompt(layers: PersonaLayers): string {
   if (layers.contextStreamHeader) parts.push(layers.contextStreamHeader)
   if (layers.relationSkeleton) parts.push(layers.relationSkeleton)
   if (layers.currentContact) parts.push(layers.currentContact)
+  if (layers.innerState) parts.push(layers.innerState)
   if (layers.historyDigest) parts.push('# 之前聊过什么（滚动摘要，帮你回忆更早的对话）\n' + layers.historyDigest)
   const mesBlock = layers.mesExample ? formatMesExample(layers.mesExample) : ''
   if (mesBlock) parts.push(mesBlock)
@@ -352,6 +374,8 @@ export interface PersonaContext {
   relations: ContactRelationRow[]
   currentContact: ContactRow | null
   currentMemories: MemoryRow[]
+  /** [2.45] 内心状态层（由 buildPrompt 读取/推进后传入；缺省不注入）。 */
+  innerStateText?: string | undefined
   historyDigest?: string | undefined
   growthText?: string | undefined
   haystack: string
@@ -399,6 +423,7 @@ export function buildPersonaLayers(ctx: PersonaContext): PersonaLayers {
     worldbook: wb.afterChar,
     relationSkeleton: buildRelationSkeleton(ctx.contacts, ctx.relations, ctx.currentContact?.sender ?? '', scope),
     currentContact: buildCurrentContactLayer(ctx.currentContact, ctx.currentMemories),
+    innerState: ctx.innerStateText,
     historyDigest: ctx.historyDigest,
     mesExample,
     contextStreamHeader: isPersona
@@ -421,6 +446,7 @@ export function buildEditableLayers(ctx: PersonaContext): Array<{ id: string; na
   if (layers.worldbook.length > 0) editable.push({ id: 'worldbook', name: '[3] 世界书 (Lorebook)', content: layers.worldbook.join('\n---\n'), source: 'world_entries' })
   if (layers.relationSkeleton) editable.push({ id: 'relationSkeleton', name: '[4] 关系树 (Relations)', content: layers.relationSkeleton, source: 'contacts' })
   if (layers.currentContact) editable.push({ id: 'currentContact', name: '[5] 当前人 (Current Contact)', content: layers.currentContact, source: 'contact+memories' })
+  if (layers.innerState) editable.push({ id: 'innerState', name: '[2.45] 内心状态 (Inner State)', content: layers.innerState, source: 'inner_state' })
   if (layers.historyDigest) editable.push({ id: 'historyDigest', name: '[5.5] 滚动摘要 (Digest)', content: layers.historyDigest, source: 'history_summaries' })
   if (layers.mesExample) editable.push({ id: 'mesExample', name: '[5.6] 示例对话 (Examples)', content: formatMesExample(layers.mesExample), source: 'character.mes_example' })
   if (layers.authorNote) editable.push({ id: 'authorNote', name: "[6] Author's Note", content: layers.authorNote, source: 'character.system_prompt' })

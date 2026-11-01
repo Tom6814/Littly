@@ -363,4 +363,18 @@ UPDATE bots
 CREATE INDEX IF NOT EXISTS idx_bots_owner ON bots(owner_id);
 `,
   },
+  {
+    // C1：相册语义化 + meme 选图协议 —— 文件指纹 / mime / 语义分类与状态。
+    // 老照片保留空 sha256（meme 回退到 id），由后台 / 控制台按需重新分析。
+    version: 3,
+    sql: `
+ALTER TABLE photos ADD COLUMN sha256 TEXT NOT NULL DEFAULT '';
+ALTER TABLE photos ADD COLUMN mime TEXT NOT NULL DEFAULT '';
+ALTER TABLE photos ADD COLUMN category TEXT NOT NULL DEFAULT '';
+ALTER TABLE photos ADD COLUMN semantic_status TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE photos ADD COLUMN semantic_at TEXT;
+ALTER TABLE photos ADD COLUMN semantic_error TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_photos_bot_sha ON photos(bot_id, sha256);
+`,
+  },
 ]

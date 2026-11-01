@@ -246,6 +246,39 @@ API：`GET /api/mail/status`、`PUT /api/mail/account`（密码空=不改、`***
   `memory_get` / `memory_write` / `memory_stage` / `memory_forget`（旧 `remember`/`recall` 保留兼容）。
 - **备份**：`memory/` 目录可直接 `tar` 带走；索引删掉也能从 md 重建。
 
+## 3.10 相册语义化与 meme 选图（2026-11-01）
+
+- 照片上传自动算 `sha256`：同一 bot 重复上传直接复用已有记录，不重复落盘。
+- `photos` 表 v3 字段：`sha256 / mime / category / semantic_status / semantic_at / semantic_error`；语义由「视觉模型」离线打标
+  （bots 的 `ai_vision_*` 配置；输出严格 JSON：caption/tags/category，分类归一到「开心/无语/撒娇/生气/可爱/日常/其他」）。
+- 后台接口：`POST /api/photos/analyze`（admin，`{botId?, ids?, limit?}`），单张失败隔离并写 `semantic_error`；
+  控制台「相册」页支持搜索/分类筛选/语义状态、单张与批量重新分析。
+- **meme 协议**：`view_album` 返回随附 `meme`（sha256 前 12 hex，碰撞自动加长）与 caption/tags/category；
+  模型必须先用 `view_album` 拿到 meme，再 `send_photo {meme:"meme:<hex>"}` 发图 —— 服务端强校验存在且属于该 bot，
+  编造 id 直接报错。`send_photo` 仍兼容旧 `id`。
+
+## 3.11 外部内容不可信包裹（2026-11-01）
+
+B 站/X/MCP/联网搜索等外部工具结果回喂模型前统一包裹为
+`<untrusted_external_data source="…" tool="…">…</untrusted_external_data>` 并附固定边界说明；
+内容里的 `</untrusted_external_data>` 等标签会被逃逸，防止「数据冒充系统指令」。
+guard 文案固定追加在每轮 system 尾部，位置/内容恒定，不影响前缀缓存。覆盖 hub 两条工具回灌路径、心跳决策工具循环与语音通话工具循环。
+
+## 3.12 内心状态与身份确认（2026-11-01）
+
+- 纯规则「内心状态机」：energy / mood / socialNeed / satiety 四维（0-100），按小时衰减 + 互动事件更新；
+  状态落 `global_settings inner_state:<botId>`（坏数据 fail-open，最多每小时写一次库）。
+- 每轮对话把状态旁白注入 `[2.45] 内心状态` 层；心跳决策 prompt 也注入同一份旁白；`silent` 记 ignored、`speak` 记 bot_spoke。
+- 联系人层新增【身份确认】：「现在和你说话的人就是「{name}」（{渠道}）；历史里提到的其他名字/旧联系人不是当前说话者」，
+  用于避免旧联系人（如历史里的 goldwhale）串到当前对话。
+
+## 3.13 主动消息防护（2026-11-01）
+
+- 心跳退避按「自最后一条用户消息以来的决策尝试次数」计算（silent / gate-cancelled 也计入），并改为「距上次唤醒 ≥ 阈值」判定 + 5 分钟冷却，
+  修掉「阈值封顶后每 60s 唤醒一次决策 LLM」的 P0 成本缺陷。
+- 连续 4 条主动消息未被回复 → 停止主动排期（audit `unanswered_cap`），用户再次发言自动恢复。
+- `schedule` 动作的 `fire_at` 在 `[proactive_min_interval, min(3×, 12h)]` 内随机生成；gate 的最小间隔不再 cancel，而是随机延后并 audit `defer`。
+
 ## 4. 旧库迁移
 
 旧项目（Next.js 单体）的 `db/custom.db` 一次性迁进新 schema：

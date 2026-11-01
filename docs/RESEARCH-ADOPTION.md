@@ -21,6 +21,18 @@
 - **Dream 触发从 AND 改 OR**：`staging≥25` 或「有暂存且超过冷却时间」都会整理，低流量联系人不再永远不整理。
 - **修复写路径清空向量**：`memory_write/update/forget` 重建索引时保留未变化条目的向量，避免搜索静默退化为纯 FTS。
 
+### 相册与表情（`harness/packages/littly/storage|tools|console-api` + 相册页）
+- **相册语义化 + `meme:<id>` 选图协议**：sha256 去重、视觉模型离线打标（caption/tags/category）、
+  `view_album` 候选 → `send_photo` 白名单校验，模型不能编造图片 id。
+- 参考 meme_manager（MIT）；代码为本项目独立实现。
+
+### 外部内容边界（`harness/packages/littly/agents/src/external-data.ts`）
+- 外部工具（B 站/X/MCP/联网搜索）结果回喂模型前统一 `<untrusted_external_data>` 包裹 + 标签逃逸 + 固定边界说明。
+
+### 内心状态（`harness/packages/littly/persona/src/inner-state.ts`）
+- 四维「此刻状态」纯规则状态机 + 小时衰减 + 事件 + 确定性旁白，注入对话与心跳决策；
+  参考 self_evolution（CC BY-NC 4.0）的 persona_sim 思想，代码独立实现。
+
 ### 主动消息（`harness/packages/littly/scheduler`）
 - **修复心跳退避统计**：按唤醒/决策尝试次数退避（silent、gate-cancelled 也计入），避免静默期每 60s 唤醒 LLM。
 - **未回硬停**：连续 4 条主动消息未获回复后暂停主动排期，直到用户再次发言。
@@ -32,11 +44,12 @@
 - bilibili_ai_bot 的双写 JSON/SQLite 架构（其 schema.sql 是未完成的 v2 目标）。
 - 任何仓库的代码与提示词原文（见合规说明）。
 
-## 下一阶段候选（按性价比）
-1. **相册语义化 + `meme:<id>` 选图协议**（meme_manager，MIT，可移植）：相册图片 caption/tags/向量 + 工具返回候选白名单，防模型编造图片 ID。
-2. **外部内容不可信包裹**（bilibili_ai_bot 思想）：B 站/推特等工具输出注入 prompt 前包裹为 untrusted data，接社交评论前必须做。
-3. **小时级内心状态机**（self_evolution 思想）：energy/mood/social_need/satiety 四维 + 小时衰减 + 心理旁白注入，零 LLM 成本，补足「为什么是现在主动说话」的依据。
-4. **两级记忆整合触发**（self_learning 思想）：计数 OR 冷却之外，再加事件快通道（重要事件立即触发整理）。
+## 已全部落地（本轮）
+1. ✅ 相册语义化 + `meme:<id>` 选图协议（meme_manager）
+2. ✅ 外部内容不可信包裹（bilibili_ai_bot 思想），覆盖 hub/心跳/语音通话
+3. ✅ 小时级内心状态机 + 身份确认（self_evolution 思想）
+4. ⏳ 事件快通道触发记忆整理（self_learning 思想）→ 列为后续候选
+5. ⏳ B 站评论/弹幕接入（需配套输出协议与预算，bilibili_ai_bot 边界设计）→ 后续候选
 
 ## 合规说明
 - 上述借鉴仅使用公开的设计思想、算法与参数；代码、提示词、数据结构均按本项目风格独立实现。

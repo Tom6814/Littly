@@ -39,6 +39,7 @@ import type { LittlyPersona } from '@littly/persona'
 import type { LittlyMemory } from '@littly/memory'
 import type { LittlyHub } from '@littly/agents'
 import { historyCharBudget, resolveHistoryTake, trimHistoryByBudget } from '@littly/agents/src/history.ts'
+import { wrapExternalToolResult } from '@littly/agents/src/external-data.ts'
 import { DeepgramStreamSTT } from './deepgram.ts'
 import { summarizeCall } from './summary.ts'
 import { consumePendingCall, listPendingCalls, type PendingCall } from './pending.ts'
@@ -464,7 +465,7 @@ async function quickReply(
             botName: bot.name,
             channelId: 'web',
           })
-          content = toolRes.result
+          content = wrapExternalToolResult(tc.name, toolRes.result)
         }
         messages.push({ role: 'tool', content, tool_call_id: tc.id })
       }

@@ -8,7 +8,8 @@ import type { LittlyStorage } from '@littly/storage'
 import type {
   BotRow, CharacterRow, ContactRelationRow, ContactRow, MemoryRow, PersonaRuleRow, WorldEntryRow,
 } from '@littly/storage'
-import { assembleSystemPrompt, buildEditableLayers, buildPersonaLayers, getPostHistoryMessage, type PersonaContext, type PersonaLayers } from './layers.ts'
+import { assembleSystemPrompt, buildEditableLayers, buildInnerStateLayer, buildPersonaLayers, getPostHistoryMessage, type PersonaContext, type PersonaLayers } from './layers.ts'
+import { loadInnerState, narrate, recordInnerEvent } from './inner-state.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -42,7 +43,11 @@ export interface BuildPromptOptions {
 }
 
 export class LittlyPersona {
-  constructor(private readonly storage: LittlyStorage) {}
+  private readonly storage: LittlyStorage
+
+  constructor(storage: LittlyStorage) {
+    this.storage = storage
+  }
 
   private all<T>(sql: string, ...params: unknown[]): T[] {
     return this.storage.prepare(sql).all(...params) as T[]
@@ -117,13 +122,28 @@ export class LittlyPersona {
   buildPrompt(opts: BuildPromptOptions): { system: string; phi: string | null; layers: PersonaLayers } | null {
     const ctx = this.buildContext(opts)
     if (!ctx) return null
+    // §内心状态 — 每轮推进到当前时刻，并记录一次 user_message（心情/活力/社交需求）。
+    // 状态是软状态：读写失败不阻断主对话，最多丢掉这一轮的旁白。
+    try {
+      const state = recordInnerEvent(this.storage, opts.botId, 'user_message', new Date())
+      ctx.innerStateText = buildInnerStateLayer(narrate(state))
+    } catch {
+      ctx.innerStateText = undefined
+    }
     const layers = buildPersonaLayers(ctx)
     return { system: assembleSystemPrompt(layers), phi: getPostHistoryMessage(layers), layers }
   }
 
   editableLayers(opts: BuildPromptOptions): Array<{ id: string; name: string; content: string; source: string }> {
     const ctx = this.buildContext(opts)
-    return ctx ? buildEditableLayers(ctx) : []
+    if (!ctx) return []
+    // 调试层查看器只读展示当前时刻的状态；不叠加 user_message 事件，避免预览改变真实状态。
+    try {
+      ctx.innerStateText = buildInnerStateLayer(narrate(loadInnerState(this.storage, opts.botId)))
+    } catch {
+      ctx.innerStateText = undefined
+    }
+    return buildEditableLayers(ctx)
   }
 }
 
@@ -135,3 +155,20 @@ export function apply(ctx: Context, _config: Config): void {
 
 // B15：工具使用指令按注册表动态生成（hub 建 prompt 时调用）。
 export { buildToolUseDirective, TOOL_USE_DIRECTIVE, type ToolDirectiveEntry } from './pack.ts'
+
+// §内心状态 — 供 scheduler 的决策 prompt 复用同一份 narrate/事件记录。
+export {
+  advance,
+  applyEvent,
+  createInitialInnerState,
+  INNER_STATE_INITIAL,
+  innerStateKey,
+  loadInnerState,
+  narrate,
+  recordInnerEvent,
+  saveInnerState,
+  type InnerEvent,
+  type InnerState,
+  type InnerStateStore,
+  type InnerStateValues,
+} from './inner-state.ts'

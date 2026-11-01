@@ -222,8 +222,22 @@ export function diaryView(row: DiaryRow): Record<string, unknown> {
   return { id: row.id, botId: row.bot_id, date: row.date, content: row.content, mood: row.mood, createdAt: row.created_at }
 }
 
-export function photoView(row: PhotoRow): Record<string, unknown> {
-  return { id: row.id, botId: row.bot_id, url: row.url, caption: row.caption, tags: parseJsonArray(row.tags), createdAt: row.created_at }
+export function photoView(row: PhotoRow, meme: string): Record<string, unknown> {
+  return {
+    id: row.id,
+    botId: row.bot_id,
+    url: row.url,
+    caption: row.caption,
+    tags: parseJsonArray(row.tags),
+    sha256: row.sha256,
+    mime: row.mime,
+    category: row.category,
+    semanticStatus: row.semantic_status,
+    semanticAt: row.semantic_at,
+    semanticError: row.semantic_error,
+    meme,
+    createdAt: row.created_at,
+  }
 }
 
 export function scheduledView(row: ScheduledMessageRow): Record<string, unknown> {

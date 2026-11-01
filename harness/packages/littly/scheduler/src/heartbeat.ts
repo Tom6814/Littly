@@ -30,6 +30,7 @@
 import { randomUUID } from 'node:crypto'
 import type { BotRow, ContactRow, MessageRow } from '@littly/storage'
 import { chatComplete, type ChatMessage, type ChatResult } from '@littly/llm'
+import { loadInnerState, narrate, recordInnerEvent } from '@littly/persona'
 import { audit } from './audit.ts'
 import {
   HEARTBEAT_WAKE_COOLDOWN_SEC,
@@ -42,6 +43,7 @@ import {
 } from './proactive.ts'
 import { shanghaiHour } from './time.ts'
 import type { SchedulerDeps } from './types.ts'
+import { wrapExternalToolResult } from '@littly/agents/src/external-data.ts'
 
 // 退避参数（折中加速：静默 10 分钟开始有内心活动，退避封顶 2 小时）
 // 序列：10min → 20min → 40min → 80min → 2h(封顶)… 约 14 次/天/联系人
@@ -367,6 +369,15 @@ async function runDecision(
     .join('\n')
   const whoBlock = `【对方是谁】\n对方：${whoName}${ownerMark}${relLines ? `\n${relLines}` : ''}`
 
+  // §内心状态 — 把同一份纯规则旁白注入决策 prompt：让她「此刻想不想说」参与判断，
+  // 而不是只看静默时长。状态读写失败时留空，绝不阻断决策。
+  let innerStateBlock = ''
+  try {
+    innerStateBlock = `【你此刻的状态】\n${narrate(loadInnerState(deps.storage, botId, now))}\n（这只是你此刻的身心感受，会影响语气与主动性；不要向对方报数值。）`
+  } catch {
+    innerStateBlock = ''
+  }
+
   const silenceDesc = formatSilence(silenceSec)
   const nowStr = now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'full', timeStyle: 'short' })
 
@@ -402,7 +413,7 @@ async function runDecision(
 
 ${whoBlock}
 
-【你有工具，像真人一样经营自己的生活】想了解外面发生了什么就搜（web_search）、想记什么就记（remember）、想整理相册就整理归类（view_album/tag_photo/delete_photo）、想经营 QQ 空间就发动态/改资料（post_qzone/set_qq_profile/set_qq_avatar）——这些都是你自己想做的事，自主决定做不做，不一定要围绕对方。调用工具后继续给出最终 JSON 决策。最多连续 4 轮工具调用，之后必须给出最终决定。
+${innerStateBlock ? `${innerStateBlock}\n\n` : ''}【你有工具，像真人一样经营自己的生活】想了解外面发生了什么就搜（web_search）、想记什么就记（remember）、想整理相册就整理归类（view_album/tag_photo/delete_photo）、想经营 QQ 空间就发动态/改资料（post_qzone/set_qq_profile/set_qq_avatar）——这些都是你自己想做的事，自主决定做不做，不一定要围绕对方。调用工具后继续给出最终 JSON 决策。最多连续 4 轮工具调用，之后必须给出最终决定。
 ${qzoneLine}
 ${humanize ? `\n\n${HUMANIZE_HEARTBEAT_STYLE}` : ''}`,
     },
@@ -446,7 +457,7 @@ ${humanize ? `\n\n${HUMANIZE_HEARTBEAT_STYLE}` : ''}`,
             // 回响不在具体渠道对话中；依赖渠道的工具（send_photo/send_message 等）会自行报不可用
             channelId: undefined,
           })
-          messages.push({ role: 'tool', content: toolRes.result, tool_call_id: tc.id })
+          messages.push({ role: 'tool', content: wrapExternalToolResult(tc.name, toolRes.result), tool_call_id: tc.id })
         }
         continue
       }
@@ -487,6 +498,16 @@ export async function executeHeartbeatAction(
 ): Promise<void> {
   const botId = bot.id
   const detail = `silence=${Math.round(action.silenceSec)}s level=${action.backoffLevel} reason=${action.reason}`
+  // §内心状态 — 决策本身就是一次经历：沉默→被冷落感；说话/记心事/写日记→消耗表达欲。
+  // 与 persona 的 buildPrompt 共用同一状态机与小时级落库节流（失败静默，不影响动作执行）。
+  try {
+    if (action.action === 'silent') recordInnerEvent(deps.storage, botId, 'ignored', now)
+    else if (action.action === 'speak' || action.action === 'memory' || action.action === 'diary') {
+      recordInnerEvent(deps.storage, botId, 'bot_spoke', now)
+    }
+  } catch {
+    // fail-open：内心状态是软状态，丢了也不阻断回响
+  }
   try {
     switch (action.action) {
       case 'speak': {

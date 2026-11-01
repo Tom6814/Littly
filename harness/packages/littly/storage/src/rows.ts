@@ -257,6 +257,16 @@ export interface PhotoRow {
   url: string
   caption: string
   tags: string
+  /** 文件内容 sha256（小写 hex；老照片为空串）。 */
+  sha256: string
+  /** 文件 mime（如 image/png；老照片为空串）。 */
+  mime: string
+  /** 语义分类（开心/无语/撒娇/生气/可爱/日常/其他；未分析为空串）。 */
+  category: string
+  /** 语义分析状态：none / pending / done / failed。 */
+  semantic_status: 'none' | 'pending' | 'done' | 'failed'
+  semantic_at: string | null
+  semantic_error: string
   created_at: string
 }
 

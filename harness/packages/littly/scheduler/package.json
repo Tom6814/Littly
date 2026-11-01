@@ -18,6 +18,7 @@
     "@littly/agents": "workspace:*",
     "@littly/llm": "workspace:*",
     "@littly/memory": "workspace:*",
+    "@littly/persona": "workspace:*",
     "@littly/storage": "workspace:*",
     "@littly/growth": "workspace:*"
   },
