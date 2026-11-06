@@ -14,7 +14,7 @@ Memoh 硬分叉 + Littly v2 核心：
 - **人物**：分层（陌生/泛泛/朋友/亲密）、重要、手动调层、回收站搜索/恢复。
 - **心跳**：保底 + 自心跳（reason 必填）+ 结构化裁决 + no-op 治理；安静时段不打扰；主动消息可发 QQ。
 - **生活引擎**：白天闲置自动做小事；每日 Dream 自动整理/写日记。
-- **工作台**：文件（路径监狱）、artifact、终端（allow_shell，危险命令需主人批准）、headless Chrome（读网页/截图）、tar.gz 快照/恢复、TigerVNC 虚拟桌面（）。
+- **工作台**：文件（路径监狱）、artifact、终端（allow_shell，危险命令需主人批准）、headless Chrome（读网页/截图）、tar.gz 快照/恢复、TigerVNC 虚拟桌面（`:6082`）。
 - **刹车**：`rm -rf`/`mkfs`/`dd`/关机/`curl|sh` 等进入待批准队列；批准才执行，拒绝留痕。
 - **SnowLuma QQ**：OneBot v11 WS 客户端；容器已接，World 内嵌 noVNC 扫码窗口。
 - **设置重排**：基本 / 模型 / 心跳 / QQ / 工作台 / 健康 / 关于；模型连通性测试。
