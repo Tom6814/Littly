@@ -35,7 +35,7 @@ QQ 首次：World 页展开 noVNC 扫码，登录后把 QQ 号填入设置。
 ./scripts/littly-test.sh
 ```
 
-最后验证镜像：`6f3cd33e00bb`（v2.0.2）
+最后验证镜像：`123c6e6c8da0`（v2.0.3）
 （`schema_migrations=174|f`，server healthy，浏览器 sidecar ok，snapshot ok，DeepSeek test ok）。
 
 ## 已知缺口
