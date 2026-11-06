@@ -37,3 +37,32 @@
 ## 结论
 
 达到“本地可运行、可对话、能自己心跳、人物/记忆/回收站可用、设置重排、QQ 协议就绪”的垂直切片，测试通过；完整设计中的 PG 索引、Memoh agent 深度替换、工作台/QQ 实机仍在后续里程碑。
+
+## 交付
+
+- 分支：`littly-v2`（orphan，无 Memoh 历史）
+- 仓库：https://github.com/Tom6814/Littly/tree/littly-v2
+- 本地运行：`docker compose up -d` → http://127.0.0.1:8082/littly/
+- 本地验证环境：colima 4 CPU / 6GB；Docker Hub 经国内镜像源。
+
+### 最终测试记录（2026-11-07 01:5x）
+
+```text
+$ go test ./internal/littly/... ./internal/server
+ok  github.com/felinics/memoh/internal/littly/app   1.478s
+ok  github.com/felinics/memoh/internal/server       (cached)
+$ go build ./cmd/agent
+ok
+$ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8082/
+302        # -> /littly/
+$ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8082/littly/
+200
+$ curl -s http://127.0.0.1:8080/littly/api/health
+{"status":"ok","model":"deepseek-flash","heartbeat_paused":false,...}
+$ curl -X POST .../littly/api/chat -d '{"content":"你好，我是主人"}'
+{"reply":"嘿，这么晚还没睡？...","replied":true,"action":"immediate","reason":"重要的人"}
+```
+
+### 运行中的容器
+
+`memoh-postgres` (healthy) · `memoh-pgvector` (healthy) · `memoh-server` (healthy) · `memoh-channel` (healthy) · `memoh-web` (up)

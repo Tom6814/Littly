@@ -277,16 +277,22 @@ func (s *Service) tickLifecycle() {
 
 func (s *Service) tickHeartbeat() {
 	s.mu.Lock()
-	if !s.cfg.Heartbeat.Enabled || s.paused || s.llm == nil {
+	if !s.cfg.Heartbeat.Enabled || s.llm == nil {
 		s.mu.Unlock()
 		return
 	}
 	now := time.Now()
 	dueSelf := s.earliestSelfHeartbeatLocked(now)
 	dueFallback := s.fallbackAt
+	// A self-scheduled heartbeat always runs, even when the fallback heartbeat
+	// is paused by the no-op governor: it carries an explicit reason from her.
 	if dueSelf != nil && dueSelf.DueAt.Before(dueFallback) {
 		s.mu.Unlock()
 		s.runHeartbeat("self", (*dueSelf).Reason)
+		return
+	}
+	if s.paused {
+		s.mu.Unlock()
 		return
 	}
 	if now.Before(dueFallback) {

@@ -395,6 +395,9 @@ func (h *Handler) heartbeatControl(c echo.Context) error {
 		h.svc.paused = false
 		h.svc.fallbackAt = time.Now()
 		h.svc.mu.Unlock()
+		// Resuming is an explicit user action; clear the no-op streak so the
+		// governor does not immediately re-pause the next fallback heartbeat.
+		_ = h.svc.st.Mutate(func(st *store.State) error { st.Runtime.NoopStreak = 0; return nil })
 	case "schedule":
 		if err := h.svc.scheduleSelfHeartbeat(time.Duration(body.Minutes)*time.Minute, body.Reason); err != nil {
 			return jsonErr(c, 400, "schedule failed", err)
