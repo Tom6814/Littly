@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -37,9 +38,13 @@ func newTestService(t *testing.T) *Service {
 type fakeLLM struct {
 	responses []llm.Response
 	idx       int
+	err       error
 }
 
 func (f *fakeLLM) Chat(ctx context.Context, req llm.Request) (llm.Response, error) {
+	if f.err != nil {
+		return llm.Response{}, f.err
+	}
 	if f.idx >= len(f.responses) {
 		return llm.Response{Content: "嗯。"}, nil
 	}
@@ -546,5 +551,51 @@ func TestSetTierAPI(t *testing.T) {
 	}
 	if _, err := s.SetTier(p.ID, "nope"); err == nil {
 		t.Fatalf("expected invalid tier error")
+	}
+}
+
+
+func TestChatLLMErrorReturns500WithoutPanic(t *testing.T) {
+	s := newTestService(t)
+	s.SetLLM(&fakeLLM{err: errors.New("upstream down")})
+	h := NewHandler(s)
+	e := echo.New()
+	h.Register(e)
+	defer s.Stop()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/littly/api/chat", strings.NewReader(`{"content":"在吗"}`))
+	req.Header.Set("Content-Type", "application/json")
+	e.ServeHTTP(rec, req)
+	if rec.Code != 500 {
+		t.Fatalf("status = %d %s", rec.Code, rec.Body.String())
+	}
+	// service still answers health
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/littly/api/health", nil))
+	if rec.Code != 200 {
+		t.Fatalf("health after error = %d", rec.Code)
+	}
+}
+
+func TestHeartbeatLLMErrorRecordsErrorOutcome(t *testing.T) {
+	s := newTestService(t)
+	s.SetLLM(&fakeLLM{err: errors.New("upstream down")})
+	s.runHeartbeat("fallback", "错误测试")
+	st := s.st.Snapshot()
+	if len(st.HeartbeatRuns) != 1 || st.HeartbeatRuns[0].Outcome != "error" {
+		t.Fatalf("runs = %+v", st.HeartbeatRuns)
+	}
+}
+
+func TestTestModelWithoutLLM(t *testing.T) {
+	s := newTestService(t)
+	h := NewHandler(s)
+	e := echo.New()
+	h.Register(e)
+	defer s.Stop()
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/littly/api/test-model", nil))
+	if rec.Code != 502 {
+		t.Fatalf("status = %d %s", rec.Code, rec.Body.String())
 	}
 }

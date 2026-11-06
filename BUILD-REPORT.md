@@ -145,6 +145,14 @@ skills`。
 - 实测打开内部 `/littly/` 页面，返回正文 + `home/browser/20261107-031336.png` artifact。
 - 单测：非 http(s) URL 拒绝。
 
+## 失败路径测试
+
+- Chat 遇到 LLM 错误：返回 500，服务不 panic，health 仍 200。
+- 心跳遇到 LLM 错误：run.outcome=error 落库，不中断循环。
+- 未配置模型时 `/test-model`：502。
+- 浏览器非 http(s)：502（已有）。
+- 全量 + race 通过。
+
 ## 修复：休息恢复精力
 
 - 心跳 outcome=resting/noop 时精力 +5；活动类 outcome 才 -2。
