@@ -175,6 +175,13 @@ skills`。
 - `GET /littly/api/diaries`；记忆页新增“日记”标签，按时间倒序展示 Dream 写下的日记（day/mood/content/summary）。
 - 单测 `TestDiariesAPI`。
 
+## 底层单测补充
+
+- `llm`: mock DeepSeek 解析 content/tool_calls/usage、5xx 重试、缺 key、`ExtractJSON` 嵌套/转义。
+- `config`: 默认 Resolve/Validate、非法时区/时钟、Redacted 隐藏 API key/SnowLuma token。
+- `store`: Mutate 持久化/重开、Schema/运行时默认值、state.json 落盘、ID 唯一。
+- 全量 `go test ./internal/littly/...` 全绿。
+
 ## 回归测试：六面 API e2e
 
 `TestAPIEndToEnd` 用 httptest 串起：bootstrap / health / chat / today / config / terminal / test-model / activities/run / activities / artifacts / people / memories / heartbeat / heartbeat schedule / world / file write/list/content/raw / events / archive，全部 200。
