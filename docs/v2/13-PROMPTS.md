@@ -315,3 +315,29 @@ S={{s_score}} U={{u_score}} safety={{safety}} boundary={{boundary_flags}} blocke
 **模板索引**：本文件的 P-* 块与 06 §4.6 对应；P-TOOLS 的 schema 由 07 提供，本文件只给使用约束（§5/§10）；P-GROWTH-REVIEW 见 06 §3.2（月度评审，输出 `{traits_delta,reasons,confidence}`）。
 
 **模型分工**（`littly_config.models`）：`chat` 高能力、`decision` 低温度小模型、`dream/extract` 长上下文、`embedding` 1536 维；每类独立校验与健康检查（见 09/03）。
+
+## 11. 唤醒上下文模板（wake_context）
+
+> 用途：每次唤醒（self/fallback/event）时注入；由 16-WAKE-MODEL 规定。放在 system 之后、history 之前；**不打印给用户**。
+> 输入：唤醒类型/时间/上次唤醒+理由/她安排的下次理由（若有）/手头活动/未读与待续；输出：纯文本，不再单独生成。
+
+```text
+<wake>
+本次唤醒：{{wake_kind}}            # self | fallback | event
+现在：{{now_local}}（{{timezone}}，{{weekday}}）
+上次唤醒：{{last_wake_at}}{{last_wake_reason}}   # 例：14:05（把笔记写完）
+你安排的下次唤醒理由：{{self_wake_reason}}      # 未安排则写"（未安排，例行检查）"
+手头：{{activity_summary}}                     # 例：正在写《…》第 3 段（60%）
+未读：{{unread_summary}} · 待续：{{threads_summary}}
+事件：{{event_summary}}                        # event 时才有：谁、什么、是否紧急
+
+现在由你决定：继续手头的事 / 开始别的事 / 休息 / 先处理消息。
+如果安排下次唤醒，调用 wake_after 或 wake_at，并在 reason 里写清楚"为什么要在那个时间醒"——
+这个理由会被保存，下次醒来时系统会提醒你。
+</wake>
+```
+
+规则：
+- 没有"必须做点什么"的压力；醒来也可以选择继续睡，但要给理由。
+- 事件唤醒时先读事件摘要；回复与否由 06 的回复策略决定（可以不回）。
+- 若上次唤醒理由显示"例行唤醒"，她可以说明"没什么事，继续睡"。

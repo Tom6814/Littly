@@ -256,7 +256,7 @@ type SocialProvider interface {
 
 - 来源：06（活动产出、想念、未完成约定、社交回应）；08 只负责**通道选择与配额**。
 - 通道选择：显式目标 > 最近 7 天入站渠道 > 配置默认（owner 的 QQ 或 Web）> Web 站内信；只选 `connected` 的渠道；都不可用则留在站内待办。
-- 配额：与 06 §6 一致——全局 ≤4 条/天；`important` ≤2、`friend` ≤1、`stranger` 0；同一人最小间隔 90 分钟；免打扰/睡眠时段不发送（紧急约定例外，06 标记）。
+- 配额：**不再有生活频率配额**（见 [16-WAKE-MODEL.md](16-WAKE-MODEL.md) §9）；她决定是否/何时主动。08 只保留技术性刹车：通道限速、免打扰/睡眠不发送（紧急约定例外）、重要人保底、反骚扰硬刹车（06/09）。
 - 定时：复用上游 schedule；到点写 06 的 `littly_outbox`（`kind=proactive`，`ref_type=scheduled`），`ref_type/ref_id` 去重；对方回复后取消同 ref 的待发；TTL：proactive 2h、scheduled 24h，过期 `expired` 并审计，不静默丢。
 - 发送前二次检查：对方未 block、渠道仍连接、配额未超、内容非空；任一失败 → 取消并记录原因。
 

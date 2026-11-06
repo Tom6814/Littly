@@ -560,4 +560,23 @@ CREATE TABLE littly_workspace_snapshots (
 );
 ```
 
+```sql
+-- 16 §3：唤醒（自唤醒 reason 必填；保底唤醒由进程定时器管理，不落此表）
+CREATE TABLE littly_wakeups (
+  id          text PRIMARY KEY,
+  person_id   text NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  kind        text NOT NULL DEFAULT 'self' CHECK (kind IN ('self','fallback','manual')),
+  due_at      timestamptz NOT NULL,
+  reason      text NOT NULL,
+  status      text NOT NULL DEFAULT 'pending'
+              CHECK (status IN ('pending','fired','cancelled','superseded','missed')),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  fired_at    timestamptz,
+  meta        jsonb NOT NULL DEFAULT '{}'
+);
+CREATE UNIQUE INDEX uq_wakeup_pending_self ON littly_wakeups(person_id)
+  WHERE kind='self' AND status='pending';
+CREATE INDEX ix_wakeup_due ON littly_wakeups(person_id, status, due_at);
+```
+
 未采纳（仍为各文档“扩展建议”）：`littly_hashtags` 等；实现时如需要，先回写本节再写迁移。

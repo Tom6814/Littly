@@ -107,7 +107,7 @@ channel worker（SnowLuma/Web）
 ### 4.2 生活（后台）
 
 ```
-life tick（5 min；可被活动完成/消息事件唤醒）
+wake（self/fallback/event；无固定 tick；见 [16-WAKE-MODEL.md](16-WAKE-MODEL.md)）
   → 推进状态（衰减/恢复）
   → 读今日意向/活动队列/threads
   → 若空闲且有精力 → 选择活动（fitness）→ 创建 activity（running）

@@ -23,6 +23,7 @@
 | D10 | **本地优先** | 先在 Mac（Docker Desktop）上完整跑通；服务器后续再评估 |
 | D11 | **QQ 用 SnowLuma** | OneBot v11，单账号归属，复用旧项目的 SnowLuma 适配协议 |
 | D12 | **旧数据只备份** | v2 首版不迁移历史；旧库/记忆/配置打包备份，迁移单独立项 |
+| D13 | **唤醒模型** | 只有唤醒可以有规律（fallback 抖动）；行动/互动无生活频率表；她可 `wake_after/wake_at` 自唤醒（reason 必填）；**不做阻塞式 wait_for_user_reply**（见 16） |
 
 ## 文档索引
 
@@ -44,6 +45,7 @@
 | [13-PROMPTS.md](13-PROMPTS.md) | 系统提示词/回复决策/计划/梦境/记忆抽取模板 | 完成 |
 | [14-ARCHIVE-MIGRATION.md](14-ARCHIVE-MIGRATION.md) | 旧数据备份/角色归档/未来导入预案 | 完成 |
 | [15-PROMPT-ENGINEERING.md](15-PROMPT-ENGINEERING.md) | 提示词工程规范（分层/JSON 契约/预算/评测/安全/版本） | 完成 |
+| [16-WAKE-MODEL.md](16-WAKE-MODEL.md) | **唤醒模型**：self/fallback/event 唤醒、reason 必填、保底唤醒、不做阻塞等待 | 完成 |
 | [MEMOH-FORK-ASSESSMENT.md](MEMOH-FORK-ASSESSMENT.md) | Memoh 分叉评估（模块地图、服务器、风险） | 评估 |
 
 ## 调研依据

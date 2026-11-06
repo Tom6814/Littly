@@ -249,3 +249,17 @@ CI 顺序：lint → 单测（race）→ build → PG 集成 → 契约 → 前�
 - **flaky 处理**：CI 自动重跑 1 次；若通过则标记 `flaky`、24h 内修复或删除，并记录 seed/请求 id；同一测试一周内 flaky ≥2 次，从主干移除。
 - **失败产物**：`test-results/<timestamp>/` 保存日志、LLM 请求（脱敏）、DB dump、Playwright trace/screenshot；验收脚本失败时保留容器并打印 `docker compose logs` 命令。
 - **判定口径**：01 §5 的 8 条成功标准逐条对应 A1–A11（A12 为 UI 冒烟）；任何一条不满足，不得宣布 v2 首版完成。
+
+## 唤醒（16-WAKE-MODEL）
+
+| 用例 | 断言 |
+|---|---|
+| `wake_after(20, reason)` | 落库/调度正确；20m 后唤醒；`<wake>` 含理由；reason 进 Today |
+| 不带 reason 的 wake_after/wake_at | 工具报错、不创建唤醒；审计 |
+| 无自唤醒 | fallback 按抖动间隔出现；进程不会永不醒 |
+| self 晚于 fallback | 先 fallback 醒，`<wake>` 说明原安排；可继续睡 |
+| 进程在 due 前重启 | pending 保留；到点触发；过期唤醒合并一次（不风暴） |
+| 连续 <60s 唤醒 | 被钳制/拒绝；无忙循环 |
+| 睡眠时段 | fallback 间隔变大；允许她自唤醒更早；硬上限 8h |
+| 消息到达时在睡 | 不强制醒；重要人可升级；回复策略留痕 |
+| `wait_for_user_reply` | **不存在**该工具；无阻塞 turn |

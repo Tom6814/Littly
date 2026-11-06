@@ -81,7 +81,7 @@ CONFIG_PATH=conf/config.local.toml go run ./cmd/agent serve
 
 ### M2 生活引擎骨架（目标 90 分钟）
 
-- 任务：迁移 state/interests/goals/intentions/activities/activity_logs/threads；实现 `internal/life/{clock,state,interests,goals,planner,activity}`；后台 tick 与 schedule 二选一（默认 tick，避免双触发）；今日意向/活动选择/日志；Today API；mock LLM 可跑。
+- 任务：迁移 state/interests/goals/intentions/activities/activity_logs/threads + `littly_wakeups`；实现 `internal/life/{clock,state,interests,goals,planner,activity,wake}`；**唤醒调度器（16 §5：self/fallback/event；reason 必填；保底抖动；无固定 tick）**；醒来决策/活动执行/日志；Today API；mock LLM 可跑。
 - 文件：`internal/life/*`、`internal/agent/background/`、`internal/handlers/today.go`、`db/postgres/queries/life.sql`。
 - 命令：`go test ./internal/life/... -count=1`；`scripts/seed-dev.sh`；`curl /api/today`。
 - 退出：tick 能生成今日意向并启动一个活动；activity_log 有 plan/step/result；Today 返回状态/活动/时间线；重启后状态不丢。
@@ -102,7 +102,7 @@ CONFIG_PATH=conf/config.local.toml go run ./cmd/agent serve
 
 ### M5 回复与主动性（目标 75 分钟）
 
-- 任务：`internal/attention` + `internal/reply`；traits/关系/状态/内容评分；动作映射；`reply_decisions` 留痕；重要关系保底；紧急例外；打断/恢复；主动消息（内容门槛/频率/安静时段/审批）；`explain_later`；出站 outbox（06 §5.11）与 `littly_channel_events`（08）；若 M1 只完成 mock，这里补真实 SnowLuma 收发。
+- 任务：`internal/attention` + `internal/reply`；traits/关系/状态/内容评分；动作映射；`reply_decisions` 留痕；重要关系保底；紧急例外；打断/恢复；主动消息（内容门槛/why_now/重要人保底/审批；无生活频率配额）；`explain_later`；唤醒工具 `wake_after`/`wake_at`（reason 必填）；出站 outbox（06 §5.11）与 `littly_channel_events`（08）；若 M1 只完成 mock，这里补真实 SnowLuma 收发。
 - 文件：`internal/attention/`、`internal/reply/`、`internal/life/social.go`、`internal/agent/decision/`、`internal/channel/adapters/snowluma/`、`handlers/reply.go`、`db/postgres/migrations/0008_channels.sql`。
 - 命令：`go test ./internal/reply/... ./internal/attention/... -count=3`。
 - 退出：高冷可连续已读不回；粘人几乎都回；重要人保底；紧急例外；决策全部留痕；主动消息有具体内容、不刷屏。
