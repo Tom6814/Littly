@@ -145,6 +145,15 @@ skills`。
 - 实测打开内部 `/littly/` 页面，返回正文 + `home/browser/20261107-031336.png` artifact。
 - 单测：非 http(s) URL 拒绝。
 
+## D7 刹车：危险命令审批
+
+- `riskyCommand` 识别 `rm -rf`、`mkfs`、`dd`、关机/重启、`curl|sh` 等。
+- 命中后不执行，写入 `approvals`（pending），终端返回 `[等待主人批准]`。
+- `GET /littly/api/approvals`；`POST /approvals/:id/approve|deny`；Today 页出现“待你批准”卡片。
+- 批准是唯一边路，执行输出/失败落库；拒绝直接关闭。
+- 单测：危险命令先挂起、文件未删；批准后执行并删除。
+- 实测：`rm -rf home/...` → pending → deny → 队列清空。
+
 ## 整栈重启持久化验收
 
 ```text

@@ -87,6 +87,7 @@ async function renderToday() {
       <div class="composer"><input id="chat-input" placeholder="说点什么…（Enter 发送）" /><button class="primary" onclick="sendChat()">发送</button></div>
     </div></section>
     <section class="card col-4"><h3>最近事件</h3><div class="timeline">${events}</div></section>
+    <section class="card col-6"><h3>待你批准</h3><div class="list">${(t.approvals || []).map((a) => `<div class="list-item"><div class="t">${esc(a.reason)}</div><div class="m mono">${esc(a.command)}</div><div class="row" style="margin-top:6px"><button class="ghost" onclick="resolveApproval('${a.id}',true)">批准执行</button><button class="ghost danger" onclick="resolveApproval('${a.id}',false)">拒绝</button></div></div>`).join("") || `<div class="empty">没有待批准的危险操作</div>`}</div></section>
     <section class="card col-6"><h3>最近心跳</h3><div class="list">${runs}</div></section>
     <section class="card col-6"><h3>她的活动</h3><div class="list">${(t.activities || []).slice(0, 8).map((a) => `<div class="list-item"><div class="t">${esc(a.title)}<span class="badge" style="margin-left:6px">${esc(a.status)}</span></div><div class="m">${esc(a.kind)} · ${a.progress || 0}% · ${fmtShort(a.created_at)}</div></div>`).join("") || `<div class="empty">还没有活动</div>`}</div></section>`;
   $("#chat-input")?.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } });
@@ -101,6 +102,10 @@ async function sendChat() {
     else toast(r.reason || "她这次没回");
     await renderToday();
   } catch (e) { toast(e.message, true); }
+}
+async function resolveApproval(id, approve) {
+  try { await api(`/approvals/${id}/${approve ? "approve" : "deny"}`, { method: "POST" }); toast(approve ? "已批准并执行" : "已拒绝"); await renderToday(); }
+  catch (e) { toast(e.message, true); }
 }
 async function runActivity() {
   try { const r = await api("/activities/run", { method: "POST" }); toast("她开始做：" + (r.activity?.title || "事情")); await renderToday(); }

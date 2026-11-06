@@ -378,6 +378,18 @@ func (s *Service) runTerminal(ctx context.Context, command string, timeoutSecond
 		return "", fmt.Errorf("shell is disabled (workbench.allow_shell=false)")
 	}
 	command = strings.TrimSpace(command)
+	if reason, risky := riskyCommand(command); risky {
+		if existing := s.pendingApproval(command); existing != nil {
+			return "[等待主人批准] " + reason, nil
+		}
+		a := s.requestApproval(command, reason)
+		return "[等待主人批准] " + reason + "（approval=" + a.ID + "）", nil
+	}
+	return s.executeTerminal(ctx, command, timeoutSeconds)
+}
+
+func (s *Service) executeTerminal(ctx context.Context, command string, timeoutSeconds int) (string, error) {
+	command = strings.TrimSpace(command)
 	if command == "" {
 		return "", fmt.Errorf("empty command")
 	}

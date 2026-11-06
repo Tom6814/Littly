@@ -77,6 +77,9 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.GET("/snapshots", h.snapshots)
 	api.POST("/snapshots", h.snapshotCreate)
 	api.POST("/snapshots/:id/restore", h.snapshotRestore)
+	api.GET("/approvals", h.approvals)
+	api.POST("/approvals/:id/approve", h.approve)
+	api.POST("/approvals/:id/deny", h.deny)
 	api.POST("/browser", h.browser)
 	api.GET("/browser/status", h.browserStatus)
 	api.GET("/events", h.events)
@@ -249,6 +252,7 @@ func (h *Handler) today(c echo.Context) error {
 		"person": p, "runtime": st.Runtime, "health": h.svc.Health(), "next_heartbeat": h.svc.nextHeartbeatInfo(),
 		"activities": activities, "events": events, "heartbeat_runs": runs, "messages": msgs,
 		"counts": map[string]int{"memories": len(st.Memories), "people": len(st.People), "artifacts": len(st.Artifacts)},
+		"approvals": h.svc.ListApprovals(),
 	})
 }
 
@@ -528,6 +532,26 @@ func (h *Handler) terminal(c echo.Context) error {
 		return jsonErr(c, 400, "terminal failed", err)
 	}
 	return c.JSON(200, map[string]any{"output": out})
+}
+
+func (h *Handler) approvals(c echo.Context) error {
+	return c.JSON(200, map[string]any{"approvals": h.svc.ListApprovals()})
+}
+
+func (h *Handler) approve(c echo.Context) error {
+	a, err := h.svc.ResolveApproval(c.Request().Context(), c.Param("id"), true)
+	if err != nil {
+		return jsonErr(c, 400, "approve failed", err)
+	}
+	return c.JSON(200, map[string]any{"approval": a})
+}
+
+func (h *Handler) deny(c echo.Context) error {
+	a, err := h.svc.ResolveApproval(c.Request().Context(), c.Param("id"), false)
+	if err != nil {
+		return jsonErr(c, 400, "deny failed", err)
+	}
+	return c.JSON(200, map[string]any{"approval": a})
 }
 
 func (h *Handler) snapshots(c echo.Context) error {

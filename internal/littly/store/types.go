@@ -74,6 +74,16 @@ type Artifact struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type Approval struct {
+	ID         string     `json:"id"`
+	Command    string     `json:"command"`
+	Reason     string     `json:"reason"`
+	Status     string     `json:"status"` // pending|approved|denied|failed
+	Output     string     `json:"output,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
+}
+
 type Heartbeat struct {
 	ID            string    `json:"id"`
 	Kind          string    `json:"kind"` // self|manual
@@ -250,6 +260,7 @@ type State struct {
 	Messages      []Message      `json:"messages"`
 	Conversations []Conversation `json:"conversations"`
 	Diaries       []Diary        `json:"diaries"`
+	Approvals     []Approval     `json:"approvals"`
 	Dreams        []Dream        `json:"dreams"`
 	Interests     []Interest     `json:"interests"`
 	Goals         []Goal         `json:"goals"`

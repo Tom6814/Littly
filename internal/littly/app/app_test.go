@@ -599,3 +599,33 @@ func TestTestModelWithoutLLM(t *testing.T) {
 		t.Fatalf("status = %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestDangerousTerminalRequiresApproval(t *testing.T) {
+	s := newTestService(t)
+	if err := s.UpdateConfig(func(c *config.Config) { c.Workbench.AllowShell = true }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.toolFileWrite("home/approval-test.txt", "x"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.execTool(context.Background(), "terminal_exec", `{"command":"rm -rf home/approval-test.txt"}`, "owner", "")
+	if err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	if !strings.Contains(out, "等待主人批准") {
+		t.Fatalf("expected approval gate, got %q", out)
+	}
+	pending := s.ListApprovals()
+	if len(pending) != 1 {
+		t.Fatalf("pending = %d", len(pending))
+	}
+	if _, err := os.Stat(filepath.Join(s.cfg.Workbench.Dir, "home", "approval-test.txt")); err != nil {
+		t.Fatalf("file must still exist before approval: %v", err)
+	}
+	if _, err := s.ResolveApproval(context.Background(), pending[0].ID, true); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.cfg.Workbench.Dir, "home", "approval-test.txt")); !os.IsNotExist(err) {
+		t.Fatalf("file should be deleted after approval: %v", err)
+	}
+}
