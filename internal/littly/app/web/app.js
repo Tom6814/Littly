@@ -209,7 +209,7 @@ async function renderWorkbench() {
     <section class="card col-12"><h3>浏览器 · 她的电脑</h3>
       <div class="row"><input id="browser-url" placeholder="https://example.com" style="flex:1" onkeydown="if(event.key==='Enter')runBrowser()" /><label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" id="browser-shot" checked style="width:auto" /> 截图</label><button class="primary" onclick="runBrowser()">打开</button></div>
       <div id="browser-out" class="muted tiny" style="margin-top:8px;white-space:pre-wrap;max-height:260px;overflow:auto"></div></section>
-    <section class="card col-6"><h3>产出（artifacts）</h3><div class="list">${arts.artifacts.map((a) => `<div class="list-item"><div class="t">${esc(a.title)}</div><div class="m">${esc(a.path)} · ${a.bytes || 0} B · ${fmt(a.created_at)}</div></div>`).join("") || `<div class="empty">还没有产出</div>`}</div></section>
+    <section class="card col-6"><h3>产出（artifacts）</h3><div class="list">${arts.artifacts.map((a) => `<div class="list-item"><div class="t"><a href="/littly/api/files/raw?path=${encodeURIComponent(a.path)}" target="_blank">${esc(a.title)}</a></div><div class="m">${esc(a.path)} · ${a.bytes || 0} B · ${fmt(a.created_at)}</div></div>`).join("") || `<div class="empty">还没有产出</div>`}</div></section>
     <section class="card col-6"><h3>活动</h3><div class="list">${acts.activities.map((a) => `<div class="list-item"><div class="t">${esc(a.title)} <span class="badge">${esc(a.status)}</span></div><div class="m">${esc(a.kind)} · ${a.progress || 0}% · ${esc(a.summary || "")}</div></div>`).join("") || `<div class="empty">还没有活动</div>`}</div></section>`;
 }
 async function runTerminal() {

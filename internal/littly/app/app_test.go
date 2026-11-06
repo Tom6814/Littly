@@ -354,3 +354,24 @@ func TestBrowserRejectsNonHTTP(t *testing.T) {
 		t.Fatalf("expected non-http url rejection")
 	}
 }
+
+func TestRawFileServesInsideWorkspace(t *testing.T) {
+	s := newTestService(t)
+	if _, err := s.toolFileWrite("home/notes/a.txt", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(s)
+	e := echo.New()
+	h.Register(e)
+	defer s.Stop()
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/littly/api/files/raw?path=home/notes/a.txt", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "hello") {
+		t.Fatalf("raw file = %d %q", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/littly/api/files/raw?path=../etc/passwd", nil))
+	if rec.Code == 200 {
+		t.Fatalf("traversal must not be served")
+	}
+}

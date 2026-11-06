@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -66,6 +67,7 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.GET("/artifacts", h.artifacts)
 	api.GET("/files", h.files)
 	api.GET("/files/content", h.fileContent)
+	api.GET("/files/raw", h.fileRaw)
 	api.PUT("/files/content", h.fileWrite)
 	api.POST("/terminal", h.terminal)
 	api.POST("/browser", h.browser)
@@ -377,6 +379,21 @@ func (h *Handler) fileContent(c echo.Context) error {
 		return jsonErr(c, 404, "read failed", err)
 	}
 	return c.JSON(200, map[string]any{"path": rel, "content": res})
+}
+
+func (h *Handler) fileRaw(c echo.Context) error {
+	rel := c.QueryParam("path")
+	if rel == "" {
+		return c.JSON(400, map[string]string{"error": "path required"})
+	}
+	full, err := h.svc.workspacePath(rel)
+	if err != nil {
+		return jsonErr(c, 400, "bad path", err)
+	}
+	if info, err := os.Stat(full); err != nil || info.IsDir() {
+		return c.JSON(404, map[string]string{"error": "not found"})
+	}
+	return c.File(full)
 }
 
 func (h *Handler) fileWrite(c echo.Context) error {
