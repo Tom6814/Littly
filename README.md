@@ -48,7 +48,7 @@ go test ./internal/server/...        # 核心 server（含单实例守卫所在�
 go build ./cmd/agent
 ```
 
-`docs/v2/BUILD-REPORT.md` 记录了本次实现范围、验证命令与已知缺口。
+`docs/v2/BUILD-REPORT.md` 记录了本次实现范围、验证命令与已知缺口；截图在 `docs/v2/screenshots/`。
 
 ## 目录
 

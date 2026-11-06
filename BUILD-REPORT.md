@@ -66,3 +66,10 @@ $ curl -X POST .../littly/api/chat -d '{"content":"你好，我是主人"}'
 ### 运行中的容器
 
 `memoh-postgres` (healthy) · `memoh-pgvector` (healthy) · `memoh-server` (healthy) · `memoh-channel` (healthy) · `memoh-web` (up)
+
+## UI 截图
+
+- `docs/v2/screenshots/today.png`：今天页（状态、心跳、聊天、事件、活动）。
+- `docs/v2/screenshots/settings.png`：重排后的设置页（基本/模型/心跳/QQ/健康/关于）。
+
+浏览器实测：Headless Chrome 1440×1100，`/littly/#/today` 与 `/littly/#/settings` 均能渲染；健康点显示“她 · 正常”，不再停留在“连接中”。

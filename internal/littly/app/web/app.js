@@ -54,6 +54,7 @@ function schedulePoll(view) {
 async function renderToday() {
   await loadToday();
   const t = S.today, rt = t.runtime, hb = t.next_heartbeat || {};
+  const health = t.health || S.boot?.health || {};
   setTitle("今天", `${esc(S.boot?.person?.name)} · ${esc(S.boot?.person?.timezone)} · ${esc(S.boot?.model?.model)}`);
   pills();
   const running = (t.activities || []).filter((a) => a.status === "running" || a.status === "paused");
@@ -68,7 +69,7 @@ async function renderToday() {
     <section class="card col-4"><h3>她的状态</h3>
       <div class="row between"><div><h2>${esc(rt.attention || "没什么特别的事")}</h2>
       <div class="muted tiny">精力 ${rt.energy} · 心情 ${rt.mood} · 社交 ${rt.social_need} · 饱腹 ${rt.satiety}</div></div>
-      <span class="badge ${t.health?.status === "ok" ? "ok" : "warn"}">${esc(t.health?.status || "")}</span></div>
+      <span class="badge ${health.status === "ok" ? "ok" : "warn"}">${esc(health.status || "unknown")}</span></div>
       <div class="row" style="margin-top:10px"><button class="ghost" onclick="act('heartbeat','now')">现在心跳</button>
       <button class="ghost" onclick="act('heartbeat','pause')">暂停</button><button class="ghost" onclick="act('heartbeat','resume')">恢复</button></div>
     </section>
@@ -280,5 +281,6 @@ async function updateHealth(force) {
 window.addEventListener("hashchange", render);
 (async function boot() {
   try { await loadBoot(); await loadToday(); } catch (e) { toast(e.message, true); }
+  updateHealth();
   render();
 })();

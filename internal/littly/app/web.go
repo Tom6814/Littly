@@ -192,7 +192,7 @@ func (h *Handler) today(c echo.Context) error {
 	}
 	msgs := h.svc.recentMessages("owner", 12)
 	return c.JSON(200, map[string]any{
-		"person": p, "runtime": st.Runtime, "next_heartbeat": h.svc.nextHeartbeatInfo(),
+		"person": p, "runtime": st.Runtime, "health": h.svc.Health(), "next_heartbeat": h.svc.nextHeartbeatInfo(),
 		"activities": activities, "events": events, "heartbeat_runs": runs, "messages": msgs,
 		"counts": map[string]int{"memories": len(st.Memories), "people": len(st.People), "artifacts": len(st.Artifacts)},
 	})

@@ -231,3 +231,27 @@ func TestHTTPBootstrapAndChat(t *testing.T) {
 		t.Fatalf("chat did not reply: %+v", out)
 	}
 }
+
+func TestSettingsUpdateReflectedInBootstrap(t *testing.T) {
+	s := newTestService(t)
+	h := NewHandler(s)
+	e := echo.New()
+	h.Register(e)
+	defer s.Stop()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/littly/api/config", strings.NewReader(`{"style":"新的说话方式"}`))
+	req.Header.Set("Content-Type", "application/json")
+	e.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("put config status %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/littly/api/bootstrap", nil))
+	var boot map[string]map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &boot); err != nil {
+		t.Fatalf("bootstrap decode: %v", err)
+	}
+	if got, _ := boot["person"]["style"].(string); got != "新的说话方式" {
+		t.Fatalf("style = %q", got)
+	}
+}
