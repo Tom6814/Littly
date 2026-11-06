@@ -175,7 +175,7 @@ skills`。
 ## 最终镜像验证（从源码构建，不靠 docker cp）
 
 ```text
-docker build -f docker/Dockerfile.server.local -t memohai/server:latest .   → Successfully built 5304eff35f36（含 browser sidecar、raw file、memory provider bridge）
+docker build -f docker/Dockerfile.server.local -t memohai/server:latest .   → Successfully built 04cf3c62aab0（含 browser sidecar、raw file、memory provider bridge、日记视图）
 docker compose up -d --force-recreate server                                 → memoh-server Healthy
 schema_migrations: 174|f (clean)
 GET /            → 302 → /littly/
