@@ -140,3 +140,19 @@ skills`。
 - `docs/v2/screenshots/settings.png`：重排后的设置页（基本/模型/心跳/QQ/健康/关于）。
 
 浏览器实测：Headless Chrome 1440×1100，`/littly/#/today` 与 `/littly/#/settings` 均能渲染；健康点显示“她 · 正常”，不再停留在“连接中”。
+
+## 最终镜像验证（从源码构建，不靠 docker cp）
+
+```text
+docker build -f docker/Dockerfile.server.local -t memohai/server:latest .   → Successfully built 8e0badc7f3f8
+docker compose up -d --force-recreate server                                 → memoh-server Healthy
+schema_migrations: 174|f (clean)
+GET /            → 302 → /littly/
+GET /littly/     → 200
+GET /littly/api/health → status ok, model deepseek-flash, storage {postgres:true, vault_ok:true}
+GET /littly/api/bootstrap → workbench {allow_shell:true, auto_activity_minutes:180}, memory {dream_hour:3}
+GET /littly/api/today → 8 messages, 12 memories, 1 activity (from Postgres)
+POST /littly/api/terminal {"command":"echo image-ok; pwd"} → image-ok + /opt/memoh/data/littly/workspace
+```
+
+构建过程中 colima 磁盘一度写满（`No space left on device`），用 `docker image prune -f` 清理 dangling 镜像后恢复；迁移重跑成功，版本 174。
