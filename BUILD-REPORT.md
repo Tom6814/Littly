@@ -145,6 +145,20 @@ skills`。
 - 实测打开内部 `/littly/` 页面，返回正文 + `home/browser/20261107-031336.png` artifact。
 - 单测：非 http(s) URL 拒绝。
 
+## 整栈重启持久化验收
+
+```text
+before: msgs 10, memories 15
+docker compose down
+docker compose up -d
+server=healthy, channel=healthy, web=up, browser=up
+after: msgs 10, memories 15, activities 1
+diaries 3, snapshots 3
+GET /littly/ → 200
+```
+
+消息、记忆、活动、日记、快照全部从卷/Postgres 恢复，整栈重建可用。
+
 ## 失败路径测试
 
 - Chat 遇到 LLM 错误：返回 500，服务不 panic，health 仍 200。
