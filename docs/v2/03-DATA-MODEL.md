@@ -561,22 +561,41 @@ CREATE TABLE littly_workspace_snapshots (
 ```
 
 ```sql
--- 16 §3：唤醒（自唤醒 reason 必填；保底唤醒由进程定时器管理，不落此表）
-CREATE TABLE littly_wakeups (
-  id          text PRIMARY KEY,
-  person_id   text NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  kind        text NOT NULL DEFAULT 'self' CHECK (kind IN ('self','fallback','manual')),
-  due_at      timestamptz NOT NULL,
-  reason      text NOT NULL,
-  status      text NOT NULL DEFAULT 'pending'
-              CHECK (status IN ('pending','fired','cancelled','superseded','missed')),
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  fired_at    timestamptz,
-  meta        jsonb NOT NULL DEFAULT '{}'
+-- 16 §4：心跳（自心跳 reason 必填；保底心跳由进程定时器管理，不落此表）
+CREATE TABLE littly_heartbeats (
+  id             text PRIMARY KEY,
+  person_id      text NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  kind           text NOT NULL DEFAULT 'self' CHECK (kind IN ('self','manual')),
+  due_at         timestamptz NOT NULL,
+  reason         text NOT NULL,
+  status         text NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending','fired','cancelled','superseded','missed','expired')),
+  noop_count     smallint NOT NULL DEFAULT 0,
+  lifetime_until timestamptz,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  fired_at       timestamptz,
+  meta           jsonb NOT NULL DEFAULT '{}'
 );
-CREATE UNIQUE INDEX uq_wakeup_pending_self ON littly_wakeups(person_id)
+CREATE UNIQUE INDEX uq_heartbeat_pending_self ON littly_heartbeats(person_id)
   WHERE kind='self' AND status='pending';
-CREATE INDEX ix_wakeup_due ON littly_wakeups(person_id, status, due_at);
+CREATE INDEX ix_heartbeat_due ON littly_heartbeats(person_id, status, due_at);
+
+CREATE TABLE littly_heartbeat_runs (
+  id            text PRIMARY KEY,
+  person_id     text NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  heartbeat_id  text REFERENCES littly_heartbeats(id) ON DELETE SET NULL,
+  kind          text NOT NULL,
+  started_at    timestamptz NOT NULL,
+  ended_at      timestamptz,
+  outcome       text NOT NULL DEFAULT '',
+  notify        boolean,
+  summary       text NOT NULL DEFAULT '',
+  model_turns   smallint NOT NULL DEFAULT 0,
+  next_due_at   timestamptz,
+  next_reason   text NOT NULL DEFAULT '',
+  error         text NOT NULL DEFAULT ''
+);
+CREATE INDEX ix_heartbeat_runs ON littly_heartbeat_runs(person_id, started_at DESC);
 ```
 
 未采纳（仍为各文档“扩展建议”）：`littly_hashtags` 等；实现时如需要，先回写本节再写迁移。

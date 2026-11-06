@@ -175,7 +175,7 @@ links: [thread:xxx, artifact:xxx, people:tori]
 
 ## 5. 生活引擎
 
-> **唤醒模型见 [16-WAKE-MODEL.md](16-WAKE-MODEL.md)**：没有固定 tick/生活节奏；只有唤醒可以有规律（fallback 抖动），行动/互动由她决定。
+> **心跳模型见 [16-HEARTBEAT.md](16-HEARTBEAT.md)**：没有固定 tick/生活节奏；只有唤醒可以有规律（fallback 抖动），行动/互动由她决定。
 
 ### 5.1 时钟与作息
 

@@ -250,16 +250,21 @@ CI 顺序：lint → 单测（race）→ build → PG 集成 → 契约 → 前�
 - **失败产物**：`test-results/<timestamp>/` 保存日志、LLM 请求（脱敏）、DB dump、Playwright trace/screenshot；验收脚本失败时保留容器并打印 `docker compose logs` 命令。
 - **判定口径**：01 §5 的 8 条成功标准逐条对应 A1–A11（A12 为 UI 冒烟）；任何一条不满足，不得宣布 v2 首版完成。
 
-## 唤醒（16-WAKE-MODEL）
+## 心跳（16-HEARTBEAT）
 
 | 用例 | 断言 |
 |---|---|
-| `wake_after(20, reason)` | 落库/调度正确；20m 后唤醒；`<wake>` 含理由；reason 进 Today |
-| 不带 reason 的 wake_after/wake_at | 工具报错、不创建唤醒；审计 |
-| 无自唤醒 | fallback 按抖动间隔出现；进程不会永不醒 |
-| self 晚于 fallback | 先 fallback 醒，`<wake>` 说明原安排；可继续睡 |
-| 进程在 due 前重启 | pending 保留；到点触发；过期唤醒合并一次（不风暴） |
-| 连续 <60s 唤醒 | 被钳制/拒绝；无忙循环 |
-| 睡眠时段 | fallback 间隔变大；允许她自唤醒更早；硬上限 8h |
-| 消息到达时在睡 | 不强制醒；重要人可升级；回复策略留痕 |
+| `heartbeat_after(20, reason)` | 落库/回执；20m 后触发；`<heartbeat>` 含理由；Today 显示下次心跳+理由 |
+| 不带 reason | 工具报错、不创建；审计 |
+| 无自心跳 | 保底心跳按抖动出现；不会永不醒；硬上限 8h |
+| 自心跳晚于保底 | 保底先到，`<heartbeat>` 说明原安排；可继续睡并重排 |
+| 进程在 due 前重启 | pending 保留；到点触发；错过合并一次（不风暴）；running 标 interrupted |
+| 重复/在飞 | CAS 恰好一次；不会两个心跳同时跑 |
+| 连续 <60s 触发 | 被间距钳制；无忙循环 |
+| 连续 no-op | 间隔拉长 → 建议 → 暂停并询问一次；不无限烧钱 |
+| 免打扰/每日上限/未回静默 | 触发被 hold/推迟；回执说明；她不能放宽护栏 |
+| `heartbeat_respond` 缺失/非法 | run 标 error/interrupted；不影响下次；不产生聊天消息 |
+| 哨兵文本 | 聊天/日志中不出现 HEARTBEAT_OK 之类哨兵；notify=false 静默 |
+| 心跳里读到不可信数据 | 不能据此创建新的重复心跳/监听（注入防护） |
+| 心跳里发消息 | 只走 outbox + 质量门；无任意目标参数 |
 | `wait_for_user_reply` | **不存在**该工具；无阻塞 turn |

@@ -2,7 +2,7 @@
 
 > 定位：把 [LIFE-ENGINE.md](LIFE-ENGINE.md) 的设计落成可编码规格；数据字段以 [03-DATA-MODEL.md](03-DATA-MODEL.md) 为唯一基准。文中 **扩展建议** 表示 03 当前没有、默认不实现；采用前先改 03。
 > 本文不覆盖：回复内容与提示词（06/13）、工作台工具实现（07）、渠道发送（08）、记忆抽取算法（05）。
-> **唤醒模型已由 [16-WAKE-MODEL.md](16-WAKE-MODEL.md) 取代**：本文 §2 的固定 5 分钟 tick/节奏表作废；唤醒由 self/fallback/event 驱动，行动由她在醒来时决定；§3 起其余部分保留，"tick"概念替换为 "wake"。
+> **心跳模型已由 [16-HEARTBEAT.md](16-HEARTBEAT.md) 取代**：本文 §2 的固定 5 分钟 tick/节奏表作废；心跳由 self/fallback/event 驱动，行动由她在心跳时决定；§3 起其余部分保留，"tick"概念替换为 "heartbeat"。
 ## 1. 包与文件划分
 新增 `internal/life/`，只依赖抽象接口；上游用带 `LITTLY:` 注释的薄适配层注入实现，避免 04 反向依赖 handlers/channel/workspace。
 
@@ -45,7 +45,7 @@ type Timer interface{ C() <-chan time.Time; Stop() bool }
 `brain` 只收 JSON 契约、不拼提示词；`tools` 只暴露 `Available/Invoke`；`dream` 只暴露分步任务。这样 04 可单测，且不越权写 05/06/07/08。
 ## 2. 时钟、作息与唤醒（固定 tick 已由 16 取代）
 
-> 以下 2.1 相位/作息仍有效；2.2 的"5m tick"与 2.5 的 tick 顺序作废，请按 [16-WAKE-MODEL.md](16-WAKE-MODEL.md) 实现 self/fallback/event 唤醒。
+> 以下 2.1 相位/作息仍有效；2.2 的"5m tick"与 2.5 的 tick 顺序作废，请按 [16-HEARTBEAT.md](16-HEARTBEAT.md) 实现 self/fallback/event 心跳。
 ### 2.1 时区与 phase
 时区取 `littly_persona.timezone`，加载失败回退 `Asia/Shanghai` 并报 health 警告；作息按配置的本地时刻解释，支持跨午夜。
 
@@ -60,7 +60,7 @@ type Timer interface{ C() <-chan time.Time; Stop() bool }
 
 ### 2.2 tick 频率与事件唤醒（作废·见 16）
 
-> 本小节被 [16-WAKE-MODEL.md](16-WAKE-MODEL.md) 取代：不再有 5m tick；唤醒由 self/fallback/event 驱动。以下仅保留"事件去抖/合并"的思想可复用。
+> 本小节被 [16-HEARTBEAT.md](16-HEARTBEAT.md) 取代：不再有 5m tick；唤醒由 self/fallback/event 驱动。以下仅保留"事件去抖/合并"的思想可复用。
 基线 `tick: 5m`；每轮结束计算 `next = min(now+5m, 下一个 phase 边界)`，保证起床/入睡准点。事件唤醒：入站消息规范化后、活动完成/失败、审批结果、workspace 就绪、手动 API；事件 5 秒去抖合并，只补一次 tick。测试直接调 `Tick(ctx, at)`，不启动循环。
 
 ### 2.3 与上游 `background` / `schedule` 的取舍

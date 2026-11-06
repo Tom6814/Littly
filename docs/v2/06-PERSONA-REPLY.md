@@ -270,7 +270,7 @@ U = round(100 * clamp(.50*urgency_msg + .20*important + .20*request + .10*deadli
 
 **来源与冷却**：约定/承诺到期（每 thread 24h）> 活动产出（同活动一次）> 共同话题/未完 thread（24h）> 生活事件（每类 6h）> 关系维护/社交需求高（每人 3 天）> 社交互动（每条 12h）。禁止：定时器空转、"在吗/干嘛呢/睡了吗"、无引用问候、重复内容、争吵后无修复内容的试探。
 
-**频率**：不再规定生活节奏（每日 N 条/每人 N 条/最小间隔等已删除，见 [16-WAKE-MODEL.md](16-WAKE-MODEL.md) §9）。是否主动、何时主动由她决定；只剩**安全/平台刹车**：平台限速（08）、模型/活动预算（09）、重要关系保底（本节末）、反骚扰硬刹车（同一人短时间大量消息 → 审计/暂停）。主动仍走 outbox（`kind=proactive`，必须带 `ref_type/ref_id` 与 `why_now`）；TTL：proactive 2h、约定/定时 24h、reply/explain 默认 12h；发送失败按 §5.7 重试，渠道选择按 08 §6。若她发消息后想"等回复"：不要阻塞等待；可在发送后用 `wake_after` 安排一次自查（reason=等他回复），见 [16-WAKE-MODEL.md](16-WAKE-MODEL.md) §7。
+**频率**：不再规定生活节奏（每日 N 条/每人 N 条/最小间隔等已删除，见 [16-HEARTBEAT.md](16-HEARTBEAT.md) §9）。是否主动、何时主动由她决定；只剩**安全/平台刹车**：平台限速（08）、模型/活动预算（09）、重要关系保底（本节末）、反骚扰硬刹车（同一人短时间大量消息 → 审计/暂停）。主动仍走 outbox（`kind=proactive`，必须带 `ref_type/ref_id` 与 `why_now`）；TTL：proactive 2h、约定/定时 24h、reply/explain 默认 12h；发送失败按 §5.7 重试，渠道选择按 08 §6。若她发消息后想"等回复"：不要阻塞等待；可在发送后用 `heartbeat_after` 安排一次自查（reason=等他回复），见 [16-HEARTBEAT.md](16-HEARTBEAT.md) §7。
 
 **质量门**（不合格丢弃并留痕）：必须引用 artifact/thread/memory/event 至少一个；文本 ≥12 字或含图片/文件/链接；黑名单短语单独出现即拒；与最近 7 天已发相似度 ≥0.9 拒；含 private/密钥/内部路径拒；每条附 `why_now`（≤40 字），解释不了"为什么现在发"就不发。
 
