@@ -113,7 +113,7 @@ diaries|3
 ## M4 进度：自动节奏
 
 - `tickLife`：每 10s 检查，白天（`day_start`~`day_end`）且无运行中活动、最近一次活动超过 3 小时 → 自动 `RunSoloActivity`；每天 `Memory.DreamHour`（默认 3 点）自动 `RunDream`（同日只跑一次）。
-- 与心跳/LLM 调用互斥（`heartRunning` 检查），`LITTLY_AUTO_ACTIVITY=0` 可整体关闭。
+- 与心跳/LLM 调用互斥（`heartRunning` 检查）；设置页可调「自主活动间隔」（0=关）与 Dream 整点，`LITTLY_AUTO_ACTIVITY=0` 仍可整体关闭。
 - 单测：`TestLifeTickDueRules`（白天/夜间、3 小时冷却、Dream 同日只一次）。
 
 ## M4 进度：工作台终端

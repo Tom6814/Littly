@@ -250,6 +250,7 @@ async function renderSettings() {
         <label><input type="checkbox" id="set-hb" ${b.heartbeat.enabled ? "checked" : ""} style="width:auto" /> 启用</label>
         <label>白天间隔（分钟）</label><input id="set-day" type="number" min="5" max="240" value="${b.heartbeat.day_minutes}" />
         <label>夜间间隔（分钟）</label><input id="set-night" type="number" min="10" max="480" value="${b.heartbeat.night_minutes}" />
+        <label>Dream 整点（0-23）</label><input id="set-dream" type="number" min="0" max="23" value="${b.memory?.dream_hour ?? 3}" />
         <div class="row" style="margin-top:10px"><button class="primary" onclick="saveHeartbeat()">保存</button></div></section>
       <section class="card"><h3>QQ · SnowLuma</h3>
         <label><input type="checkbox" id="set-sl" ${b.channels?.snowluma?.enabled ? "checked" : ""} style="width:auto" /> 启用</label>
@@ -264,6 +265,7 @@ async function renderSettings() {
         <div class="kv"><div>目录</div><div class="mono">${esc(b.dirs?.workspace || "")}</div></div>
         <label><input type="checkbox" id="set-shell" ${b.workbench?.allow_shell ? "checked" : ""} style="width:auto" /> 允许她执行 shell（终端）</label>
         <label><input type="checkbox" id="set-net" ${b.workbench?.allow_network ? "checked" : ""} style="width:auto" /> 允许联网</label>
+        <label>自主活动间隔（分钟，0=关）</label><input id="set-auto" type="number" min="0" max="1440" value="${b.workbench?.auto_activity_minutes ?? 180}" />
         <div class="row" style="margin-top:10px"><button class="primary" onclick="saveWorkbench()">保存</button></div>
       </section>
       <section class="card"><h3>健康</h3><div id="health-box" class="kv">检查中…</div>
@@ -291,7 +293,7 @@ async function saveSnowLuma() {
   } catch (e) { toast(e.message, true); }
 }
 async function saveWorkbench() {
-  try { await api("/config", { method: "PUT", body: JSON.stringify({ allow_shell: $("#set-shell").checked, allow_network: $("#set-net").checked }) }); await loadBoot(); toast("已保存"); renderSettings(); }
+  try { await api("/config", { method: "PUT", body: JSON.stringify({ allow_shell: $("#set-shell").checked, allow_network: $("#set-net").checked, auto_activity_minutes: Number($("#set-auto").value) }) }); await loadBoot(); toast("已保存"); renderSettings(); }
   catch (e) { toast(e.message, true); }
 }
 async function updateHealth(force) {

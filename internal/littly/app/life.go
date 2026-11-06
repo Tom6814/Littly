@@ -160,7 +160,7 @@ var _ = os.Getenv
 // day. Both are guarded against heartbeat/LLM overlap and can be disabled with
 // LITTLY_AUTO_ACTIVITY=0.
 func (s *Service) tickLife(local time.Time) {
-	if os.Getenv("LITTLY_AUTO_ACTIVITY") == "0" || s.LLM() == nil {
+	if os.Getenv("LITTLY_AUTO_ACTIVITY") == "0" || s.cfg.Workbench.AutoActivityMinutes <= 0 || s.LLM() == nil {
 		return
 	}
 	s.mu.Lock()
@@ -214,5 +214,5 @@ func (s *Service) autoActivityDue(local time.Time) bool {
 			last = a.CreatedAt
 		}
 	}
-	return last.IsZero() || local.Sub(last) > 3*time.Hour
+	return last.IsZero() || local.Sub(last) > time.Duration(s.cfg.Workbench.AutoActivityMinutes)*time.Minute
 }

@@ -87,7 +87,8 @@ func (h *Handler) bootstrap(c echo.Context) error {
 		"health": h.svc.Health(),
 		"next_heartbeat": h.svc.nextHeartbeatInfo(),
 		"channels": map[string]any{"snowluma": h.svc.snowLumaStatus()},
-		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork},
+		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork, "auto_activity_minutes": cfg.Workbench.AutoActivityMinutes},
+		"memory": map[string]any{"dream_hour": cfg.Memory.DreamHour, "vault_dir": cfg.Memory.VaultDir},
 	})
 }
 
@@ -114,8 +115,10 @@ func (h *Handler) putConfig(c echo.Context) error {
 		SLToken       *string        `json:"snowluma_token"`
 		SLAccount     *string        `json:"snowluma_account"`
 		SLOwner       *string        `json:"snowluma_owner"`
-		AllowShell    *bool          `json:"allow_shell"`
-		AllowNetwork  *bool          `json:"allow_network"`
+		AllowShell        *bool `json:"allow_shell"`
+		AllowNetwork      *bool `json:"allow_network"`
+		AutoActivityMins  *int  `json:"auto_activity_minutes"`
+		DreamHour         *int  `json:"dream_hour"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return jsonErr(c, 400, "bad json", err)
@@ -174,6 +177,12 @@ func (h *Handler) putConfig(c echo.Context) error {
 		}
 		if body.AllowNetwork != nil {
 			cfg.Workbench.AllowNetwork = *body.AllowNetwork
+		}
+		if body.AutoActivityMins != nil {
+			cfg.Workbench.AutoActivityMinutes = *body.AutoActivityMins
+		}
+		if body.DreamHour != nil {
+			cfg.Memory.DreamHour = *body.DreamHour
 		}
 	})
 	if err != nil {
@@ -453,7 +462,8 @@ func (h *Handler) world(c echo.Context) error {
 	cfg := h.svc.Config().Redacted()
 	return c.JSON(200, map[string]any{
 		"channels": map[string]any{"snowluma": h.svc.snowLumaStatus()},
-		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork},
+		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork, "auto_activity_minutes": cfg.Workbench.AutoActivityMinutes},
+		"memory": map[string]any{"dream_hour": cfg.Memory.DreamHour, "vault_dir": cfg.Memory.VaultDir},
 		"owner":    h.svc.Person(),
 		"model":    cfg.Brain.Model,
 		"dirs":     map[string]string{"vault": cfg.Memory.VaultDir, "workspace": cfg.Workbench.Dir},
