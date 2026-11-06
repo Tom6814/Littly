@@ -143,6 +143,11 @@ skills`。
 - 实测打开内部 `/littly/` 页面，返回正文 + `home/browser/20261107-031336.png` artifact。
 - 单测：非 http(s) URL 拒绝。
 
+## World：内嵌 QQ 登录窗口
+
+- World 页面用 `<details>` 内嵌 noVNC iframe（http://127.0.0.1:6081/vnc.html），可直接扫码，不必切标签。
+- 仍保留新标签打开链接。
+
 ## M5 进度：SnowLuma 容器
 
 - 已启动 `littly-snowluma`（`motricseven7/snowluma:v2.2.1`，`SYS_PTRACE`，`memoh_memoh-network`），端口 `3001`（OneBot WS）/`5099`（WebUI）/`6081`（noVNC）。
