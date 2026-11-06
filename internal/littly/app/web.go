@@ -68,6 +68,8 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.GET("/files/content", h.fileContent)
 	api.PUT("/files/content", h.fileWrite)
 	api.POST("/terminal", h.terminal)
+	api.POST("/browser", h.browser)
+	api.GET("/browser/status", h.browserStatus)
 	api.GET("/events", h.events)
 	api.GET("/heartbeat", h.heartbeatInfo)
 	api.POST("/heartbeat", h.heartbeatControl)
@@ -89,7 +91,7 @@ func (h *Handler) bootstrap(c echo.Context) error {
 		"health": h.svc.Health(),
 		"next_heartbeat": h.svc.nextHeartbeatInfo(),
 		"channels": map[string]any{"snowluma": h.svc.snowLumaStatus()},
-		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork, "auto_activity_minutes": cfg.Workbench.AutoActivityMinutes},
+		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork, "auto_activity_minutes": cfg.Workbench.AutoActivityMinutes, "browser_url": cfg.Workbench.BrowserURL},
 		"memory": map[string]any{"dream_hour": cfg.Memory.DreamHour, "vault_dir": cfg.Memory.VaultDir},
 	})
 }
@@ -406,6 +408,25 @@ func (h *Handler) terminal(c echo.Context) error {
 	return c.JSON(200, map[string]any{"output": out})
 }
 
+func (h *Handler) browser(c echo.Context) error {
+	var body struct {
+		URL        string `json:"url"`
+		Screenshot bool   `json:"screenshot"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return jsonErr(c, 400, "bad json", err)
+	}
+	out, err := h.svc.Browse(c.Request().Context(), body.URL, body.Screenshot)
+	if err != nil {
+		return jsonErr(c, 502, "browser failed", err)
+	}
+	return c.JSON(200, out)
+}
+
+func (h *Handler) browserStatus(c echo.Context) error {
+	return c.JSON(200, h.svc.BrowserStatus(c.Request().Context()))
+}
+
 func (h *Handler) events(c echo.Context) error {
 	st := h.svc.Store().Snapshot()
 	var out []store.Event
@@ -474,7 +495,7 @@ func (h *Handler) world(c echo.Context) error {
 	cfg := h.svc.Config().Redacted()
 	return c.JSON(200, map[string]any{
 		"channels": map[string]any{"snowluma": h.svc.snowLumaStatus()},
-		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork, "auto_activity_minutes": cfg.Workbench.AutoActivityMinutes},
+		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork, "auto_activity_minutes": cfg.Workbench.AutoActivityMinutes, "browser_url": cfg.Workbench.BrowserURL},
 		"memory": map[string]any{"dream_hour": cfg.Memory.DreamHour, "vault_dir": cfg.Memory.VaultDir},
 		"owner":    h.svc.Person(),
 		"model":    cfg.Brain.Model,

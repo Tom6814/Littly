@@ -347,3 +347,10 @@ func TestPingModel(t *testing.T) {
 		t.Fatalf("unexpected ping result: %+v", res)
 	}
 }
+
+func TestBrowserRejectsNonHTTP(t *testing.T) {
+	s := newTestService(t)
+	if _, err := s.Browse(context.Background(), "file:///etc/passwd", false); err == nil {
+		t.Fatalf("expected non-http url rejection")
+	}
+}

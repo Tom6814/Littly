@@ -127,6 +127,14 @@ scripts
 skills`。
 - 单测 `TestTerminalToolGatedAndRuns`：未开启报错、开启后执行成功。
 
+## M4 进度：浏览器
+
+- compose 新增 `browser` sidecar（`chromedp/headless-shell`，内部 9222，经 socat 转发到 9223）。
+- 工具 `browser_open` + API `POST /littly/api/browser`、`GET /littly/api/browser/status`；支持读 `document.body.innerText`、截图存 `home/browser/*.png` 并登记 artifact。
+- 处理了 Chrome DevTools 的 Host/WebSocket 限制：HTTP 用 `Host: localhost`，WS 用自定义 `net.Dialer` 连接 sidecar。
+- 实测打开内部 `/littly/` 页面，返回正文 + `home/browser/20261107-031336.png` artifact。
+- 单测：非 http(s) URL 拒绝。
+
 ## M5 进度：SnowLuma 容器
 
 - 已启动 `littly-snowluma`（`motricseven7/snowluma:v2.2.1`，`SYS_PTRACE`，`memoh_memoh-network`），端口 `3001`（OneBot WS）/`5099`（WebUI）/`6081`（noVNC）。

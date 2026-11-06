@@ -74,10 +74,10 @@ services:
       #   HTTP_PROXY=http://host.docker.internal:7890 docker compose up -d
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,pgvector,server,channel,web,migrate,webhook-tunnel,connect-it,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel,memoh-connect-it"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},browser,littly-browser,postgres,pgvector,server,channel,web,migrate,webhook-tunnel,connect-it,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel,memoh-connect-it"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,channel,web,migrate,webhook-tunnel,connect-it,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel,memoh-connect-it"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},browser,littly-browser,postgres,pgvector,server,channel,web,migrate,webhook-tunnel,connect-it,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel,memoh-connect-it"
       MEMOH_INTERNAL_RPC_SHARED_SECRET: "${MEMOH_INTERNAL_RPC_SHARED_SECRET:?MEMOH_INTERNAL_RPC_SHARED_SECRET is required}"
       LITTLY_API_KEY: "${LITTLY_API_KEY:-}"
       LITTLY_DATA_DIR: "/opt/memoh/data/littly"
@@ -127,10 +127,10 @@ services:
     environment:
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,server,channel,webhook-tunnel,memoh-postgres,memoh-server,memoh-channel,memoh-webhook-tunnel"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},browser,littly-browser,postgres,server,channel,webhook-tunnel,memoh-postgres,memoh-server,memoh-channel,memoh-webhook-tunnel"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,server,channel,webhook-tunnel,memoh-postgres,memoh-server,memoh-channel,memoh-webhook-tunnel"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},browser,littly-browser,postgres,server,channel,webhook-tunnel,memoh-postgres,memoh-server,memoh-channel,memoh-webhook-tunnel"
       MEMOH_INTERNAL_RPC_SHARED_SECRET: "${MEMOH_INTERNAL_RPC_SHARED_SECRET:?MEMOH_INTERNAL_RPC_SHARED_SECRET is required}"
       LITTLY_API_KEY: "${LITTLY_API_KEY:-}"
       LITTLY_DATA_DIR: "/opt/memoh/data/littly"
@@ -202,15 +202,24 @@ services:
       CONNECT_IT_BASE_URL: "${MEMOH_CONNECT_IT_PUBLIC_BASE_URL:-http://localhost:${MEMOH_CONNECT_IT_PORT:-8421}}"
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
       HTTPS_PROXY: "${HTTPS_PROXY:-${https_proxy:-}}"
-      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},postgres,server,connect-it,memoh-postgres,memoh-server,memoh-connect-it"
+      NO_PROXY: "${NO_PROXY:-127.0.0.1,localhost},browser,littly-browser,postgres,server,connect-it,memoh-postgres,memoh-server,memoh-connect-it"
       http_proxy: "${http_proxy:-${HTTP_PROXY:-}}"
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
-      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,server,connect-it,memoh-postgres,memoh-server,memoh-connect-it"
+      no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},browser,littly-browser,postgres,server,connect-it,memoh-postgres,memoh-server,memoh-connect-it"
     ports:
       - "${MEMOH_CONNECT_IT_PORT:-8421}:8421"
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  browser:
+    image: chromedp/headless-shell:latest
+    container_name: littly-browser
+    expose:
+      - "9222"
     restart: unless-stopped
     networks:
       - memoh-network

@@ -62,6 +62,7 @@ type Workbench struct {
 	AllowShell          bool   `json:"allow_shell"`
 	AllowNetwork        bool   `json:"allow_network"`
 	AutoActivityMinutes int    `json:"auto_activity_minutes"`
+	BrowserURL          string `json:"browser_url"`
 }
 
 type SnowLuma struct {
@@ -143,6 +144,7 @@ func Default() Config {
 	c.Workbench.MaxFileBytes = 8 << 20
 	c.Workbench.AllowNetwork = true
 	c.Workbench.AutoActivityMinutes = 180
+	c.Workbench.BrowserURL = "http://littly-browser:9222"
 	c.Channels.SnowLuma.WSURL = "ws://127.0.0.1:3001"
 	c.Channels.SnowLuma.GroupAtOnly = true
 	c.Security.QuietStart = "23:00"
@@ -222,6 +224,7 @@ func (c *Config) Resolve() error {
 	}
 	if c.Workbench.AutoActivityMinutes == 0 {
 		c.Workbench.AutoActivityMinutes = 180
+	c.Workbench.BrowserURL = "http://littly-browser:9222"
 	}
 	if c.Workbench.MaxFileBytes <= 0 {
 		c.Workbench.MaxFileBytes = 8 << 20

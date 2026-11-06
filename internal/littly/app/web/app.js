@@ -206,6 +206,9 @@ async function renderWorkbench() {
       <div class="row"><input id="term-cmd" placeholder="cd /opt/memoh/data/littly/workspace 下执行…" style="flex:1" onkeydown="if(event.key==='Enter')runTerminal()" /><button class="primary" onclick="runTerminal()">执行</button></div>
       <pre id="term-out" class="mono" style="white-space:pre-wrap;max-height:240px;overflow:auto;margin-top:10px;color:var(--muted)">（输出）</pre>
       <div class="muted tiny">受 workbench.allow_shell 控制；限时 15 秒、输出 16KB。这是她自己的电脑，不是安全沙箱。</div></section>
+    <section class="card col-12"><h3>浏览器 · 她的电脑</h3>
+      <div class="row"><input id="browser-url" placeholder="https://example.com" style="flex:1" onkeydown="if(event.key==='Enter')runBrowser()" /><label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" id="browser-shot" checked style="width:auto" /> 截图</label><button class="primary" onclick="runBrowser()">打开</button></div>
+      <div id="browser-out" class="muted tiny" style="margin-top:8px;white-space:pre-wrap;max-height:260px;overflow:auto"></div></section>
     <section class="card col-6"><h3>产出（artifacts）</h3><div class="list">${arts.artifacts.map((a) => `<div class="list-item"><div class="t">${esc(a.title)}</div><div class="m">${esc(a.path)} · ${a.bytes || 0} B · ${fmt(a.created_at)}</div></div>`).join("") || `<div class="empty">还没有产出</div>`}</div></section>
     <section class="card col-6"><h3>活动</h3><div class="list">${acts.activities.map((a) => `<div class="list-item"><div class="t">${esc(a.title)} <span class="badge">${esc(a.status)}</span></div><div class="m">${esc(a.kind)} · ${a.progress || 0}% · ${esc(a.summary || "")}</div></div>`).join("") || `<div class="empty">还没有活动</div>`}</div></section>`;
 }
@@ -214,6 +217,15 @@ async function runTerminal() {
   $("#term-out").textContent = "…";
   try { const r = await api("/terminal", { method: "POST", body: JSON.stringify({ command: cmd }) }); $("#term-out").textContent = r.output || "(无输出)"; }
   catch (e) { $("#term-out").textContent = "错误：" + e.message; }
+}
+async function runBrowser() {
+  const url = $("#browser-url").value.trim(); if (!url) return;
+  const el = $("#browser-out"); el.textContent = "打开中…";
+  try {
+    const r = await api("/browser", { method: "POST", body: JSON.stringify({ url, screenshot: $("#browser-shot").checked }) });
+    el.textContent = `标题：${r.title || "(无)"}\n${r.screenshot ? "截图：" + r.screenshot + "\n" : ""}\n${(r.text || "").slice(0, 4000)}`;
+    await renderWorkbench();
+  } catch (e) { el.textContent = "错误：" + e.message; }
 }
 async function openFile(path) { try { S.file = await api("/files/content?path=" + encodeURIComponent(path)); renderWorkbench(); } catch (e) { toast(e.message, true); } }
 
