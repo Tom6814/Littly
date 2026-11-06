@@ -73,6 +73,9 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.GET("/files/raw", h.fileRaw)
 	api.PUT("/files/content", h.fileWrite)
 	api.POST("/terminal", h.terminal)
+	api.GET("/snapshots", h.snapshots)
+	api.POST("/snapshots", h.snapshotCreate)
+	api.POST("/snapshots/:id/restore", h.snapshotRestore)
 	api.POST("/browser", h.browser)
 	api.GET("/browser/status", h.browserStatus)
 	api.GET("/events", h.events)
@@ -510,6 +513,30 @@ func (h *Handler) terminal(c echo.Context) error {
 		return jsonErr(c, 400, "terminal failed", err)
 	}
 	return c.JSON(200, map[string]any{"output": out})
+}
+
+func (h *Handler) snapshots(c echo.Context) error {
+	list, err := h.svc.ListSnapshots()
+	if err != nil {
+		return jsonErr(c, 500, "list snapshots failed", err)
+	}
+	return c.JSON(200, map[string]any{"snapshots": list})
+}
+
+func (h *Handler) snapshotCreate(c echo.Context) error {
+	info, err := h.svc.CreateSnapshot()
+	if err != nil {
+		return jsonErr(c, 500, "snapshot failed", err)
+	}
+	return c.JSON(200, info)
+}
+
+func (h *Handler) snapshotRestore(c echo.Context) error {
+	n, err := h.svc.RestoreSnapshot(c.Param("id"))
+	if err != nil {
+		return jsonErr(c, 400, "restore failed", err)
+	}
+	return c.JSON(200, map[string]any{"ok": true, "files": n})
 }
 
 func (h *Handler) browser(c echo.Context) error {

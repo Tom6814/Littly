@@ -163,6 +163,13 @@ skills`。
 - SnowLuma 状态新增 `state=waiting_login`：OneBot WS 未监听时显示“等待扫码登录”，不再只显示裸 connection refused。
 - 设置页副标题更新为 基本 / 模型 / 心跳 / QQ / 工作台 / 健康 / 关于。
 
+## M4 进度：工作台快照/恢复
+
+- `POST /littly/api/snapshots`：把 workspace 打成 `data/snapshots/snapshot-*.tar.gz`，登记 artifact。
+- `GET /littly/api/snapshots` / `POST /littly/api/snapshots/:id/restore`：列表与恢复（路径穿越防护）。
+- UI 工作台新增快照卡片。
+- 实测：5 files / 33,953 B；单测 `TestSnapshotCreateRestore` 覆盖拍→删→恢复→内容校验、非法 id。
+
 ## 设置页补充
 
 - 心跳：白天起止、Dream 整点

@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -470,5 +472,35 @@ func TestCreatePersonAndMemoryAPIs(t *testing.T) {
 	st := s.st.Snapshot()
 	if len(st.People) < 2 || len(st.Memories) < 1 {
 		t.Fatalf("people=%d memories=%d", len(st.People), len(st.Memories))
+	}
+}
+
+func TestSnapshotCreateRestore(t *testing.T) {
+	s := newTestService(t)
+	if _, err := s.toolFileWrite("home/notes/restore-me.md", "original"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := s.CreateSnapshot()
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if info.ID == "" {
+		t.Fatalf("empty snapshot id")
+	}
+	// delete then restore
+	full := filepath.Join(s.cfg.Workbench.Dir, "home", "notes", "restore-me.md")
+	if err := os.Remove(full); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.RestoreSnapshot(info.ID)
+	if err != nil || n == 0 {
+		t.Fatalf("restore n=%d err=%v", n, err)
+	}
+	b, err := os.ReadFile(full)
+	if err != nil || string(b) != "original" {
+		t.Fatalf("restored content=%q err=%v", b, err)
+	}
+	if _, err := s.RestoreSnapshot("../etc/passwd"); err == nil {
+		t.Fatalf("expected bad snapshot id error")
 	}
 }
