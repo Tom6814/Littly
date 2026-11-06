@@ -21,6 +21,7 @@ import (
 
 	"github.com/felinics/memoh/internal/littly/config"
 	"github.com/felinics/memoh/internal/littly/llm"
+	"github.com/felinics/memoh/internal/littly/memoryapi"
 	"github.com/felinics/memoh/internal/littly/store"
 )
 
@@ -147,7 +148,8 @@ func (s *Service) Start() {
 	s.wg.Add(1)
 	go s.loop()
 	if s.cfg.Channels.SnowLuma.Enabled {
-		s.startSnowLuma()
+		memoryapi.Set(memoryBackend{s: s})
+	s.startSnowLuma()
 	}
 }
 

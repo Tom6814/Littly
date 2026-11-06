@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/felinics/memoh/internal/littly/memoryapi"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
@@ -53,5 +54,42 @@ func TestOnBeforeChatMergesVaultContext(t *testing.T) {
 	}
 	if res.ResultCount < 1 {
 		t.Fatalf("result count = %d", res.ResultCount)
+	}
+}
+
+type fakeBackend struct{ items []memoryapi.Hit }
+
+func (f *fakeBackend) Search(ctx context.Context, query string, limit int) ([]memoryapi.Hit, error) {
+	return f.items, nil
+}
+func (f *fakeBackend) Add(ctx context.Context, title, body string) (memoryapi.Hit, error) {
+	h := memoryapi.Hit{ID: "littly:new", Title: title, Body: body}
+	f.items = append(f.items, h)
+	return h, nil
+}
+func (f *fakeBackend) Update(ctx context.Context, id, title, body string) (memoryapi.Hit, error) {
+	return memoryapi.Hit{ID: id, Title: title, Body: body}, nil
+}
+func (f *fakeBackend) Delete(ctx context.Context, id string) error { return nil }
+func (f *fakeBackend) List(ctx context.Context, limit int) ([]memoryapi.Hit, error) {
+	return f.items, nil
+}
+
+func TestBackendReadWrite(t *testing.T) {
+	fb := &fakeBackend{items: []memoryapi.Hit{{ID: "littly:m1", Title: "后端记忆", Body: "来自 state", Importance: 4}}}
+	memoryapi.Set(fb)
+	defer memoryapi.Set(nil)
+	p := &Provider{Provider: &fakeProvider{}, statePath: filepath.Join(t.TempDir(), "missing.json")}
+	res, err := p.Search(context.Background(), memprovider.SearchRequest{Query: "后端", Limit: 5})
+	if err != nil || len(res.Results) != 1 || res.Results[0].Memory == "" {
+		t.Fatalf("search=%+v err=%v", res, err)
+	}
+	added, err := p.Add(context.Background(), memprovider.AddRequest{Message: "新增记忆"})
+	if err != nil || len(added.Results) != 1 {
+		t.Fatalf("add=%+v err=%v", added, err)
+	}
+	before, err := p.OnBeforeChat(context.Background(), memprovider.BeforeChatRequest{Query: "后端"})
+	if err != nil || before == nil || !strings.Contains(before.ContextText, "后端记忆") {
+		t.Fatalf("before=%+v err=%v", before, err)
 	}
 }

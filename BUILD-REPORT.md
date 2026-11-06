@@ -129,11 +129,13 @@ skills`。
 
 ## M3 进度：memory provider 桥
 
-- 新包 `internal/littly/memprovider`：在 Memoh 默认 memory provider 外做只读桥接。
-- `Search` / `OnBeforeChat` 合并 `state.json` 中非私密记忆（关键词/最新/重要性），其余方法全部 delegate 上游。
+- 新包 `internal/littly/memprovider`：默认 memory provider 的 **可读写桥接**。
+- 新增 `internal/littly/memoryapi` Backend：`Search/Add/Update/Delete/List`；app.Service 通过 `memoryBackend` 注册。
+- provider 的 `Search/Add/GetAll/Update/Delete/DeleteBatch/DeleteAll/OnBeforeChat/Compact/Usage/CallTool` 在 backend 可用时直接读写她的记忆（vault + state/PG）；backend 缺失时透传上游。
+- `OnAfterChat` 在 backend 模式下 no-op，避免上游重复写入。
 - 核心注册：`registry.Register("__builtin_default__", littlymem.Wrap(defaultProvider))`。
-- 单测：私密过滤、关键词搜索、OnBeforeChat 上下文合并、无 state 时透传。
-- 限制：这是桥接，不是 provider 合同级替换；写入/抽取仍走上游 builtin。
+- 单测：私密过滤、关键词、上下文合并、无 state 透传、backend 读写/BeforeChat。
+- 限制：`ListTools` 仍复用上游描述；还不是 100% 合同级替换。
 
 ## M4 进度：浏览器
 
