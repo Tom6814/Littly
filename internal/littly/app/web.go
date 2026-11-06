@@ -92,7 +92,8 @@ func (h *Handler) bootstrap(c echo.Context) error {
 	return c.JSON(200, map[string]any{
 		"person": map[string]any{"id": p.ID, "name": p.DisplayName, "nickname": p.Nickname, "timezone": p.Timezone, "traits": cfg.Person.Traits, "self": cfg.Person.Self, "style": cfg.Person.Style, "boundaries": cfg.Person.Boundaries, "bio": cfg.Person.Bio},
 		"model": map[string]any{"model": cfg.Brain.Model, "base_url": cfg.Brain.BaseURL, "temperature": cfg.Brain.Temperature},
-		"heartbeat": map[string]any{"enabled": cfg.Heartbeat.Enabled, "day_minutes": cfg.Heartbeat.FallbackDayMinutes, "night_minutes": cfg.Heartbeat.FallbackNightMinutes, "day_start": cfg.Heartbeat.DayStart, "day_end": cfg.Heartbeat.DayEnd},
+		"heartbeat": map[string]any{"enabled": cfg.Heartbeat.Enabled, "day_minutes": cfg.Heartbeat.FallbackDayMinutes, "night_minutes": cfg.Heartbeat.FallbackNightMinutes, "day_start": cfg.Heartbeat.DayStart, "day_end": cfg.Heartbeat.DayEnd, "quiet_start": cfg.Security.QuietStart, "quiet_end": cfg.Security.QuietEnd},
+		"security": map[string]any{"quiet_start": cfg.Security.QuietStart, "quiet_end": cfg.Security.QuietEnd},
 		"health": h.svc.Health(),
 		"next_heartbeat": h.svc.nextHeartbeatInfo(),
 		"channels": map[string]any{"snowluma": h.svc.snowLumaStatus()},
@@ -128,6 +129,11 @@ func (h *Handler) putConfig(c echo.Context) error {
 		AllowNetwork      *bool `json:"allow_network"`
 		AutoActivityMins  *int  `json:"auto_activity_minutes"`
 		DreamHour         *int  `json:"dream_hour"`
+		DayStart          *string `json:"day_start"`
+		DayEnd            *string `json:"day_end"`
+		QuietStart        *string `json:"quiet_start"`
+		QuietEnd          *string `json:"quiet_end"`
+		GroupAtOnly       *bool   `json:"group_at_only"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return jsonErr(c, 400, "bad json", err)
@@ -192,6 +198,21 @@ func (h *Handler) putConfig(c echo.Context) error {
 		}
 		if body.DreamHour != nil {
 			cfg.Memory.DreamHour = *body.DreamHour
+		}
+		if body.DayStart != nil {
+			cfg.Heartbeat.DayStart = *body.DayStart
+		}
+		if body.DayEnd != nil {
+			cfg.Heartbeat.DayEnd = *body.DayEnd
+		}
+		if body.QuietStart != nil {
+			cfg.Security.QuietStart = *body.QuietStart
+		}
+		if body.QuietEnd != nil {
+			cfg.Security.QuietEnd = *body.QuietEnd
+		}
+		if body.GroupAtOnly != nil {
+			cfg.Channels.SnowLuma.GroupAtOnly = *body.GroupAtOnly
 		}
 	})
 	if err != nil {

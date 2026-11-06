@@ -285,6 +285,8 @@ async function renderSettings() {
         <label>白天间隔（分钟）</label><input id="set-day" type="number" min="5" max="240" value="${b.heartbeat.day_minutes}" />
         <label>夜间间隔（分钟）</label><input id="set-night" type="number" min="10" max="480" value="${b.heartbeat.night_minutes}" />
         <label>Dream 整点（0-23）</label><input id="set-dream" type="number" min="0" max="23" value="${b.memory?.dream_hour ?? 3}" />
+        <div class="row"><div style="flex:1"><label>白天开始</label><input id="set-days" value="${esc(b.heartbeat?.day_start || "07:00")}" /></div><div style="flex:1"><label>白天结束</label><input id="set-daye" value="${esc(b.heartbeat?.day_end || "23:00")}" /></div></div>
+        <div class="row"><div style="flex:1"><label>安静开始</label><input id="set-qs" value="${esc(b.security?.quiet_start || "23:00")}" /></div><div style="flex:1"><label>安静结束</label><input id="set-qe" value="${esc(b.security?.quiet_end || "08:00")}" /></div></div>
         <div class="row" style="margin-top:10px"><button class="primary" onclick="saveHeartbeat()">保存</button></div></section>
       <section class="card"><h3>QQ · SnowLuma</h3>
         <label><input type="checkbox" id="set-sl" ${b.channels?.snowluma?.enabled ? "checked" : ""} style="width:auto" /> 启用</label>
@@ -292,6 +294,7 @@ async function renderSettings() {
         <label>QQ 号（账号唯一归属）</label><input id="set-sl-account" value="${esc(b.channels?.snowluma?.account || "")}" placeholder="例如 123456789" />
         <label>主人 QQ 号</label><input id="set-sl-owner" value="" placeholder="用于主动消息" />
         <label>Access Token</label><input id="set-sl-token" type="password" value="" placeholder="${b.channels?.snowluma?.last_error ? "连接异常：" + esc(b.channels.snowluma.last_error) : "留空则不修改"}" />
+        <label><input type="checkbox" id="set-sl-at" ${b.channels?.snowluma?.group_at_only !== false ? "checked" : ""} style="width:auto" /> 群聊里只有 @ 她才回</label>
         <div class="row" style="margin-top:10px"><button class="primary" onclick="saveSnowLuma()">保存并连接</button></div>
         <div class="muted tiny" style="margin-top:8px">单账号；扫码登录：<a href="http://127.0.0.1:6081/vnc.html" target="_blank">noVNC</a>；登录后把 QQ 号填到上面。</div>
       </section>
@@ -326,6 +329,7 @@ async function saveSnowLuma() {
       snowluma_account: $("#set-sl-account").value,
       snowluma_owner: $("#set-sl-owner").value,
       snowluma_token: $("#set-sl-token").value,
+      group_at_only: $("#set-sl-at")?.checked ?? true,
     };
     await api("/config", { method: "PUT", body: JSON.stringify(body) });
     await loadBoot(); toast("渠道配置已保存，正在连接"); renderSettings();

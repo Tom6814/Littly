@@ -163,6 +163,13 @@ skills`。
 - SnowLuma 状态新增 `state=waiting_login`：OneBot WS 未监听时显示“等待扫码登录”，不再只显示裸 connection refused。
 - 设置页副标题更新为 基本 / 模型 / 心跳 / QQ / 工作台 / 健康 / 关于。
 
+## 设置页补充
+
+- 心跳：白天起止、Dream 整点
+- 安全：安静时段
+- QQ：群聊仅 @ 才回
+- PUT `/littly/api/config` 与 bootstrap/UI 同步；截图更新。
+
 ## 记忆/人物录入
 
 - `POST /littly/api/people`：手动添加联系人（默认 manual 渠道、自动 external id）。
