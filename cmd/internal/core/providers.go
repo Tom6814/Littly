@@ -76,6 +76,7 @@ import (
 	"github.com/felinics/memoh/internal/handlers"
 	hookspkg "github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/logger"
+	littlymem "github.com/felinics/memoh/internal/littly/memprovider"
 	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/mcp"
 	mcpfederation "github.com/felinics/memoh/internal/mcp/sources/federation"
@@ -446,7 +447,8 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, provid
 	}
 	defaultProvider := membuiltin.NewBuiltinProvider(log, defaultRuntime)
 	defaultProvider.SetLLM(llm)
-	registry.Register("__builtin_default__", defaultProvider)
+	// LITTLY: bridge the default memory provider to her own memory index.
+	registry.Register("__builtin_default__", littlymem.Wrap(defaultProvider))
 	return registry
 }
 

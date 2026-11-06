@@ -127,6 +127,14 @@ scripts
 skills`。
 - 单测 `TestTerminalToolGatedAndRuns`：未开启报错、开启后执行成功。
 
+## M3 进度：memory provider 桥
+
+- 新包 `internal/littly/memprovider`：在 Memoh 默认 memory provider 外做只读桥接。
+- `Search` / `OnBeforeChat` 合并 `state.json` 中非私密记忆（关键词/最新/重要性），其余方法全部 delegate 上游。
+- 核心注册：`registry.Register("__builtin_default__", littlymem.Wrap(defaultProvider))`。
+- 单测：私密过滤、关键词搜索、OnBeforeChat 上下文合并、无 state 时透传。
+- 限制：这是桥接，不是 provider 合同级替换；写入/抽取仍走上游 builtin。
+
 ## M4 进度：浏览器
 
 - compose 新增 `browser` sidecar（`chromedp/headless-shell`，内部 9222，经 socat 转发到 9223）。
