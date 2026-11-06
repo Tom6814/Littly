@@ -277,7 +277,7 @@ async function renderWorld() {
       <div>账号</div><div>${esc(sl.account || "未绑定")}</div><div>WS</div><div class="mono">${esc(sl.ws_url || "")}</div></div>
       <div class="muted tiny" style="margin-top:8px">QQ 走 SnowLuma OneBot v11；账号唯一归属。首次需要扫码：<a href="http://127.0.0.1:6081/vnc.html" target="_blank">noVNC 扫码登录</a> · <a href="http://127.0.0.1:5099/" target="_blank">SnowLuma WebUI</a></div>
       <details style="margin-top:10px"><summary class="muted tiny" style="cursor:pointer">在页面里打开 QQ 登录窗口</summary>
-        <iframe src="http://127.0.0.1:6081/vnc.html" style="width:100%;height:520px;border:1px solid var(--line);border-radius:10px;margin-top:8px;background:#000" title="QQ noVNC"></iframe>
+        <iframe src="http://127.0.0.1:6081/vnc.html?autoconnect=true&resize=scale&host=127.0.0.1&port=6081&path=websockify" style="width:100%;height:520px;border:1px solid var(--line);border-radius:10px;margin-top:8px;background:#000" title="QQ noVNC"></iframe>
       </details></section>
     <section class="card col-6"><h3>她的电脑</h3><div class="kv"><div>vault</div><div class="mono">${esc(w.dirs?.vault || "")}</div><div>workspace</div><div class="mono">${esc(w.dirs?.workspace || "")}</div><div>模型</div><div>${esc(w.model || "")}</div></div></section>
     <section class="card col-12"><h3>联系人</h3>
