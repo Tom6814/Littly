@@ -159,10 +159,12 @@ async function renderMemory() {
     <section class="card col-12"><div class="tabs">
       <button class="${S.memTab === "memories" ? "active" : ""}" onclick="S.memTab='memories';renderMemory()">记忆</button>
       <button class="${S.memTab === "people" ? "active" : ""}" onclick="S.memTab='people';renderMemory()">人物</button>
+      <button class="${S.memTab === "diaries" ? "active" : ""}" onclick="S.memTab='diaries';renderMemory()">日记</button>
       <button class="${S.memTab === "archive" ? "active" : ""}" onclick="S.memTab='archive';renderMemory()">回收站</button>
     </div><div id="mem-body">加载中…</div></section>`;
   if (S.memTab === "memories") await renderMemories();
   else if (S.memTab === "people") await renderPeople();
+  else if (S.memTab === "diaries") await renderDiaries();
   else await renderArchive();
 }
 async function renderMemories() {
@@ -170,6 +172,11 @@ async function renderMemories() {
   const list = data.memories || [];
   $("#mem-body").innerHTML = `<div class="row" style="margin-bottom:12px"><input id="mem-q" placeholder="搜她的记忆…" value="${esc(S.memQ)}" onkeydown="if(event.key==='Enter'){S.memQ=this.value;renderMemories()}"/><button onclick="S.memQ=document.getElementById('mem-q').value;renderMemories()">搜索</button></div>
     <div class="list">${list.map((m) => `<div class="list-item"><div class="t">${esc(m.title)}</div><div class="m">${esc(m.domain)} · ${esc(m.kind)} · ${fmt(m.event_time)} · ${esc(m.visibility)}</div><div class="tiny" style="margin-top:6px">${esc(m.body)}</div></div>`).join("") || `<div class="empty">还没有记忆</div>`}</div>`;
+}
+async function renderDiaries() {
+  const data = await api("/diaries");
+  const list = data.diaries || [];
+  $("#mem-body").innerHTML = `<div class="list">${list.map((d) => `<div class="list-item"><div class="t">${esc(d.day || fmt(d.at))} <span class="badge">${esc(d.mood || "")}</span></div><div class="tiny" style="margin-top:6px;white-space:pre-wrap">${esc(d.content)}</div><div class="m">${esc(d.summary || "")}</div></div>`).join("") || `<div class="empty">还没有日记。也许今晚 Dream 会写。</div>`}</div>`;
 }
 async function renderPeople() {
   const data = await api("/people");

@@ -163,6 +163,11 @@ skills`。
 - SnowLuma 状态新增 `state=waiting_login`：OneBot WS 未监听时显示“等待扫码登录”，不再只显示裸 connection refused。
 - 设置页副标题更新为 基本 / 模型 / 心跳 / QQ / 工作台 / 健康 / 关于。
 
+## 记忆面：日记视图
+
+- `GET /littly/api/diaries`；记忆页新增“日记”标签，按时间倒序展示 Dream 写下的日记（day/mood/content/summary）。
+- 单测 `TestDiariesAPI`。
+
 ## 回归测试：六面 API e2e
 
 `TestAPIEndToEnd` 用 httptest 串起：bootstrap / health / chat / today / config / terminal / test-model / activities/run / activities / artifacts / people / memories / heartbeat / heartbeat schedule / world / file write/list/content/raw / events / archive，全部 200。

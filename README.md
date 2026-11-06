@@ -9,7 +9,7 @@ Littly v2 是 **Memoh（AGPL-3.0）的硬分叉**。Memoh 提供服务器、Web 
 - **六面 UI**：`/littly/` — 今天 / 她 / 记忆 / 工作台 / 世界 / 设置（旧的设置入口 `/settings`、`/bots` 已重定向到新 UI）。
 - **她主动活着**：心跳（保底 + 自心跳）有理由、结构化裁决、no-op 治理；会自己安排下一次醒来。每日 `DreamHour`（默认 03:00）自动整理；白天闲置（默认 180 分钟，可在设置页调，0=关）会自己做一件小事；Dream 整点也可在设置页改。
 - **不是每条消息都回**：性格 traits + 关系 + 状态 + 消息内容 → 立即回 / 短回 / 晚点回 / 不回；决策留痕。
-- **记忆**：Markdown vault（SELF/domains/日记/人物卡）+ JSON 索引；可见性 public/relationship/private；私密抽屉网页端不可见。
+- **记忆**：Markdown vault（SELF/domains/日记/人物卡）+ JSON 索引；记忆/人物/日记/回收站四个标签；可见性 public/relationship/private，私密抽屉网页端不可见。
 - **人物分层**：重要的人一人一卡；泛泛之交一行；90/180 天淡出进入**可搜索回收站**；她可以主动 `recall_person` 搜到再恢复（不自动恢复）。
 - **工作台**：她的文件（路径监狱）、产物 artifact、活动记录、**终端**（`allow_shell` 开关，限时/限输出）、**浏览器**（headless Chrome sidecar，可读正文/截图存档）；她可以自己选题做一件小事（LLM 写笔记，无 LLM 时降级），留下活动与产出。
 - **SnowLuma QQ**：OneBot v11 WebSocket 客户端（登录/私聊/群聊@/去重/发送），设置页可配；账号唯一归属，不换号。SnowLuma 容器已接入，noVNC `:6081` 扫码、WebUI `:5099`。

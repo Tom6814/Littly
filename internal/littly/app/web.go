@@ -56,6 +56,7 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.POST("/chat", h.chat)
 	api.POST("/test-model", h.testModel)
 	api.GET("/memories", h.memories)
+	api.GET("/diaries", h.diaries)
 	api.GET("/people", h.people)
 	api.GET("/people/:id", h.person)
 	api.POST("/people/:id/important", h.personImportant)
@@ -279,6 +280,18 @@ func (h *Handler) memories(c echo.Context) error {
 		out = out[:100]
 	}
 	return c.JSON(200, map[string]any{"memories": out})
+}
+
+func (h *Handler) diaries(c echo.Context) error {
+	st := h.svc.Store().Snapshot()
+	out := make([]store.Diary, 0, len(st.Diaries))
+	for i := len(st.Diaries) - 1; i >= 0; i-- {
+		out = append(out, st.Diaries[i])
+	}
+	if len(out) > 60 {
+		out = out[:60]
+	}
+	return c.JSON(200, map[string]any{"diaries": out})
 }
 
 func (h *Handler) people(c echo.Context) error {

@@ -429,3 +429,20 @@ func TestAPIEndToEnd(t *testing.T) {
 	want(200, do("GET", "/littly/api/events", ""), "events")
 	want(200, do("GET", "/littly/api/archive?q=E2E", ""), "archive")
 }
+
+func TestDiariesAPI(t *testing.T) {
+	s := newTestService(t)
+	_ = s.st.Mutate(func(st *store.State) error {
+		st.Diaries = append(st.Diaries, store.Diary{ID: "d1", Day: "2026-11-07", Content: "今天写了心跳。", Mood: "平静", At: time.Now().UTC()})
+		return nil
+	})
+	h := NewHandler(s)
+	e := echo.New()
+	h.Register(e)
+	defer s.Stop()
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/littly/api/diaries", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "今天写了心跳") {
+		t.Fatalf("diaries = %d %s", rec.Code, rec.Body.String())
+	}
+}
