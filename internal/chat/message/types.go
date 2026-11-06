@@ -1,0 +1,339 @@
+package message
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+)
+
+const (
+	AgentStepInterruptedMetadataKey = "agent_step_interrupted"
+	// DiscussStepMetadataKey marks a row a Discuss run wrote before its
+	// answer. The row is context for later runs, not proof that its run
+	// consumed the input it answers: the run can still fail after it.
+	DiscussStepMetadataKey      = "discuss_step"
+	HistoryErrorCodeMetadataKey = "error_code"
+	// HistoryErrorArgsMetadataKey holds the catalog args of the failure named
+	// by error_code: only the args its catalog entry allows, as strings.
+	HistoryErrorArgsMetadataKey         = "error_args"
+	HistoryFailureOriginMetadataKey     = "failure_origin"
+	HistoryFailureOriginUserMessageHook = "user_message_hook"
+	AgentStepInterruptedReasoningPrefix = "[Previous assistant response was interrupted during reasoning. Continue from this checkpoint:]\n"
+	// ToolCallDiffsMetadataKey carries UI-only edit/write diffs lifted out of
+	// assistant message content at persist time. Value shape:
+	// map[toolCallID]unifiedDiff. Keeping them on the row's metadata column —
+	// not inside content — keeps them out of the history byte budget, which
+	// measures octet_length(content) only.
+	ToolCallDiffsMetadataKey = "diffs"
+	// InputEstimateMetadataKey holds, on the assistant row of a native step,
+	// what the run's estimate priced the step's request at. Beside the input
+	// tokens the provider counted for it (usage.inputTokens) it calibrates
+	// the estimate of the session's later runs on the same model.
+	InputEstimateMetadataKey = "input_estimate_tokens"
+)
+
+// LatestInterruptedCheckpoint returns the last assistant entry only when it is
+// an interrupted checkpoint. Earlier checkpoints are ordinary history.
+func LatestInterruptedCheckpoint(n int, classify func(int) (assistant, interrupted bool)) int {
+	if n <= 0 || classify == nil {
+		return -1
+	}
+	for i := n - 1; i >= 0; i-- {
+		assistant, interrupted := classify(i)
+		if assistant {
+			if interrupted {
+				return i
+			}
+			return -1
+		}
+	}
+	return -1
+}
+
+// MessageAsset carries media asset metadata attached to a message.
+// ContentHash is the content-addressed identifier for the media file.
+type MessageAsset struct {
+	ContentHash string         `json:"content_hash"`
+	Role        string         `json:"role"`
+	Ordinal     int            `json:"ordinal"`
+	Mime        string         `json:"mime"`
+	SizeBytes   int64          `json:"size_bytes"`
+	StorageKey  string         `json:"storage_key"`
+	Name        string         `json:"name,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// Message represents a single persisted bot message.
+type Message struct {
+	ID                      string          `json:"id"`
+	BotID                   string          `json:"bot_id"`
+	SessionID               string          `json:"session_id,omitempty"`
+	SenderChannelIdentityID string          `json:"sender_channel_identity_id,omitempty"`
+	SenderUserID            string          `json:"sender_user_id,omitempty"`
+	SenderDisplayName       string          `json:"sender_display_name,omitempty"`
+	SenderAvatarURL         string          `json:"sender_avatar_url,omitempty"`
+	Platform                string          `json:"platform,omitempty"`
+	ExternalMessageID       string          `json:"external_message_id,omitempty"`
+	SourceReplyToMessageID  string          `json:"source_reply_to_message_id,omitempty"`
+	Role                    string          `json:"role"`
+	Content                 json.RawMessage `json:"content"`
+	Metadata                map[string]any  `json:"metadata,omitempty"`
+	RawMetadata             json.RawMessage `json:"-"`
+	TurnID                  string          `json:"turn_id,omitempty"`
+	// TurnPosition is the immutable turn-level sequence reserved at admission
+	// (SR-TURN-001). It is loaded on the UI read path so the frontend can
+	// order and reconcile turns without guessing from text or timestamps.
+	TurnPosition   *int64          `json:"turn_position,omitempty"`
+	Usage          json.RawMessage `json:"usage,omitempty"`
+	SessionMode    string          `json:"session_mode,omitempty"`
+	RuntimeType    string          `json:"runtime_type,omitempty"`
+	Assets         []MessageAsset  `json:"assets,omitempty"`
+	EventID        string          `json:"event_id,omitempty"`
+	DisplayContent string          `json:"display_content,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+}
+
+type HistoryTurn struct {
+	ID                 string    `json:"id"`
+	BotID              string    `json:"bot_id"`
+	SessionID          string    `json:"session_id"`
+	Position           int64     `json:"position"`
+	RequestMessageID   string    `json:"request_message_id,omitempty"`
+	AssistantMessageID string    `json:"assistant_message_id,omitempty"`
+	SupersededByTurnID string    `json:"superseded_by_turn_id,omitempty"`
+	SupersededAt       time.Time `json:"superseded_at,omitempty"`
+	SupersededReason   string    `json:"superseded_reason,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// AssetRef links a media asset to a persisted message.
+// ContentHash is the content-addressed identifier for the media file.
+type AssetRef struct {
+	ContentHash string         `json:"content_hash"`
+	Role        string         `json:"role"`
+	Ordinal     int            `json:"ordinal"`
+	Mime        string         `json:"mime,omitempty"`
+	SizeBytes   int64          `json:"size_bytes,omitempty"`
+	StorageKey  string         `json:"storage_key,omitempty"`
+	Name        string         `json:"name,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// PersistInput is the input for persisting a message.
+type PersistInput struct {
+	BotID                   string
+	SessionID               string
+	SenderChannelIdentityID string
+	SenderUserID            string
+	ExternalMessageID       string
+	SourceReplyToMessageID  string
+	Role                    string
+	Content                 json.RawMessage
+	Metadata                map[string]any
+	Usage                   json.RawMessage
+	SessionMode             string
+	RuntimeType             string
+	Assets                  []AssetRef
+	ModelID                 string
+	EventID                 string
+	DisplayText             string
+	TurnRequestMessageID    string
+	SkipHistoryTurn         bool
+	// RunID links this row to the admitted run that produced it. It is
+	// traceability only: history is read by turn, never by run.
+	RunID string
+	// TurnID and TurnPosition carry a turn this message must be filed under
+	// because admission already allocated it (SR-TURN-001). Both empty means no
+	// admission decided the turn and the history layer allocates one, which is
+	// still the case for channel inbound and schedules.
+	//
+	// They travel together: a turn id without its position would file the row
+	// under the right turn at the wrong place in the session's order, and a
+	// position without its id would take a slot the client cannot name.
+	TurnID       string
+	TurnPosition *int64
+}
+
+type LocateResult struct {
+	Messages []Message
+	TargetID string
+}
+
+// HistoryPosition is a place in a session's history: the position of a
+// turn and the sequence of a message in it. Positions order the history; the
+// zero position precedes every message.
+type HistoryPosition struct {
+	Turn int64
+	Seq  int64
+}
+
+// Before reports whether p comes before other.
+func (p HistoryPosition) Before(other HistoryPosition) bool {
+	return p.Turn < other.Turn || p.Turn == other.Turn && p.Seq < other.Seq
+}
+
+// HistoryWindow selects what a byte-budgeted load of a session's raw
+// history reads: the context rows after a history checkpoint, newest first
+// within MaxBytes.
+type HistoryWindow struct {
+	// After is the position of the checkpoint the raw history follows.
+	After HistoryPosition
+	// Before, when set, cuts the history before a message: an edit or retry
+	// replays what came before the turn it replaces.
+	Before   *HistoryPosition
+	MaxBytes int64
+}
+
+// HistoryLoad is what a byte-budgeted load of a HistoryWindow read.
+type HistoryLoad struct {
+	Messages []Message
+	// Truncated reports that MaxBytes, not the window, ended the load: context
+	// rows of the window remain older than the oldest it read.
+	Truncated bool
+}
+
+// ActiveMessagesMeasure is a database-side aggregate over a session's raw
+// history (CM-ADM-001): counts and raw content bytes, computed without
+// loading any payload into the process.
+type ActiveMessagesMeasure struct {
+	MessageCount int64
+	ContentBytes int64
+}
+
+// Writer defines write behavior needed by the inbound router.
+type Writer interface {
+	Persist(ctx context.Context, input PersistInput) (Message, error)
+}
+
+// ToolTailRoundPersister optionally persists a complete
+// user -> assistant(tool-call) -> tool -> assistant(final) round in one write.
+type ToolTailRoundPersister interface {
+	PersistToolTailRound(ctx context.Context, inputs []PersistInput) ([]Message, bool, error)
+}
+
+type TurnReplacement struct {
+	OldTurnID               string
+	ReplacementTurnID       string
+	ReplacementTurnPosition *int64
+	RequestMessageID        string
+	Reason                  string
+	SessionMetadata         map[string]any
+}
+
+type RoundPersistenceOptions struct {
+	Replacement                       *TurnReplacement
+	CleanupRuntimeDecisionProjections bool
+	// AgentTurnID records the runtime's own turn id on the round's run in
+	// the same transaction as the messages; empty writes nothing.
+	AgentTurnID string
+}
+
+// AtomicRoundPersister writes a complete round in one transaction.
+// Implementations must enforce any runtime fence carried by ctx, while still
+// supporting unfenced local replacement transactions.
+type AtomicRoundPersister interface {
+	PersistRound(ctx context.Context, inputs []PersistInput, options RoundPersistenceOptions) ([]Message, bool, error)
+}
+
+// AgentStep is one native-agent step persisted atomically. Interrupted marks a
+// text/reasoning snapshot of a step the model never finished, which takes a
+// different writability predicate than a complete step.
+type AgentStep struct {
+	RunID       string
+	Messages    []PersistInput
+	Interrupted bool
+	// Replacement starts a new attempt in the same transaction as its first
+	// messages. Subsequent steps append normally to their persisted request.
+	Replacement *TurnReplacement
+}
+
+// TurnSlot names a turn before any of its rows exist. Admission already draws
+// one for a run's request turn; an applied steer opens its own canonical turn
+// (SR-TURN-001) and needs the same treatment, so every subscriber learns the
+// turn's identity when the input is accepted rather than when the step commits.
+type TurnSlot struct {
+	TurnID   string
+	Position int64
+}
+
+// TurnSlotAllocator draws a slot from the session's turn counter without
+// writing a row.
+type TurnSlotAllocator interface {
+	AllocateTurnSlot(ctx context.Context, sessionID string) (TurnSlot, error)
+}
+
+type AgentStepPersister interface {
+	PersistAgentStep(ctx context.Context, step AgentStep) ([]Message, error)
+}
+
+// Service defines message read/write behavior.
+type Service interface {
+	Writer
+	List(ctx context.Context, botID string) ([]Message, error)
+	ListSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
+	ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error)
+	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error)
+	ListBySession(ctx context.Context, sessionID string) ([]Message, error)
+	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
+	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
+	// ListHistoryWithinBytes loads a session's raw history over a
+	// HistoryWindow (CM-ADM-001): its context rows are admitted newest-first
+	// until their content byte total crosses window.MaxBytes, and the load
+	// reports whether that left older rows of the window out. Only content is
+	// budgeted, so metadata is returned undecoded in RawMetadata (Metadata
+	// stays nil): callers decode one row at a time instead of holding every
+	// row's decoded metadata, which legacy lifecycle audits can inflate.
+	ListHistoryWithinBytes(ctx context.Context, sessionID string, window HistoryWindow) (HistoryLoad, error)
+	// ListHistoryByIDs loads the named context rows of a session, as
+	// ListHistoryWithinBytes loads them, in history order: the rows a history
+	// checkpoint keeps by reference.
+	ListHistoryByIDs(ctx context.Context, sessionID string, ids []string) ([]Message, error)
+	// HistoryPositionByID reports where a visible message of the session is.
+	HistoryPositionByID(ctx context.Context, sessionID string, messageID string) (HistoryPosition, error)
+	// ListTurnResponseSourcesWithinBytes is the raw history after a position
+	// within maxBytes, as ListHistoryWithinBytes loads it, projected to what
+	// turn-response composition reads: ID, role, content, created_at, and
+	// Metadata holding only the interrupted and Discuss step flags. Nothing
+	// else is loaded.
+	ListTurnResponseSourcesWithinBytes(ctx context.Context, sessionID string, after HistoryPosition, maxBytes int64) (HistoryLoad, error)
+	// ListTurnResponseSourcesByIDs is ListHistoryByIDs projected as
+	// ListTurnResponseSourcesWithinBytes projects its rows, with the
+	// ExternalMessageID of a user row.
+	ListTurnResponseSourcesByIDs(ctx context.Context, sessionID string, ids []string) ([]Message, error)
+	// MeasureHistory aggregates the message count and content bytes of the
+	// raw history after a position on the database side (CM-ADM-001):
+	// admission sizes it without shipping any payload into the process.
+	MeasureHistory(ctx context.Context, sessionID string, after HistoryPosition) (ActiveMessagesMeasure, error)
+	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error)
+	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error)
+	ListBeforeMessageBySession(ctx context.Context, sessionID string, beforeMessageID string, limit int32) ([]Message, error)
+	LocateByExternalIDBySession(ctx context.Context, sessionID string, externalMessageID string, beforeLimit int32, afterLimit int32) (LocateResult, error)
+	GetByIDBySession(ctx context.Context, sessionID string, messageID string) (Message, error)
+	ListVisibleFromBySession(ctx context.Context, sessionID string, messageID string) ([]Message, error)
+	GetVisibleTurnByMessage(ctx context.Context, sessionID string, messageID string) (HistoryTurn, error)
+	GetLatestVisibleTurnBySession(ctx context.Context, sessionID string) (HistoryTurn, error)
+	ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, replacementTurnID string, replacementTurnPosition *int64, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error)
+	DeleteByIDs(ctx context.Context, ids []string) error
+	DeleteByBot(ctx context.Context, botID string) error
+	DeleteBySession(ctx context.Context, sessionID string) error
+	LinkAssets(ctx context.Context, messageID string, assets []AssetRef) error
+}
+
+// Message origin is independent of the LLM role. Internal feedback is stored
+// as user input for model replay but stays in the current conversation turn.
+const (
+	MessageSourceMetadataKey      = "message_source"
+	MessageSourceInternalFeedback = "internal_feedback"
+)
+
+func IsInternalFeedback(metadata map[string]any) bool {
+	return metadata[MessageSourceMetadataKey] == MessageSourceInternalFeedback
+}
+
+func historyBindingRole(role string, metadata map[string]any) string {
+	if role == "user" && IsInternalFeedback(metadata) {
+		return MessageSourceInternalFeedback
+	}
+	return role
+}

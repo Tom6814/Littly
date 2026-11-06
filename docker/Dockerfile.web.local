@@ -1,0 +1,21 @@
+FROM node:24-bookworm-slim AS build
+WORKDIR /build
+RUN npm install -g pnpm@10
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY patches ./patches
+COPY scripts/ensure-submodules.mjs scripts/check-patched-deps.mjs ./scripts/
+COPY packages ./packages
+COPY apps ./apps
+RUN test -f packages/ui/package.json
+RUN pnpm install
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=$VITE_API_URL
+WORKDIR /build/apps/web
+RUN pnpm build
+FROM nginx:alpine
+COPY --from=build /build/apps/web/dist /usr/share/nginx/html
+ENV MEMOH_SERVER_UPSTREAM=memoh-server:8080 MEMOH_CHANNEL_UPSTREAM=memoh-channel:8081
+COPY docker/nginx.conf /etc/nginx/templates/default.conf.template
+COPY docker/nginx-app.conf /etc/nginx/templates/includes/memoh-app.conf.template
+EXPOSE 8082
+CMD ["nginx", "-g", "daemon off;"]

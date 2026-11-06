@@ -1,0 +1,244 @@
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createApp, h } from 'vue'
+import type { ProviderPreset } from '@/constants/provider-presets'
+
+const mocks = vi.hoisted(() => ({
+  deleteModel: vi.fn(),
+  getProviderModels: vi.fn(),
+  getProviderByName: vi.fn(),
+  importModels: vi.fn(),
+  postProvider: vi.fn(),
+  putModelsById: vi.fn(),
+  testProvider: vi.fn(),
+  updateProvider: vi.fn(),
+  invalidateQueries: vi.fn(),
+}))
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => key,
+    // Only the probe failure codes have copy in this mock.
+    te: (key: string) => key.startsWith('errors.agent.provider_'),
+  }),
+}))
+
+vi.mock('@pinia/colada', async () => {
+  const { ref } = await import('vue')
+  return {
+    useMutation: (options: { mutation: (value: never) => Promise<unknown> }) => ({
+      mutateAsync: options.mutation,
+      isLoading: ref(false),
+    }),
+    useQuery: (options: { query: (context: { signal: AbortSignal }) => Promise<unknown> }) => {
+      const state = ref({ data: [] })
+      return {
+        state,
+        refresh: async () => {
+          state.value.data = await options.query({ signal: new AbortController().signal }) as never[]
+        },
+      }
+    },
+    useQueryCache: () => ({
+      invalidateQueries: mocks.invalidateQueries,
+      ensure: (options: { query: (context: { signal: AbortSignal }) => Promise<unknown> }) => options,
+      // Pinia Colada hands every query its abort signal.
+      refresh: async (entry: { query: (context: { signal: AbortSignal }) => Promise<unknown> }) => ({ status: 'success', data: await entry.query({ signal: new AbortController().signal }) }),
+    }),
+    defineQueryOptions: (options: unknown) => options,
+  }
+})
+
+vi.mock('@memohai/sdk', () => ({
+  deleteModelsById: mocks.deleteModel,
+  getProvidersByIdModels: mocks.getProviderModels,
+  getProvidersNameByName: mocks.getProviderByName,
+  postProviders: mocks.postProvider,
+  postProvidersByIdImportModels: mocks.importModels,
+  postProvidersByIdImportCatalogModels: mocks.importModels,
+  postProvidersByIdTest: mocks.testProvider,
+  putModelsById: mocks.putModelsById,
+  putProvidersById: mocks.updateProvider,
+}))
+
+import { useProviderSetup } from './useProviderSetup'
+
+const preset: ProviderPreset = {
+  id: 'deepseek',
+  name: 'DeepSeek',
+  clientType: 'openai-completions',
+  baseUrl: 'https://api.deepseek.com/v1',
+  source: 'deepseek.yaml',
+}
+
+function mountSetup(selectedPreset: ProviderPreset | null) {
+  let setup: ReturnType<typeof useProviderSetup> | undefined
+  const ready = vi.fn()
+  const app = createApp({
+    setup() {
+      setup = useProviderSetup({ selectedPreset: () => selectedPreset, onProviderReady: ready })
+      return () => h('div')
+    },
+  })
+  app.mount(document.createElement('div'))
+  setup!.initFormValues(selectedPreset)
+  return { app, ready, setup: setup! }
+}
+
+describe('useProviderSetup', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.testProvider.mockResolvedValue({ data: { status: 'ok' } })
+    mocks.importModels.mockResolvedValue({ data: { created: 2 } })
+    mocks.getProviderModels.mockResolvedValue({
+      data: [
+        { id: 'pro-id', model_id: 'deepseek-v4-pro', provider_id: 'provider-id', type: 'chat', enable: false },
+        { id: 'flash-id', model_id: 'deepseek-v4-flash', provider_id: 'provider-id', type: 'chat', enable: false },
+      ],
+    })
+  })
+
+  it('creates a preset provider from its entry and imports the entry\'s catalog', async () => {
+    mocks.postProvider.mockResolvedValue({ data: { id: 'provider-id' } })
+    const { app, ready, setup } = mountSetup(preset)
+    setup.formValues.value.api_key = 'sk-test'
+
+    await setup.saveAndNext()
+
+    expect(mocks.postProvider).toHaveBeenCalledWith({
+      body: {
+        name: 'DeepSeek',
+        client_type: 'openai-completions',
+        config: { base_url: preset.baseUrl, api_key: 'sk-test' },
+        metadata: { catalog: 'deepseek', source: 'deepseek', onboarding: true },
+        icon: 'https://models.dev/logos/deepseek.svg',
+      },
+      throwOnError: true,
+    })
+    const importCall = mocks.importModels.mock.calls[0]![0]
+    expect(importCall.path).toEqual({ id: 'provider-id' })
+    expect(importCall.body).toEqual({ skip_model_ids: undefined })
+    expect(ready).toHaveBeenCalledWith({ providerId: 'provider-id' })
+    expect(mocks.putModelsById).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
+  it('never reuses a same-name custom provider for a preset', async () => {
+    mocks.postProvider.mockRejectedValue({ code: 'provider.name_taken' })
+    mocks.getProviderByName.mockResolvedValue({ data: { id: 'custom-provider-id', client_type: 'anthropic-messages' } })
+    const { app, ready, setup } = mountSetup(preset)
+    setup.formValues.value.api_key = 'sk-test'
+
+    await setup.saveAndNext()
+
+    expect(mocks.updateProvider).not.toHaveBeenCalled()
+    expect(ready).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
+  it('never reuses a same-name provider of the same protocol made by hand', async () => {
+    mocks.postProvider.mockRejectedValue({ code: 'provider.name_taken' })
+    mocks.getProviderByName.mockResolvedValue({ data: { id: 'custom-provider-id', client_type: 'openai-completions', metadata: {} } })
+    const { app, ready, setup } = mountSetup(preset)
+    setup.formValues.value.api_key = 'sk-test'
+
+    await setup.saveAndNext()
+
+    expect(mocks.updateProvider).not.toHaveBeenCalled()
+    expect(ready).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
+  it('never reuses a same-name provider the user made from the same entry', async () => {
+    mocks.postProvider.mockRejectedValue({ code: 'provider.name_taken' })
+    mocks.getProviderByName.mockResolvedValue({
+      data: { id: 'hand-made-id', client_type: 'openai-completions', metadata: { catalog: 'deepseek', source: 'deepseek' } },
+    })
+    const { app, ready, setup } = mountSetup(preset)
+    setup.formValues.value.api_key = 'sk-test'
+
+    await setup.saveAndNext()
+
+    expect(mocks.updateProvider).not.toHaveBeenCalled()
+    expect(ready).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
+  it('reuses the provider an earlier run made from the same entry', async () => {
+    mocks.postProvider.mockRejectedValue({ code: 'provider.name_taken' })
+    mocks.getProviderByName.mockResolvedValue({
+      data: { id: 'earlier-id', client_type: 'openai-completions', metadata: { catalog: 'deepseek', source: 'deepseek', onboarding: true } },
+    })
+    mocks.updateProvider.mockResolvedValue({ data: { id: 'earlier-id' } })
+    const { app, ready, setup } = mountSetup(preset)
+    setup.formValues.value.api_key = 'sk-test'
+
+    await setup.saveAndNext()
+
+    expect(mocks.updateProvider).toHaveBeenCalledWith(expect.objectContaining({ path: { id: 'earlier-id' } }))
+    expect(ready).toHaveBeenCalledWith({ providerId: 'earlier-id' })
+    app.unmount()
+  })
+
+  it.each([
+    'openai-responses',
+    'openai-completions',
+    'anthropic-messages',
+    'google-generative-ai',
+  ])('imports custom %s providers with explicit protocol defaults', async (clientType) => {
+    mocks.getProviderByName.mockResolvedValue({ data: null })
+    mocks.postProvider.mockResolvedValue({ data: { id: 'provider-id' } })
+    const { app, setup } = mountSetup(null)
+    setup.formValues.value = {
+      name: 'My Provider',
+      api_key: 'sk-test',
+      base_url: 'https://example.com/v1',
+      client_type: clientType,
+    }
+
+    await setup.saveAndNext()
+
+    expect(mocks.postProvider).toHaveBeenCalled()
+    expect(mocks.importModels).toHaveBeenCalledWith({
+      path: { id: 'provider-id' },
+      body: { default_compatibilities: ['tool-call', 'reasoning'] },
+      throwOnError: true,
+    })
+    app.unmount()
+  })
+
+  it.each([
+    [{ status: 'auth_error', reachable: true, code: 'agent.provider_auth_failed' }, 'authError', 'errors.agent.provider_auth_failed'],
+    [{ status: 'error', reachable: false, code: 'agent.provider_unreachable' }, 'unreachable', 'errors.agent.provider_unreachable'],
+    [{ status: 'error', reachable: true, code: 'provider.future_code' }, 'http', ''],
+    [{ status: 'error', reachable: false }, 'unreachable', ''],
+  ])('names a failed test %j by its code copy only', async (result, state, detail) => {
+    mocks.postProvider.mockResolvedValue({ data: { id: 'provider-id' } })
+    mocks.testProvider.mockResolvedValue({ data: result })
+    const { app, ready, setup } = mountSetup(preset)
+    setup.formValues.value.api_key = 'sk-test'
+
+    await setup.saveAndNext()
+
+    expect(ready).not.toHaveBeenCalled()
+    expect(mocks.importModels).not.toHaveBeenCalled()
+    expect(setup.errorState.value).toBe(state)
+    expect(setup.errorDetail.value).toBe(detail)
+    app.unmount()
+  })
+
+  it('does not advance without a chat model', async () => {
+    mocks.postProvider.mockResolvedValue({ data: { id: 'provider-id' } })
+    mocks.getProviderModels.mockResolvedValue({
+      data: [{ id: 'embedding-id', model_id: 'embedding', type: 'embedding', enable: false }],
+    })
+    const { app, ready, setup } = mountSetup(preset)
+    setup.formValues.value.api_key = 'sk-test'
+
+    await setup.saveAndNext()
+
+    expect(ready).not.toHaveBeenCalled()
+    expect(setup.errorState.value).toBe('noModels')
+    app.unmount()
+  })
+})

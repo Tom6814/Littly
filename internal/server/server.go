@@ -1,0 +1,190 @@
+package server
+
+import (
+	"context"
+	"encoding/hex"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"strings"
+
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/channel/publicmedia"
+	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/telemetry"
+)
+
+type Server struct {
+	stopRequests context.CancelFunc
+	echo         *echo.Echo
+	addr         string
+	logger       *slog.Logger
+}
+
+type Handler interface {
+	Register(e *echo.Echo)
+}
+
+func NewServer(log *slog.Logger, addr string, jwtSecret string,
+	handlers ...Handler,
+) *Server {
+	return newServer(log, addr, jwtSecret, nil, handlers...)
+}
+
+func NewServerWithSessionValidator(log *slog.Logger, addr string, jwtSecret string,
+	validateSession auth.UserSessionValidator, handlers ...Handler,
+) *Server {
+	return newServer(log, addr, jwtSecret, validateSession, handlers...)
+}
+
+func newServer(log *slog.Logger, addr string, jwtSecret string,
+	validateSession auth.UserSessionValidator, handlers ...Handler,
+) *Server {
+	if addr == "" {
+		addr = ":8080"
+	}
+
+	e := echo.New()
+	e.Binder = &httpx.Binder{}
+	requestCtx, stopRequests := context.WithCancel(context.Background())
+	baseContext := func(net.Listener) context.Context { return requestCtx }
+	e.Server.BaseContext = baseContext
+	e.TLSServer.BaseContext = baseContext
+	e.HideBanner = true
+	e.HTTPErrorHandler = NewHTTPErrorHandler(log)
+	e.Use(httpx.AssignRequestID())
+	// Directly after AssignRequestID: everything below, and every handler, logs with
+	// a context that carries the id.
+	e.Use(httpx.RequestIDContext)
+	// After RequestIDContext so the span can carry the id the client is given,
+	// and before everything else so the span covers the work they do.
+	e.Use(telemetry.EchoServer)
+	// Directly after the span: the result record is logged with it, and a
+	// panic or error anywhere below is answered and recorded here.
+	e.Use(AccessLog(log))
+	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
+		Limit: "1M",
+		Skipper: func(c echo.Context) bool {
+			return !shouldLimitPublicRequestBody(c.Request().URL.Path)
+		},
+	}))
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins:  []string{"*"},
+		AllowMethods:  []string{echo.GET, echo.HEAD, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
+		AllowHeaders:  []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID, "Idempotency-Key"},
+		ExposeHeaders: []string{echo.HeaderXRequestID},
+	}))
+	e.Use(recordUpgradeStatus)
+	e.Use(auth.JWTMiddleware(jwtSecret, func(c echo.Context) bool {
+		return shouldSkipJWT(c.Request().URL.Path)
+	}, validateSession))
+
+	for _, h := range handlers {
+		if h != nil {
+			h.Register(e)
+		}
+	}
+
+	// LITTLY: single-person mode. The old multi-bot surface is not part of v2;
+	// block bot creation so a second "person" cannot be created through the
+	// legacy API. Set LITTLY_SINGLE_PERSON=0 only for fork maintenance/tests.
+	if os.Getenv("LITTLY_SINGLE_PERSON") != "0" {
+		e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+			return func(c echo.Context) error {
+				if c.Request().Method == http.MethodPost && (c.Path() == "/bots" || strings.HasPrefix(c.Path(), "/bots/stream")) {
+					return echo.NewHTTPError(http.StatusForbidden, "littly single-person mode: creating another bot is disabled")
+				}
+				return next(c)
+			}
+		})
+	}
+	return &Server{
+		stopRequests: stopRequests, echo: e,
+		addr:   addr,
+		logger: log.With(slog.String("component", "server")),
+	}
+}
+
+func (s *Server) Start() error {
+	return s.echo.Start(s.addr)
+}
+
+func (s *Server) Stop(ctx context.Context) error {
+	// Agent interruption is recorded by the earlier lifecycle hook. Cancel
+	// request contexts now so SSE handlers release before their hubs are closed
+	// by later hooks; otherwise HTTP drain consumes the whole shutdown budget.
+	if s.stopRequests != nil {
+		s.stopRequests()
+	}
+	return s.echo.Shutdown(ctx)
+}
+
+func shouldSkipJWT(path string) bool {
+	if path == "/" || path == "/ping" || path == "/health" || path == "/ready" || path == "/api/swagger.json" || path == "/auth/login" || path == "/runtimes/connect" {
+		return true
+	}
+	if strings.HasPrefix(path, "/assets/") {
+		return true
+	}
+	// LITTLY: the v2 six-surface UI and its API are mounted as a core handler.
+	// Local single-person mode has no separate login; keep it public so the
+	// embedded UI can boot. (Replace with a token check before public deploy.)
+	if path == "/littly" || strings.HasPrefix(path, "/littly/") {
+		return true
+	}
+	if isPublicSupermarketSkillIconPath(path) {
+		return true
+	}
+	if strings.HasPrefix(path, "/api/docs") {
+		return true
+	}
+	if isPublicChannelWebhookPath(path) {
+		return true
+	}
+	if isPublicChannelMediaPath(path) {
+		return true
+	}
+	if strings.HasPrefix(path, "/oauth/mcp/callback") || strings.HasPrefix(path, "/api/oauth/mcp/callback") {
+		return true
+	}
+	if strings.HasPrefix(path, "/providers/oauth/callback") {
+		return true
+	}
+	if strings.HasPrefix(path, "/auth/callback") {
+		return true
+	}
+	return false
+}
+
+func isPublicSupermarketSkillIconPath(path string) bool {
+	digest, found := strings.CutPrefix(path, "/supermarket/artifacts/icon/")
+	if !found {
+		digest, found = strings.CutPrefix(path, "/workspace-dependencies/icons/")
+	}
+	if !found || len(digest) != 64 || strings.ToLower(digest) != digest {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
+}
+
+func shouldLimitPublicRequestBody(path string) bool {
+	return isPublicChannelWebhookPath(path)
+}
+
+func isPublicChannelWebhookPath(path string) bool {
+	if !strings.HasPrefix(path, "/channels/") {
+		return false
+	}
+	trimmed := strings.Trim(strings.TrimPrefix(path, "/channels/"), "/")
+	parts := strings.Split(trimmed, "/")
+	return len(parts) >= 3 && strings.TrimSpace(parts[0]) != "" && parts[1] == "webhook" && strings.TrimSpace(parts[2]) != ""
+}
+
+func isPublicChannelMediaPath(path string) bool {
+	return publicmedia.IsPath(path)
+}

@@ -1,0 +1,267 @@
+// Package external defines the neutral port between the agent application
+// layer and out-of-process runtimes: Codex, Claude Code, and ACP agents.
+//
+// A Driver owns one runtime type end to end: process lifecycle inside the bot
+// workspace, the native wire protocol, and the translation of runtime events
+// into the shared event.StreamEvent vocabulary. The application layer stays
+// runtime-agnostic: it resolves a Driver from the session's runtime type,
+// hands it a PromptInput, and persists the PromptResult — the same shape for
+// every driver. New runtimes must implement Driver instead of growing new
+// special cases in the application layer.
+package external
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	sdk "github.com/felinics/twilight/sdk"
+
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	"github.com/felinics/memoh/internal/agent/event"
+)
+
+// BotAgentAuthPurger signs an Agent's runtime out: it removes the login the
+// runtime keeps of its own.
+type BotAgentAuthPurger interface {
+	PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string) error
+}
+
+type ModelCatalogRequest struct {
+	BotID       string
+	BotAgentID  string
+	ProjectPath string
+	// ModelID selects the model whose defaults the picker is displaying.
+	ModelID string
+	// Preference validation needs only capabilities; resolved defaults are a
+	// separate, optional observation for display.
+	ResolveDefaults bool
+}
+
+type ModelCatalogProvider interface {
+	ModelCatalog(ctx context.Context, request ModelCatalogRequest) (ModelCatalog, error)
+}
+
+var ErrModelCatalogUnavailable = errors.New("external agent model catalog unavailable")
+
+// ThreadForker is implemented by runtimes with native conversation forking.
+// ForkThread derives a new runtime-side conversation from the session
+// described by runtimeMetadata, cut after lastTurnID when non-empty (empty
+// forks at the runtime head). It returns the runtime-metadata delta that
+// identifies the fork — only the driver-owned session keys — which the
+// caller overlays on the source session's runtime metadata.
+type ThreadForker interface {
+	ForkThread(ctx context.Context, botID, botAgentID string, runtimeMetadata map[string]any, lastTurnID string) (map[string]any, error)
+}
+
+// ModelCatalog is the runtime-owned model picker contract.
+type ModelCatalog struct {
+	Models                    []ModelOption `json:"models"`
+	ConfiguredModelID         string        `json:"configured_model_id,omitempty"`
+	ConfiguredReasoningEffort string        `json:"configured_reasoning_effort,omitempty"`
+}
+
+// ModelOption is one runtime model and its supported reasoning options.
+type ModelOption struct {
+	// ResolvedModelID preserves a runtime-advertised full model name for
+	// validation without duplicating its alias in the model picker.
+	ResolvedModelID        string                  `json:"resolved_model_id,omitempty"`
+	ID                     string                  `json:"id"`
+	Name                   string                  `json:"name"`
+	Description            string                  `json:"description,omitempty"`
+	Default                bool                    `json:"default,omitempty"`
+	DefaultReasoningEffort string                  `json:"default_reasoning_effort,omitempty"`
+	ReasoningEfforts       []ReasoningEffortOption `json:"reasoning_efforts"`
+	// IDs belong to this runtime's permission menu, not a shared preset enum.
+	UnavailablePermissionModes []string `json:"unavailable_permission_modes,omitempty"`
+}
+
+// ReasoningEffortOption is one runtime-defined reasoning level.
+type ReasoningEffortOption struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// PromptInput is one turn's worth of work for a Driver.
+type PromptInput struct {
+	Steering   Steering
+	BotID      string
+	BotAgentID string
+	ChatID     string
+	ThreadID   string
+	RunID      string
+	RouteID    string
+
+	// Prompt is the user's message text.
+	Prompt string
+	// ContextMarkdown is the assembled Memoh context document for this turn.
+	ContextMarkdown string
+	// Images are inline user images, raw bytes with MIME types.
+	Images []Image
+
+	// ModelID and ReasoningEffort are per-turn overrides; empty means the
+	// runtime's configured default.
+	ModelID         string
+	ReasoningEffort string
+
+	// SessionMode is the Memoh session mode driving this turn (chat,
+	// schedule, ...); tool-gateway policy keys on it.
+	SessionMode string
+
+	// CurrentPlatform, ReplyTarget, and ConversationType describe the surface
+	// the turn is answering; they flow into the trusted tool identity.
+	CurrentPlatform  string
+	ReplyTarget      string
+	ConversationType string
+
+	// Command is an exact agent-command selector matched at admission; a
+	// runtime that advertises commands must re-validate it at dispatch.
+	// Runtimes without a command vocabulary ignore it.
+	Command string
+	// CommandArgs is the original user input after the runtime command selector.
+	CommandArgs string
+
+	// ForceFreshRuntime asks the driver to abandon any resumable runtime
+	// session and start this turn on a fresh one.
+	ForceFreshRuntime bool
+
+	// AttachmentReferences names non-image attachments already staged for the
+	// runtime (paths or references it may read through its tools).
+	AttachmentReferences []string
+	// CanFallbackImagesToFiles permits a runtime without image input to
+	// receive the images as workspace files instead of failing the turn.
+	CanFallbackImagesToFiles bool
+	// ToolOutputLimit bounds tool output the runtime feeds back into its
+	// context through Memoh-owned tool surfaces.
+	ToolOutputLimit contextlimit.ToolOutputLimit
+
+	// RuntimeMetadata is the session's runtime metadata map. Drivers read and
+	// persist their own keys through it (e.g. the codex thread id).
+	RuntimeMetadata map[string]any
+
+	// ContextURI names the Memoh-owned context document. The budget flows into
+	// runtime-hosted Memoh tools.
+	ContextURI             string
+	ContextBudgetMaxTokens int
+
+	// RuntimeOwnerAccountID is the account whose workspace authority the
+	// runtime executes under.
+	RuntimeOwnerAccountID string
+	// ChannelIdentityID identifies the acting user for tool attribution.
+	ChannelIdentityID string
+	// SessionToken authenticates runtime-side calls back into Memoh.
+	SessionToken string //nolint:gosec // session credential material, not a hardcoded secret
+	// ToolHTTPURL is the Memoh tool gateway (HTTP MCP) base URL, empty when
+	// the gateway is unavailable.
+	ToolHTTPURL string
+
+	// CanRequestUserInput reports whether the surface driving this turn can
+	// deliver interactive decisions such as approvals and ask_user.
+	CanRequestUserInput bool
+
+	// Sink receives stream events as the turn runs. Never nil.
+	Sink EventSink
+}
+
+// Image is an inline prompt image.
+type Image struct {
+	MimeType string
+	// Data is the raw image bytes (not base64, not a data URL).
+	Data []byte
+}
+
+// EventSink receives stream events during a turn.
+type EventSink interface {
+	EmitStreamEvent(event.StreamEvent)
+}
+
+// EventSinkFunc adapts a function to EventSink.
+type EventSinkFunc func(event.StreamEvent)
+
+func (f EventSinkFunc) EmitStreamEvent(ev event.StreamEvent) { f(ev) }
+
+// PromptResult is the durable outcome of one turn.
+type PromptResult struct {
+	// Notices are UI-only runtime facts collected across startup and execution.
+	// They are persisted with the round, independently of the model transcript.
+	Notices []event.Notice
+	// SteerInputIDs correspond to the user messages in Output, in arrival order.
+	SteerInputIDs []string
+	// Output is the transcript to persist, in provider-message form.
+	Output []sdk.Message
+	// Text is the final assistant message text (for surfaces that report a
+	// plain-text result, e.g. schedule runs).
+	Text string
+	// Usage is the turn's token usage, when the runtime reported it.
+	Usage *sdk.Usage
+	// StopReason is the runtime's terminal stop reason, normalized to the
+	// event vocabulary where possible.
+	StopReason string
+	// AgentTurnID is the runtime's own identifier for this turn (e.g. the
+	// codex turn id); it anchors turn-level operations such as forking.
+	AgentTurnID string
+	// FinalTurnAnchorOnly restricts a multi-turn transcript to its final fork boundary.
+	FinalTurnAnchorOnly bool
+	// TurnCompleted reports whether the runtime finished the turn (as opposed
+	// to an interrupt or failure part-way).
+	TurnCompleted bool
+	// RuntimeMetadata carries driver-owned metadata updates to merge back
+	// into the session's runtime metadata (e.g. a newly created thread id).
+	// Nil means no changes.
+	RuntimeMetadata map[string]any
+}
+
+// LauncherSource says which copy of a CLI a Launcher points at.
+type LauncherSource string
+
+const (
+	LauncherSourceManaged LauncherSource = "managed"
+	LauncherSourceToolkit LauncherSource = "toolkit"
+	LauncherSourcePath    LauncherSource = "path"
+)
+
+// Launcher is a resolved CLI executable inside the bot workspace.
+type Launcher struct {
+	// Path is the absolute path the driver must execute.
+	Path string
+	// Version is the observed CLI version, empty when unknown.
+	Version string
+	Source  LauncherSource
+}
+
+// LauncherResolver picks the CLI copy a driver should execute: the managed
+// copy first, then the image toolkit, then PATH. Discovery is read-only;
+// a missing dependency yields a *DependencyMissingError.
+type LauncherResolver interface {
+	ResolveLauncher(ctx context.Context, botID, depID string) (Launcher, error)
+}
+
+// VersionObserver lets drivers feed the CLI version reported during the
+// protocol handshake back into the resolver's cache.
+type VersionObserver interface {
+	ObserveLauncherVersion(ctx context.Context, botID, depID, version string)
+}
+
+// ErrDependencyMissing is the errors.Is target for DependencyMissingError.
+var ErrDependencyMissing = errors.New("workspace dependency is not installed")
+
+// DependencyMissingError reports that no copy of the dependency exists in the
+// workspace. TaskID is the background installation task, if one was started.
+type DependencyMissingError struct {
+	DependencyID string
+	TaskID       string
+	// OperationInProgress distinguishes an existing administrative operation
+	// from a dependency that an administrator still needs to install.
+	OperationInProgress bool
+}
+
+func (e *DependencyMissingError) Error() string {
+	if e == nil {
+		return ErrDependencyMissing.Error()
+	}
+	return fmt.Sprintf("workspace dependency %s is not installed", e.DependencyID)
+}
+
+// Is makes errors.Is(err, ErrDependencyMissing) true for any instance.
+func (*DependencyMissingError) Is(target error) bool { return target == ErrDependencyMissing }

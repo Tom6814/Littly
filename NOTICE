@@ -1,0 +1,25 @@
+Littly v2
+Copyright (C) 2026 Littly contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, version 3.
+
+Fork provenance
+---------------
+This repository is a hard fork of Memoh (https://github.com/felinics/Memoh),
+AGPL-3.0, baseline snapshot 2026-11-06 (v0.13 series). Upstream copyright and
+license notices are retained. Modifications made by Littly:
+
+- single-person mode (default entry redirects to /littly/, bot creation guarded)
+- internal/littly: one-person persona, personality-driven reply policy,
+  autobiographical memory vault, people tiers + recycle bin, heartbeat
+  ("心声回响" v2), workbench file/artifact tools, SnowLuma OneBot v11 client,
+  six-surface embedded UI, settings rework
+- nginx entry changes and compose healthcheck/env additions
+
+Design references (no code copied):
+- Generative Agents (arXiv:2304.03442)
+- Letta sleep-time compute
+- Hermes HeartBeat 2.0 (https://hermes-agent.nousresearch.com/marketplace/heartbeat2)
+- Littly v1 "心声回响" (heartbeat.ts)

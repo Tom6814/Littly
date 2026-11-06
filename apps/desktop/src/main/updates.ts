@@ -1,0 +1,514 @@
+import { readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { join } from 'node:path'
+import type { OutgoingHttpHeaders } from 'node:http'
+import { CancellationToken } from 'builder-util-runtime'
+import { GenericProvider } from 'electron-updater/out/providers/GenericProvider.js'
+import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import electronUpdater from 'electron-updater'
+import type { ProgressInfo, UpdateInfo } from 'electron-updater'
+import {
+  createInitialDesktopUpdateState,
+  reduceDesktopUpdateState,
+  type DesktopUpdateInfo,
+  type DesktopUpdateState,
+  type DesktopUpdateStateEvent,
+} from '../shared/updates'
+
+const UPDATE_FEED_BASE_URL = (process.env.MEMOH_DESKTOP_UPDATE_BASE_URL ?? '').trim()
+// The app is tray-resident and can run for weeks without a quit. Restart always
+// installs the cached download without a last-moment check, so a release newer
+// than the last check is only picked up on the following launch. A check fetches
+// only the small feed manifest, so a short interval keeps that window small cheaply.
+// Failures retry separately so one outage does not disable updates.
+const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000
+const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000]
+const DOWNLOAD_STALL_TIMEOUT_MS = 2 * 60_000
+const FEED_REQUEST_TIMEOUT_MS = 30_000
+const { autoUpdater } = electronUpdater
+type UpdateCheckResult = NonNullable<Awaited<ReturnType<typeof autoUpdater.checkForUpdates>>>
+type DownloadCancellationToken = NonNullable<UpdateCheckResult['cancellationToken']>
+
+export interface DesktopUpdatesOptions {
+  assertTrustedRenderer(event: IpcMainInvokeEvent): void
+  prepareToInstall(): Promise<void>
+  markQuitting(): void
+  installFailed(): void
+  onStateChanged(state: DesktopUpdateState): void
+}
+
+interface SavedUpdates {
+  autoUpdate: boolean
+  pending: UpdateInfo | null
+  attemptedVersion: string | null
+}
+let saved: SavedUpdates = { autoUpdate: true, pending: null, attemptedVersion: null }
+let updateOptions: DesktopUpdatesOptions
+let updateState = createInitialDesktopUpdateState(app.getVersion(), Boolean(UPDATE_FEED_BASE_URL))
+let updaterConfigured = false
+let updaterListenersRegistered = false
+let checkTimer: ReturnType<typeof setTimeout> | null = null
+let downloadStallTimer: ReturnType<typeof setTimeout> | null = null
+let downloadCancellationToken: DownloadCancellationToken | null = null
+let downloadCompletionSequence = 0
+let installRecoveryRequired = false
+// Becomes true only once the package is handed to the native installer. Before
+// that, an `error` event can only come from a background check that was already
+// in flight when the user chose to restart.
+let installHandedOff = false
+let consecutiveFailures = 0
+let handledFailure: unknown = null
+
+export function registerDesktopUpdates(options: DesktopUpdatesOptions): void {
+  updateOptions = options
+  try {
+    const value = JSON.parse(readFileSync(settingsPath(), 'utf8')) as SavedUpdates
+    if (typeof value.autoUpdate !== 'boolean') throw new Error('Invalid update settings')
+    saved = { autoUpdate: value.autoUpdate, pending: value.pending?.version ? value.pending : null, attemptedVersion: value.attemptedVersion ?? null }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') setUpdateState({ type: 'error', error })
+  }
+  setUpdateState({ type: 'preference', autoUpdate: saved.autoUpdate })
+  configureAutoUpdater()
+
+  ipcMain.handle('desktop:updates:get-info', (event): DesktopUpdateInfo => {
+    options.assertTrustedRenderer(event)
+    return {
+      version: app.getVersion(),
+      platform: process.platform,
+      enabled: Boolean(UPDATE_FEED_BASE_URL),
+    }
+  })
+  ipcMain.handle('desktop:updates:get-state', (event) => {
+    options.assertTrustedRenderer(event)
+    return getUpdateState()
+  })
+  ipcMain.handle('desktop:updates:check', (event) => {
+    options.assertTrustedRenderer(event)
+    return checkForUpdate()
+  })
+  ipcMain.handle('desktop:updates:set-auto-update', (event, enabled: unknown) => {
+    options.assertTrustedRenderer(event)
+    if (typeof enabled !== 'boolean') throw new TypeError('autoUpdate must be boolean')
+    if (updateState.status === 'installing') return updateState
+    persist({ ...saved, autoUpdate: enabled })
+    setUpdateState({ type: 'preference', autoUpdate: enabled })
+    if (enabled) void checkForUpdate()
+    else cancelScheduledCheck()
+    return updateState
+  })
+  ipcMain.handle('desktop:updates:install', async (event) => {
+    options.assertTrustedRenderer(event)
+    return installDesktopUpdate()
+  })
+
+  scheduleCheck(3_000)
+}
+
+// builder-util-runtime arms its request timeout on the `socket` event, which
+// Electron's net.request never emits. A feed that accepts the connection but
+// never answers would leave the check pending forever, and electron-updater
+// hands every later check that same pending promise. Abort the manifest request
+// instead so the check fails and the normal retry schedule takes over.
+// Requests that bring their own token (downloads) keep the download watchdog.
+class FeedProvider extends GenericProvider {
+  constructor(_options: unknown, updater: ConstructorParameters<typeof GenericProvider>[1], runtime: ConstructorParameters<typeof GenericProvider>[2]) {
+    super({ provider: 'generic', url: ensureTrailingSlash(UPDATE_FEED_BASE_URL) }, updater, runtime)
+  }
+
+  protected override async httpRequest(url: URL, headers?: OutgoingHttpHeaders | null, cancellationToken?: CancellationToken): Promise<string | null> {
+    if (cancellationToken) return super.httpRequest(url, headers, cancellationToken)
+    const token = new CancellationToken()
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      token.cancel()
+    }, FEED_REQUEST_TIMEOUT_MS)
+    try {
+      return await super.httpRequest(url, headers, token)
+    } catch (error) {
+      if (timedOut) throw new Error(`Update check timed out after ${FEED_REQUEST_TIMEOUT_MS / 1000} seconds.`)
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+}
+
+function useFeed(): void {
+  autoUpdater.setFeedURL({ provider: 'custom', updateProvider: FeedProvider, url: ensureTrailingSlash(UPDATE_FEED_BASE_URL) })
+}
+
+function getUpdateState(): DesktopUpdateState {
+  return updateState
+}
+
+async function checkForUpdate(automatic = false): Promise<DesktopUpdateState> {
+  if (automatic && installRecoveryRequired) return updateState
+  if (!UPDATE_FEED_BASE_URL) {
+    return setUpdateState({
+      type: 'unavailable',
+      error: 'No update feed URL is configured.',
+    })
+  }
+  if (['checking', 'downloading', 'installing'].includes(updateState.status)) return updateState
+
+  installRecoveryRequired = false
+  cancelScheduledCheck()
+  configureAutoUpdater()
+  if (!autoUpdater.isUpdaterActive()) {
+    return setUpdateState({
+      type: 'unavailable',
+      error: 'Updater is not available for this build.',
+    })
+  }
+
+  handledFailure = null
+  // While a package is ready, recheck without downloading. electron-updater
+  // compares the full manifest, so a same-version republish would otherwise be
+  // re-downloaded, and it empties the cached package first: a failed
+  // re-download would leave Restart pointing at a package that no longer exists.
+  // Only a different version replaces the ready package.
+  const readyVersion = updateState.status === 'downloaded' ? updateState.latestVersion : null
+  if (readyVersion) autoUpdater.autoDownload = false
+  setUpdateState({ type: 'checking' })
+  try {
+    const completionAtStart = downloadCompletionSequence
+    let result: Awaited<ReturnType<typeof autoUpdater.checkForUpdates>>
+    try {
+      result = await autoUpdater.checkForUpdates()
+    } finally {
+      // An installation started meanwhile keeps downloads off until it fails.
+      if (readyVersion && updateState.status !== 'installing') autoUpdater.autoDownload = true
+    }
+    // A restart started while this check was in flight owns the state now.
+    // Background downloads are disabled during installation, so there is no
+    // download to track and the cached package being installed stays intact.
+    if (updateState.status === 'installing') return updateState
+    if (!result) {
+      return setUpdateState({
+        type: 'unavailable',
+        error: 'Updater is not available for this build.',
+      })
+    }
+    let download = result.downloadPromise
+    let token = result.cancellationToken
+    if (readyVersion && result.isUpdateAvailable && result.updateInfo.version !== readyVersion) {
+      token = new CancellationToken()
+      download = autoUpdater.downloadUpdate(token)
+    }
+    if (download) {
+      // A cached download may finish before checkForUpdates() resumes. Do not
+      // arm a stall timer for work that has already emitted `update-downloaded`.
+      if (token && downloadCompletionSequence === completionAtStart) armDownloadWatchdog(token)
+      void download.then(
+        () => clearDownloadWatchdog(token),
+        failDownload,
+      )
+    }
+    if (updateState.status === 'checking') {
+      setUpdateState(
+        result.isUpdateAvailable
+          ? { type: 'available', latestVersion: result.updateInfo.version, releaseNotes: updateNotes(result.updateInfo) }
+          : { type: 'not-available', latestVersion: result.updateInfo.version },
+      )
+    }
+    if (!result.isUpdateAvailable || !download) markUpdateSucceeded()
+  } catch (error) {
+    failUpdate(error)
+  }
+  return updateState
+}
+
+function markUpdateSucceeded(): void {
+  consecutiveFailures = 0
+  handledFailure = null
+  scheduleCheck(PERIODIC_CHECK_INTERVAL_MS)
+}
+
+function failUpdate(error: unknown): void {
+  clearDownloadWatchdog()
+  if (updateState.status === 'installing') return
+  if (handledFailure === error || (updateState.status === 'error' && checkTimer)) return
+  handledFailure = error
+  // A feed error must not hide an already usable download. New-version download
+  // failures are no longer in `downloaded`, so they remain visible and actionable.
+  if (updateState.status !== 'downloaded') setUpdateState({ type: 'error', error })
+  const delay = RETRY_DELAYS_MS[Math.min(consecutiveFailures, RETRY_DELAYS_MS.length - 1)]
+  consecutiveFailures += 1
+  scheduleCheck(delay)
+}
+
+function failDownload(error: unknown): void {
+  clearDownloadWatchdog()
+  // electron-updater may have cleared its pending cache for this download.
+  // Do not carry a stale manifest into the next launch's offline recovery.
+  if (saved.pending) {
+    try {
+      persist({ ...saved, pending: null })
+    } catch (persistError) {
+      failUpdate(persistError)
+      return
+    }
+  }
+  failUpdate(error)
+}
+
+// electron-updater keeps a single pending package and empties it before it
+// downloads a different release; there is no option to keep the previous one.
+// Drop the saved manifest at that point so a quit or crash mid-download cannot
+// make the next launch recover and install the replaced, older release.
+// An installation in progress disables background downloads, so its package stays.
+function forgetReplacedPending(version: string): void {
+  if (!saved.pending || saved.pending.version === version || updateState.status === 'installing') return
+  try {
+    persist({ ...saved, pending: null })
+  } catch (error) {
+    failUpdate(error)
+  }
+}
+
+function armDownloadWatchdog(token: DownloadCancellationToken): void {
+  clearDownloadWatchdog()
+  downloadCancellationToken = token
+  downloadStallTimer = setTimeout(() => {
+    const error = new Error('Update download stopped making progress. Retry will follow automatically.')
+    token.cancel()
+    failDownload(error)
+  }, DOWNLOAD_STALL_TIMEOUT_MS)
+}
+
+function clearDownloadWatchdog(token?: DownloadCancellationToken): void {
+  if (token && downloadCancellationToken !== token) return
+  if (downloadStallTimer) clearTimeout(downloadStallTimer)
+  downloadStallTimer = null
+  downloadCancellationToken = null
+}
+
+function scheduleCheck(delay: number): void {
+  cancelScheduledCheck()
+  if (!UPDATE_FEED_BASE_URL || !saved.autoUpdate || updateState.status === 'installing' || installRecoveryRequired) return
+  checkTimer = setTimeout(() => {
+    checkTimer = null
+    void checkForUpdate(true)
+  }, delay)
+}
+
+function cancelScheduledCheck(): void {
+  if (checkTimer) clearTimeout(checkTimer)
+  checkTimer = null
+}
+
+function settingsPath(): string {
+  return join(app.getPath('userData'), 'desktop-updates.json')
+}
+
+function persist(next: SavedUpdates): void {
+  const path = settingsPath()
+  writeFileSync(`${path}.tmp`, JSON.stringify(next), { mode: 0o600 })
+  renameSync(`${path}.tmp`, path)
+  saved = next
+}
+
+function failInstall(error: unknown): void {
+  installHandedOff = false
+  autoUpdater.autoDownload = true
+  installRecoveryRequired = true
+  cancelScheduledCheck()
+  clearDownloadWatchdog()
+  updateOptions.installFailed()
+  setUpdateState({ type: 'error', error })
+}
+
+export async function installDesktopUpdate(): Promise<DesktopUpdateState> {
+  return installUpdate(updateOptions)
+}
+
+async function installUpdate(options: DesktopUpdatesOptions, restart = true): Promise<DesktopUpdateState> {
+  if (updateState.status !== 'downloaded') return updateState
+  cancelScheduledCheck()
+  setUpdateState({ type: 'installing' }) // Lock before the first await, including IPC double-clicks.
+  // electron-updater reads autoDownload when a check resolves. A check already
+  // in flight would otherwise download a newer release and delete the package
+  // this restart is about to install.
+  autoUpdater.autoDownload = false
+  try {
+    persist({ ...saved, attemptedVersion: updateState.latestVersion })
+    await options.prepareToInstall()
+    options.markQuitting()
+    autoUpdater.autoRunAppAfterInstall = restart
+    installHandedOff = true
+    // MacUpdater may still be preparing the ZIP in Squirrel. Its eventual quit
+    // callback cannot be cancelled through the public API, so elapsed time alone
+    // must not restore the session while that callback remains armed. Stay locked
+    // until installation exits the process or the updater reports a real error.
+    autoUpdater.quitAndInstall(!restart, restart)
+  } catch (error) {
+    failInstall(error)
+  }
+  return updateState
+}
+
+// Own the quit boundary instead of native auto-install: on macOS handing the
+// package to Squirrel early cannot reliably be undone when the toggle changes.
+export async function installDesktopUpdateOnQuit(): Promise<boolean> {
+  if (!saved.autoUpdate || updateState.status !== 'downloaded') return false
+  await installUpdate(updateOptions, false)
+  return getUpdateState().status === 'installing'
+}
+
+/** Recover after shutdown/crash without depending on an online feed. The standard
+ * updater resolves and SHA-validates its own cache using the saved manifest; no
+ * cached executable path is trusted or launched by this application. A bounded
+ * startup wait keeps the old version usable on recovery failure. An attempted
+ * version still running old code becomes an error, never another restart loop.
+ */
+export async function recoverDesktopUpdate(): Promise<boolean> {
+  if (!saved.pending || !UPDATE_FEED_BASE_URL) return false
+  try {
+    if (autoUpdater.currentVersion.compare(saved.pending.version) >= 0) {
+      persist({ ...saved, pending: null, attemptedVersion: null })
+      return false
+    }
+    if (saved.attemptedVersion === saved.pending.version) {
+      installRecoveryRequired = true
+      cancelScheduledCheck()
+      setUpdateState({ type: 'error', error: 'The previous update was not applied. Retry from About.' })
+      return false
+    }
+    if (!saved.autoUpdate) return false
+    const manifest = saved.pending
+    class CachedManifestProvider extends FeedProvider {
+      override async getLatestVersion(): Promise<UpdateInfo> { return manifest }
+    }
+    autoUpdater.setFeedURL({ provider: 'custom', updateProvider: CachedManifestProvider, url: ensureTrailingSlash(UPDATE_FEED_BASE_URL) })
+    let expired = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const recovery = (async () => {
+      const completionAtStart = downloadCompletionSequence
+      const result = await autoUpdater.checkForUpdates()
+      const token = result?.cancellationToken
+      // The cached package may be gone, which turns recovery into a real download.
+      // Without the stall watchdog a hung download leaves the status at
+      // `downloading` forever and every later check is skipped as "busy".
+      if (result?.downloadPromise && token && downloadCompletionSequence === completionAtStart) armDownloadWatchdog(token)
+      try {
+        await result?.downloadPromise
+      } finally {
+        clearDownloadWatchdog(token)
+      }
+      if (!expired && updateState.status === 'downloaded') await installUpdate(updateOptions)
+    })()
+    try {
+      await Promise.race([
+        recovery,
+        new Promise<void>(resolve => { timer = setTimeout(() => { expired = true; resolve() }, 8_000) }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+      useFeed()
+    }
+    // After timeout, recovery may finish downloading but must not restart an
+    // already visible session. Its errors are still consumed and exposed.
+    void recovery.catch(failUpdate)
+    return getUpdateState().status === 'installing'
+  } catch (error) {
+    failUpdate(error)
+    return false
+  }
+}
+
+function configureAutoUpdater(): void {
+  if (!UPDATE_FEED_BASE_URL) return
+
+  if (!updaterConfigured) {
+    // Silent-first flow: download in the background and apply on the next
+    // natural quit. The footer chip / About row remain the explicit path
+    // (restart-now), not the only way an update ever lands.
+    autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = false
+    autoUpdater.forceDevUpdateConfig = !app.isPackaged
+    try {
+      useFeed()
+      updaterConfigured = true
+    } catch (error) {
+      setUpdateState({ type: 'unavailable', error: formatConfigurationError(error) })
+      return
+    }
+  }
+
+  if (updaterListenersRegistered) return
+  autoUpdater.on('checking-for-update', () => setUpdateState({ type: 'checking' }))
+  autoUpdater.on('update-available', info => {
+    forgetReplacedPending(updateVersion(info))
+    setUpdateState({ type: 'available', latestVersion: updateVersion(info), releaseNotes: updateNotes(info) })
+  })
+  autoUpdater.on('update-not-available', info => (
+    setUpdateState({ type: 'not-available', latestVersion: updateVersion(info) })
+  ))
+  autoUpdater.on('download-progress', progress => {
+    if (downloadCancellationToken) armDownloadWatchdog(downloadCancellationToken)
+    setUpdateState({ type: 'download-progress', percent: progressPercent(progress) })
+  })
+  autoUpdater.on('update-downloaded', info => {
+    // Keep the attempted version recorded for the installation in progress.
+    if (updateState.status === 'installing') return
+    downloadCompletionSequence += 1
+    clearDownloadWatchdog()
+    try {
+      persist({ ...saved, pending: info, attemptedVersion: null })
+      setUpdateState({ type: 'downloaded', latestVersion: updateVersion(info), releaseNotes: updateNotes(info) })
+      markUpdateSucceeded()
+    } catch (error) {
+      failDownload(error)
+    }
+  })
+  autoUpdater.on('error', error => {
+    if (updateState.status !== 'installing') failUpdate(error)
+    else if (installHandedOff) failInstall(error)
+  })
+  updaterListenersRegistered = true
+}
+
+function setUpdateState(event: DesktopUpdateStateEvent): DesktopUpdateState {
+  updateState = reduceDesktopUpdateState(updateState, event)
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send('desktop:updates:state-changed', updateState)
+    }
+  }
+  updateOptions.onStateChanged(updateState)
+  return updateState
+}
+
+function updateVersion(info: UpdateInfo): string {
+  return info.version
+}
+
+// electron-updater shapes releaseNotes as string | Array<{ note }> | null
+// depending on the feed; collapse to a single markdown string (or null so the
+// renderer can hide the notes affordance entirely).
+function updateNotes(info: UpdateInfo): string | null {
+  const notes = info.releaseNotes
+  if (typeof notes === 'string') return notes.trim() || null
+  if (Array.isArray(notes)) {
+    const joined = notes
+      .map(entry => (typeof entry?.note === 'string' ? entry.note.trim() : ''))
+      .filter(Boolean)
+      .join('\n\n')
+    return joined || null
+  }
+  return null
+}
+
+function progressPercent(progress: ProgressInfo): number {
+  return progress.percent
+}
+
+function ensureTrailingSlash(value: string): string {
+  return value.endsWith('/') ? value : `${value}/`
+}
+
+function formatConfigurationError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return `Failed to configure updater: ${message}`
+}

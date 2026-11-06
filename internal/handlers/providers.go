@@ -1,0 +1,921 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"slices"
+	"strings"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/labstack/echo/v4"
+
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/modelcatalog"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/reasoning"
+)
+
+type ProvidersHandler struct {
+	service       *providers.Service
+	modelsService *models.Service
+	catalog       *modelcatalog.Service
+	logger        *slog.Logger
+}
+
+func NewProvidersHandler(log *slog.Logger, service *providers.Service, modelsService *models.Service, catalog *modelcatalog.Service) *ProvidersHandler {
+	return &ProvidersHandler{
+		service:       service,
+		modelsService: modelsService,
+		catalog:       catalog,
+		logger:        log.With(slog.String("handler", "providers")),
+	}
+}
+
+func (h *ProvidersHandler) Register(e *echo.Echo) {
+	group := e.Group("/providers")
+	group.POST("", h.Create)
+	group.POST("/from-template", h.CreateFromTemplate)
+	group.GET("", h.List)
+	group.GET("/catalog/models", h.CatalogModels)
+	group.GET("/:id", h.Get)
+	group.GET("/:id/models", h.ListModelsByProvider)
+	group.GET("/name/:name", h.GetByName)
+	group.PUT("/:id", h.Update)
+	group.DELETE("/:id", h.Delete)
+	group.GET("/count", h.Count)
+	group.POST("/:id/test", h.Test)
+	group.POST("/:id/import-models", h.ImportModels)
+	group.POST("/:id/import-catalog-models", h.ImportCatalogModels)
+}
+
+// CreateFromTemplate godoc
+// @Summary Create a provider from a global template
+// @Description Materialize a tenant-owned provider only when the user saves a template configuration
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Param request body providers.CreateFromTemplateRequest true "Provider template configuration"
+// @Success 201 {object} providers.GetResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /providers/from-template [post].
+func (h *ProvidersHandler) CreateFromTemplate(c echo.Context) error {
+	var req providers.CreateFromTemplateRequest
+	if err := c.Bind(&req); err != nil {
+		return apperror.Wrap(apperror.CodeProviderTemplateRequestInvalid, err, nil)
+	}
+	resp, err := h.service.CreateFromTemplate(c.Request().Context(), req)
+	if err != nil {
+		return providerTemplateError(err)
+	}
+	return c.JSON(http.StatusCreated, resp)
+}
+
+// Create godoc
+// @Summary Create a new LLM provider
+// @Description Create a new LLM provider configuration
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Param request body providers.CreateRequest true "Provider configuration"
+// @Success 201 {object} providers.GetResponse
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /providers [post].
+func (h *ProvidersHandler) Create(c echo.Context) error {
+	var req providers.CreateRequest
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+
+	// Validate required fields
+	if req.Name == "" {
+		return apperror.FieldRequired("name")
+	}
+
+	resp, err := h.service.Create(c.Request().Context(), req)
+	if err != nil {
+		if translated := providerError(err); apperror.CodeOf(translated) != "" {
+			return translated
+		}
+		return errs.Wrap(err, "create provider")
+	}
+
+	return c.JSON(http.StatusCreated, resp)
+}
+
+// List godoc
+// @Summary List all LLM providers
+// @Description Get a list of all configured LLM providers
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Success 200 {array} providers.GetResponse
+// @Failure 500 {object} server.Problem
+// @Router /providers [get].
+func (h *ProvidersHandler) List(c echo.Context) error {
+	resp, err := h.service.List(c.Request().Context())
+	if err != nil {
+		return errs.Wrap(err, "list providers")
+	}
+
+	return c.JSON(http.StatusOK, resp)
+}
+
+// Get godoc
+// @Summary Get provider by ID
+// @Description Get a provider configuration by its ID
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Param id path string true "Provider ID (UUID)"
+// @Success 200 {object} providers.GetResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /providers/{id} [get].
+func (h *ProvidersHandler) Get(c echo.Context) error {
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	resp, err := h.service.Get(c.Request().Context(), id)
+	if err != nil {
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "get provider")
+	}
+
+	return c.JSON(http.StatusOK, resp)
+}
+
+// ListModelsByProvider godoc
+// @Summary List provider models
+// @Description Get models for a provider by id, optionally filtered by type
+// @Tags providers
+// @Param id path string true "Provider ID (UUID)"
+// @Param type query string false "Model type (chat, embedding)"
+// @Success 200 {array} models.GetResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /providers/{id}/models [get].
+func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
+	if h.modelsService == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "models service not configured")
+	}
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
+	}
+	modelType := strings.TrimSpace(c.QueryParam("type"))
+	var resp []models.GetResponse
+	if modelType == "" {
+		resp, err = h.modelsService.ListByProviderID(c.Request().Context(), id)
+	} else {
+		resp, err = h.modelsService.ListByProviderIDAndType(c.Request().Context(), id, models.ModelType(modelType))
+	}
+	if err != nil {
+		if errors.Is(err, db.ErrInvalidUUID) {
+			return apperror.FieldInvalid("id", err)
+		}
+		if errors.Is(err, models.ErrInvalidModelType) {
+			return apperror.FieldInvalid("type", err)
+		}
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "list provider models")
+	}
+	provider, err := h.service.Get(c.Request().Context(), id)
+	if err != nil {
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "get provider")
+	}
+	return c.JSON(http.StatusOK, withReasoningForClientType(resp, provider.ClientType))
+}
+
+// GetByName godoc
+// @Summary Get provider by name
+// @Description Get a provider configuration by its name
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Param name path string true "Provider name"
+// @Success 200 {object} providers.GetResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /providers/name/{name} [get].
+func (h *ProvidersHandler) GetByName(c echo.Context) error {
+	name, err := httpx.RequiredParam(c, "name")
+	if err != nil {
+		return err
+	}
+
+	resp, err := h.service.GetByName(c.Request().Context(), name)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return apperror.Wrap(apperror.CodeProviderNotFound, err, nil)
+		}
+		return errs.Wrap(err, "get provider by name")
+	}
+
+	return c.JSON(http.StatusOK, resp)
+}
+
+// Update godoc
+// @Summary Update provider
+// @Description Update an existing provider configuration
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Param id path string true "Provider ID (UUID)"
+// @Param request body providers.UpdateRequest true "Updated provider configuration"
+// @Success 200 {object} providers.GetResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /providers/{id} [put].
+func (h *ProvidersHandler) Update(c echo.Context) error {
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	var req providers.UpdateRequest
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+
+	resp, err := h.service.Update(c.Request().Context(), id, req)
+	if err != nil {
+		if translated := providerError(err); apperror.CodeOf(translated) != "" {
+			return translated
+		}
+		return errs.Wrap(err, "update provider")
+	}
+
+	return c.JSON(http.StatusOK, resp)
+}
+
+// Delete godoc
+// @Summary Delete provider
+// @Description Delete a provider configuration
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Param id path string true "Provider ID (UUID)"
+// @Success 204 "No Content"
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /providers/{id} [delete].
+func (h *ProvidersHandler) Delete(c echo.Context) error {
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	if err := h.service.Delete(c.Request().Context(), id); err != nil {
+		return errs.Wrap(err, "delete provider")
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}
+
+// Count godoc
+// @Summary Count providers
+// @Description Get the total count of providers
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Success 200 {object} providers.CountResponse
+// @Failure 500 {object} server.Problem
+// @Router /providers/count [get].
+func (h *ProvidersHandler) Count(c echo.Context) error {
+	count, err := h.service.Count(c.Request().Context())
+	if err != nil {
+		return errs.Wrap(err, "count providers")
+	}
+
+	return c.JSON(http.StatusOK, providers.CountResponse{Count: count})
+}
+
+// Test godoc
+// @Summary Test provider connectivity
+// @Description Probe a provider's base URL to check reachability, supported client types, and embedding support
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Param id path string true "Provider ID (UUID)"
+// @Success 200 {object} providers.TestResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /providers/{id}/test [post].
+func (h *ProvidersHandler) Test(c echo.Context) error {
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
+	}
+
+	ctx := c.Request().Context()
+	if userID, err := auth.UserIDFromContext(c); err == nil {
+		ctx = oauthctx.WithUserID(ctx, userID)
+	}
+
+	resp, err := h.service.Test(ctx, id)
+	if err != nil {
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "test provider")
+	}
+	if resp.Cause != nil {
+		// The response carries only the code; this event is where the cause
+		// is kept.
+		failure := probeError(resp.Cause, resp.Status == providers.TestStatusAuthError)
+		result := errlog.Event(ctx, "provider.test", failure, errlog.Options{})
+		h.logger.LogAttrs(ctx, result.Level, "provider test failed", append([]slog.Attr{
+			slog.String("provider_id", id), slog.String("status", string(resp.Status)),
+		}, result.Attrs()...)...)
+		resp.Code = string(apperror.CodeOf(failure))
+	}
+
+	return c.JSON(http.StatusOK, resp)
+}
+
+// ImportModels godoc
+// @Summary Import models from provider
+// @Description Fetch models from provider and import them
+// @Tags providers
+// @Accept json
+// @Produce json
+// @Param id path string true "Provider ID (UUID)"
+// @Param request body providers.ImportModelsRequest false "Explicit defaults for unknown custom chat models"
+// @Success 200 {object} providers.ImportModelsResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /providers/{id}/import-models [post].
+func (h *ProvidersHandler) ImportModels(c echo.Context) error {
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
+	}
+	var req providers.ImportModelsRequest
+	if err := c.Bind(&req); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if err := models.ValidateCompatibilities(req.DefaultCompatibilities); err != nil {
+		return apperror.FieldInvalid("default_compatibilities", err)
+	}
+
+	ctx := c.Request().Context()
+	if userID, err := auth.UserIDFromContext(c); err == nil {
+		ctx = oauthctx.WithUserID(ctx, userID)
+	}
+
+	provider, err := h.service.Get(ctx, id)
+	if err != nil {
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "get provider")
+	}
+	if !models.IsLLMClientType(models.ClientType(provider.ClientType)) {
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("import models is not supported for speech providers"))
+	}
+	if providers.PublicCatalogManaged(provider.Metadata) {
+		return apperror.New(apperror.CodeProviderManagedReadonly, nil)
+	}
+
+	remoteModels, err := h.service.FetchRemoteModels(ctx, id)
+	if err != nil {
+		if translated := probeError(err, false); apperror.CodeOf(translated) != "" {
+			return translated
+		}
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "fetch provider models")
+	}
+
+	resp := providers.ImportModelsResponse{
+		Models: make([]string, 0),
+	}
+	managedCatalog := providers.IsManagedModelCatalogClientType(models.ClientType(provider.ClientType))
+	availableModelIDs := make(map[string]struct{}, len(remoteModels))
+	// A model the provider already has is refreshed in place. Sending it through
+	// Create first would probe an embedding model's dimensions, a billed
+	// request, on every refresh before the duplicate is refused, and a failed
+	// probe would skip the refresh altogether.
+	existingModels, existingModelIDs := h.providerModels(ctx, id)
+
+	// Bulk import lands disabled — the user picks which ones to expose in
+	// model pickers afterward, to avoid flooding bot config with dozens of
+	// freshly discovered models.
+	disabled := false
+
+	for _, m := range remoteModels {
+		availableModelIDs[m.ID] = struct{}{}
+		modelType := models.ModelTypeChat
+		if strings.TrimSpace(m.Type) == string(models.ModelTypeEmbedding) {
+			modelType = models.ModelTypeEmbedding
+		}
+		name := strings.TrimSpace(m.Name)
+		if name == "" {
+			name = m.ID
+		}
+		// The discovered config carries capabilities exactly as reported, so a
+		// re-import refresh never inherits caller-supplied defaults; only the
+		// create path below applies them.
+		discoveredConfig := modelConfigFromRemote(m, append([]string(nil), m.Compatibilities...))
+		if managedCatalog {
+			available := true
+			discoveredConfig.CatalogAvailable = &available
+		}
+		if _, ok := existingModelIDs[m.ID]; ok {
+			if h.fillExistingModel(ctx, provider.ClientType, id, m.ID, discoveredConfig, managedCatalog && m.CapabilitiesKnown) {
+				resp.Updated++
+			} else {
+				resp.Skipped++
+			}
+			continue
+		}
+		createConfig := discoveredConfig
+		createConfig.Compatibilities = importedCompatibilities(
+			m,
+			modelType,
+			req.DefaultCompatibilities,
+			allowCustomModelCapabilityDefaults(provider),
+		)
+		configContext := models.ConfigContext{ModelID: m.ID, Type: modelType, ClientType: provider.ClientType}
+		_, err := h.modelsService.Create(ctx, models.AddRequest{
+			ModelID:    m.ID,
+			Name:       name,
+			ProviderID: id,
+			Type:       modelType,
+			Enable:     &disabled,
+			Config:     createConfig.Upgrade(configContext),
+		})
+		if err != nil {
+			if errors.Is(err, models.ErrModelIDAlreadyExists) {
+				// Upsert/assert: re-importing fills in newly discovered
+				// capabilities on existing models without clobbering user config.
+				if h.fillExistingModel(ctx, provider.ClientType, id, m.ID, discoveredConfig, managedCatalog && m.CapabilitiesKnown) {
+					resp.Updated++
+				} else {
+					resp.Skipped++
+				}
+				continue
+			}
+			h.logger.WarnContext(c.Request().Context(), "failed to import model", slog.String("model_id", m.ID), slog.Any("error", err))
+			resp.Skipped++
+			continue
+		}
+
+		resp.Created++
+		resp.Models = append(resp.Models, m.ID)
+	}
+	if managedCatalog {
+		h.markUnavailableManagedModels(ctx, id, availableModelIDs, existingModels)
+	}
+
+	return c.JSON(http.StatusOK, resp)
+}
+
+// importCatalogModels creates the catalog models a provider lacks, disabled,
+// and refreshes what the catalog describes on the ones it already has. The
+// user's choices stay: whether a model is enabled, its name and description.
+func (h *ProvidersHandler) importCatalogModels(ctx context.Context, provider providers.GetResponse, catalog []modelcatalog.Model) providers.ImportModelsResponse {
+	providerID := provider.ID
+	resp := providers.ImportModelsResponse{Models: make([]string, 0)}
+	if len(catalog) == 0 {
+		return resp
+	}
+	// Entries have already been normalized and validated by the catalog service.
+	rows, _ := h.providerModels(ctx, providerID)
+	existing := make(map[string]models.GetResponse, len(rows))
+	for _, row := range rows {
+		existing[row.ModelID] = row
+	}
+	disabled := false
+	for _, m := range catalog {
+		modelID, config := m.ModelID, m.Config
+		if row, ok := existing[modelID]; ok {
+			if h.refreshCatalogModel(ctx, providerID, modelID, &row, config) {
+				resp.Updated++
+			} else {
+				resp.Skipped++
+			}
+			continue
+		}
+		_, err := h.modelsService.Create(ctx, models.AddRequest{
+			ModelID:    modelID,
+			Name:       m.Name,
+			ProviderID: providerID,
+			Type:       models.ModelTypeChat,
+			Enable:     &disabled,
+			Config:     config,
+		})
+		switch {
+		case err == nil:
+			resp.Created++
+			resp.Models = append(resp.Models, modelID)
+		case errors.Is(err, models.ErrModelIDAlreadyExists):
+			if h.refreshCatalogModel(ctx, providerID, modelID, nil, config) {
+				resp.Updated++
+			} else {
+				resp.Skipped++
+			}
+		default:
+			h.logger.WarnContext(ctx, "failed to import catalog model", slog.String("model_id", modelID), slog.Any("error", err))
+			resp.Skipped++
+		}
+	}
+	return resp
+}
+
+// providerModels lists a provider's models once per import, by row and by
+// model id. A failed listing is logged and reads as none, so the import falls
+// back to telling existing models apart by Create's duplicate error.
+func (h *ProvidersHandler) providerModels(ctx context.Context, providerID string) ([]models.GetResponse, map[string]struct{}) {
+	ids := map[string]struct{}{}
+	rows, err := h.modelsService.ListByProviderID(ctx, providerID)
+	if err != nil {
+		h.logger.WarnContext(ctx, "failed to list provider models before import", slog.Any("error", err))
+		return nil, ids
+	}
+	for _, m := range rows {
+		ids[m.ModelID] = struct{}{}
+	}
+	return rows, ids
+}
+
+// refreshCatalogModel refreshes one existing model from its catalog entry.
+// known is the row the import already listed, or nil to read it.
+func (h *ProvidersHandler) refreshCatalogModel(ctx context.Context, providerID, modelID string, known *models.GetResponse, catalog models.ModelConfig) bool {
+	if known == nil {
+		row, err := h.modelsService.GetByProviderAndModelID(ctx, providerID, modelID)
+		if err != nil {
+			return false
+		}
+		known = &row
+	}
+	existing := *known
+	if existing.Type != models.ModelTypeChat {
+		return false
+	}
+	refreshed, changed := refreshFromCatalog(modelID, existing.Config, catalog)
+	if !changed {
+		return false
+	}
+	if _, err := h.modelsService.UpdateByProviderAndModelID(ctx, providerID, modelID, models.UpdateRequest{
+		ModelID:    existing.ModelID,
+		Name:       existing.Name,
+		ProviderID: existing.ProviderID,
+		Type:       existing.Type,
+		Config:     refreshed,
+	}); err != nil {
+		h.logger.WarnContext(ctx, "failed to refresh catalog model", slog.String("model_id", modelID), slog.Any("error", err))
+		return false
+	}
+	return true
+}
+
+// refreshFromCatalog brings what the catalog describes up to date without
+// undoing the user's edits, which the row cannot tell apart from what an
+// earlier import wrote. Limits follow the catalog where it states them.
+// Capabilities only grow: a modality, tool calling or structured output that is
+// on stays on, and reasoning the catalog does not list is kept. When both
+// reason, the catalog's controls (levels, toggle, off answer and dialect)
+// replace the stored ones; see refreshedReasoning for what of the user's is
+// kept. A description is filled in only when the model has none. The result is compared
+// in its stored form, since that is what the row holds and what an update
+// would write.
+func refreshFromCatalog(modelID string, existing, catalog models.ModelConfig) (models.ModelConfig, bool) {
+	out := existing
+	out.Modalities = unionModalities(existing.Modalities, catalog.Modalities)
+	if catalog.ContextWindow != nil {
+		out.ContextWindow = catalog.ContextWindow
+	}
+	if catalog.MaxOutputTokens != nil {
+		out.MaxOutputTokens = catalog.MaxOutputTokens
+	}
+	out.ToolCall = existing.ToolCall || catalog.ToolCall
+	out.StructuredOutput = existing.StructuredOutput || catalog.StructuredOutput
+	out.Reasoning = refreshedReasoning(existing.Reasoning, catalog.Reasoning)
+	if out.Description == nil || strings.TrimSpace(*out.Description) == "" {
+		out.Description = catalog.Description
+	}
+	out = out.StoredForm(modelID)
+	return out, !sameStoredConfig(modelID, existing, out)
+}
+
+func unionModalities(existing, catalog *models.ModelModalities) *models.ModelModalities {
+	if catalog == nil {
+		return existing
+	}
+	if existing == nil {
+		return catalog
+	}
+	union := func(have, add []models.Modality) []models.Modality {
+		out := slices.Clone(have)
+		for _, m := range add {
+			if !slices.Contains(out, m) {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	return &models.ModelModalities{Input: union(existing.Input, catalog.Input), Output: union(existing.Output, catalog.Output)}
+}
+
+// refreshedReasoning takes the catalog's controls and keeps what the edit form
+// tunes while those controls still use it: the budget range under a budget,
+// the default effort among the levels, the default switch on a model that has
+// one, and the default budget under a budget. The replay field does not depend
+// on the controls and is always kept.
+func refreshedReasoning(existing, catalog *models.ModelReasoning) *models.ModelReasoning {
+	switch {
+	case catalog == nil:
+		return existing
+	case existing == nil:
+		return catalog
+	}
+	r := *catalog
+	if existing.Budget != nil && catalog.Budget != nil {
+		r.Budget = existing.Budget
+	}
+	r.Default = refreshedDefault(existing.Default, catalog.Default, r)
+	if existing.Replay != nil {
+		r.Replay = existing.Replay
+	}
+	return &r
+}
+
+func refreshedDefault(existing, catalog *models.ReasoningDefault, r models.ModelReasoning) *models.ReasoningDefault {
+	if existing == nil {
+		return catalog
+	}
+	var out models.ReasoningDefault
+	if catalog != nil {
+		out = *catalog
+	}
+	if existing.Enabled != nil && r.Toggle {
+		out.Enabled = existing.Enabled
+	}
+	if existing.Effort != "" && slices.Contains(r.Efforts, existing.Effort) {
+		out.Effort = existing.Effort
+	}
+	if existing.Budget != nil && r.Budget != nil {
+		out.Budget = existing.Budget
+	}
+	if out == (models.ReasoningDefault{}) {
+		return nil
+	}
+	return &out
+}
+
+func allowCustomModelCapabilityDefaults(provider providers.GetResponse) bool {
+	// A provider made from a former template or preset gets the defaults like
+	// any other: the template that described its models is gone, so nothing
+	// else will. The web client sends them only for entries without a
+	// models.dev source, which covers the former templates the same way.
+	//
+	// A gallery provider with a models.dev source imports that source's models;
+	// one its endpoint lists beyond them is as unknown as a template provider's,
+	// since the catalog did not list it. An entry without a source (Ollama, New
+	// API) has only its endpoint, so its models get the protocol's defaults as a
+	// custom provider's do; the gallery sends them for exactly those.
+	if value, _ := provider.Metadata["source"].(string); strings.TrimSpace(value) != "" {
+		return false
+	}
+	return true
+}
+
+func importedCompatibilities(remote providers.RemoteModel, modelType models.ModelType, defaults []string, allowCustomDefaults bool) []string {
+	if len(remote.Compatibilities) > 0 || modelType != models.ModelTypeChat || remote.CapabilitiesKnown || !allowCustomDefaults {
+		return remote.Compatibilities
+	}
+	// Unknown means unknown unless the caller explicitly supplies defaults.
+	// The backend never infers model capabilities from the client protocol.
+	return append([]string(nil), defaults...)
+}
+
+// markUnavailableManagedModels marks the models the catalog no longer lists.
+// existingModels is the listing the import started from: a model it created is
+// available, and one it refreshed is listed, so neither needs reading again.
+func (h *ProvidersHandler) markUnavailableManagedModels(ctx context.Context, providerID string, available map[string]struct{}, existingModels []models.GetResponse) {
+	for _, existing := range existingModels {
+		if _, ok := available[existing.ModelID]; ok {
+			continue
+		}
+		unavailable := false
+		if existing.Config.CatalogAvailable != nil && !*existing.Config.CatalogAvailable {
+			continue
+		}
+		config := existing.Config
+		config.CatalogAvailable = &unavailable
+		if _, err := h.modelsService.UpdateByProviderAndModelID(ctx, providerID, existing.ModelID, models.UpdateRequest{
+			ModelID:    existing.ModelID,
+			Name:       existing.Name,
+			ProviderID: existing.ProviderID,
+			Type:       existing.Type,
+			Config:     config,
+		}); err != nil {
+			h.logger.WarnContext(ctx, "failed to mark stale managed model unavailable", slog.String("model_id", existing.ModelID), slog.Any("error", err))
+		}
+	}
+}
+
+// fillExistingModel refreshes an existing model's capability-discovery fields
+// from the latest trusted discovery. Managed catalogs replace authoritative
+// capability fields exactly, including removal; generic discovery keeps its
+// additive compatibility behavior because an empty field can mean unknown.
+// Returns true if the model was changed and persisted.
+//
+// The lookup is provider-scoped because model_id is only unique per provider;
+// same-named models under other providers must not affect this refresh.
+func (h *ProvidersHandler) fillExistingModel(ctx context.Context, clientType, providerID, modelID string, discovered models.LegacyModelConfig, replaceCapabilities bool) bool {
+	existing, err := h.modelsService.GetByProviderAndModelID(ctx, providerID, modelID)
+	if err != nil {
+		return false
+	}
+	// Discovery still reports capabilities in the version 1 vocabulary, so the
+	// merge runs there and the result is upgraded back.
+	var merged models.LegacyModelConfig
+	var changed bool
+	if replaceCapabilities {
+		merged, changed = mergeManagedDiscoveredConfig(existing.Config.Legacy(), discovered)
+	} else {
+		merged, changed = mergeDiscoveredConfig(existing.Config.Legacy(), discovered)
+	}
+	if !changed {
+		return false
+	}
+	// The version 1 reading is lossy in places that do not matter, such as the
+	// position of the disable token, so whether anything changed is decided on
+	// the config that would be stored.
+	config := models.MergeLegacyConfig(existing.Config, merged, models.ConfigContext{ModelID: existing.ModelID, Type: existing.Type, ClientType: clientType})
+	if sameStoredConfig(existing.ModelID, existing.Config, config) {
+		return false
+	}
+	if _, err := h.modelsService.UpdateByProviderAndModelID(ctx, providerID, modelID, models.UpdateRequest{
+		ModelID:    existing.ModelID,
+		Name:       existing.Name,
+		ProviderID: existing.ProviderID,
+		Type:       existing.Type,
+		Config:     config,
+	}); err != nil {
+		h.logger.WarnContext(ctx, "failed to fill model capabilities", slog.String("model_id", modelID), slog.Any("error", err))
+		return false
+	}
+	return true
+}
+
+// sameStoredConfig reports whether writing next over a model's stored config
+// would store what is already there.
+func sameStoredConfig(modelID string, stored, next models.ModelConfig) bool {
+	before, err := json.Marshal(stored.StoredForm(modelID))
+	if err != nil {
+		return false
+	}
+	after, err := json.Marshal(next.StoredForm(modelID))
+	if err != nil {
+		return false
+	}
+	return string(before) == string(after)
+}
+
+// modelConfigFromRemote builds the stored config for an imported model. It exists
+// as a named function so a test can assert that every wire declaration survives
+// the import path: a dialect or off-support token lost here is lost for every row
+// this path creates, and the resulting model resolves onto the wrong wire — which
+// is how these fields came to be missing from RemoteModel in the first place.
+func modelConfigFromRemote(m providers.RemoteModel, compatibilities []string) models.LegacyModelConfig {
+	return models.LegacyModelConfig{
+		Description:         m.Description,
+		Compatibilities:     compatibilities,
+		ReasoningEfforts:    m.ReasoningEfforts,
+		ThinkingMode:        m.ThinkingMode,
+		ReasoningDialect:    m.ReasoningDialect,
+		ReasoningOffSupport: m.ReasoningOffSupport,
+		ReasoningDefaultOn:  m.ReasoningDefaultOn,
+		ThinkingBudgetMin:   m.ThinkingBudgetMin,
+		ThinkingBudgetMax:   m.ThinkingBudgetMax,
+		ContextWindow:       m.ContextWindow,
+		MaxOutputTokens:     m.MaxOutputTokens,
+		Dimensions:          m.Dimensions,
+	}
+}
+
+func mergeManagedDiscoveredConfig(existing, discovered models.LegacyModelConfig) (models.LegacyModelConfig, bool) {
+	out, changed := mergeDiscoveredConfig(existing, discovered)
+	if !slices.Equal(out.Compatibilities, discovered.Compatibilities) {
+		out.Compatibilities = append([]string(nil), discovered.Compatibilities...)
+		changed = true
+	}
+	if !slices.Equal(out.ReasoningEfforts, discovered.ReasoningEfforts) {
+		out.ReasoningEfforts = append([]string(nil), discovered.ReasoningEfforts...)
+		changed = true
+	}
+	if out.ThinkingMode != discovered.ThinkingMode {
+		out.ThinkingMode = discovered.ThinkingMode
+		changed = true
+	}
+	if out.ReasoningDialect != discovered.ReasoningDialect {
+		out.ReasoningDialect = discovered.ReasoningDialect
+		changed = true
+	}
+	if out.ReasoningOffSupport != discovered.ReasoningOffSupport {
+		out.ReasoningOffSupport = discovered.ReasoningOffSupport
+		changed = true
+	}
+	if !sameBoolPointer(out.ReasoningDefaultOn, discovered.ReasoningDefaultOn) {
+		out.ReasoningDefaultOn = discovered.ReasoningDefaultOn
+		changed = true
+	}
+	if !sameIntPointer(out.ThinkingBudgetMin, discovered.ThinkingBudgetMin) {
+		out.ThinkingBudgetMin = discovered.ThinkingBudgetMin
+		changed = true
+	}
+	if !sameIntPointer(out.ThinkingBudgetMax, discovered.ThinkingBudgetMax) {
+		out.ThinkingBudgetMax = discovered.ThinkingBudgetMax
+		changed = true
+	}
+	return out, changed
+}
+
+func mergeDiscoveredConfig(existing, discovered models.LegacyModelConfig) (models.LegacyModelConfig, bool) {
+	out := existing
+	changed := false
+	if out.Description == nil && discovered.Description != nil {
+		description := strings.TrimSpace(*discovered.Description)
+		out.Description = &description
+		changed = true
+	}
+	// Capability-discovery fields: a present discovery wins. The fetch layer
+	// (applyCapabilities) has already let an explicit upstream claim take
+	// precedence over the registry, so whatever arrives here is the freshest
+	// trusted value and should replace the stored one. We only skip when the
+	// discovery is empty (nothing learned this round → keep what we have).
+	if discovered.ThinkingMode != "" && discovered.ThinkingMode != out.ThinkingMode {
+		out.ThinkingMode = discovered.ThinkingMode
+		changed = true
+	}
+	if merged := reasoning.MergeTiers(out.ReasoningEfforts, discovered.ReasoningEfforts); !slices.Equal(merged, out.ReasoningEfforts) {
+		out.ReasoningEfforts = merged
+		changed = true
+	}
+	if discovered.ReasoningDialect != "" && discovered.ReasoningDialect != out.ReasoningDialect {
+		out.ReasoningDialect = discovered.ReasoningDialect
+		changed = true
+	}
+	if discovered.ReasoningOffSupport != "" && discovered.ReasoningOffSupport != out.ReasoningOffSupport {
+		out.ReasoningOffSupport = discovered.ReasoningOffSupport
+		changed = true
+	}
+	if discovered.ReasoningDefaultOn != nil && !sameBoolPointer(out.ReasoningDefaultOn, discovered.ReasoningDefaultOn) {
+		out.ReasoningDefaultOn = discovered.ReasoningDefaultOn
+		changed = true
+	}
+	if discovered.ThinkingBudgetMin != nil && !sameIntPointer(out.ThinkingBudgetMin, discovered.ThinkingBudgetMin) {
+		out.ThinkingBudgetMin = discovered.ThinkingBudgetMin
+		changed = true
+	}
+	if discovered.ThinkingBudgetMax != nil && !sameIntPointer(out.ThinkingBudgetMax, discovered.ThinkingBudgetMax) {
+		out.ThinkingBudgetMax = discovered.ThinkingBudgetMax
+		changed = true
+	}
+	if discovered.ContextWindow != nil && (out.ContextWindow == nil || *discovered.ContextWindow != *out.ContextWindow) {
+		out.ContextWindow = discovered.ContextWindow
+		changed = true
+	}
+	if discovered.MaxOutputTokens != nil && (out.MaxOutputTokens == nil || *discovered.MaxOutputTokens != *out.MaxOutputTokens) {
+		out.MaxOutputTokens = discovered.MaxOutputTokens
+		changed = true
+	}
+	if discovered.CatalogAvailable != nil && (out.CatalogAvailable == nil || *discovered.CatalogAvailable != *out.CatalogAvailable) {
+		out.CatalogAvailable = discovered.CatalogAvailable
+		changed = true
+	}
+	// Compatibilities are additive: keep anything already present and add the
+	// newly discovered tokens.
+	for _, c := range discovered.Compatibilities {
+		if !slices.Contains(out.Compatibilities, c) {
+			out.Compatibilities = append(out.Compatibilities, c)
+			changed = true
+		}
+	}
+	return out, changed
+}
+
+func sameBoolPointer(left, right *bool) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+func sameIntPointer(left, right *int) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Littly · 她</title>
+<link rel="stylesheet" href="/littly/style.css" />
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">L</span><div><b>Littly</b><small>她不是助手，她是一个人</small></div></div>
+    <nav id="nav">
+      <a href="#/today" data-view="today">今天</a>
+      <a href="#/her" data-view="her">她</a>
+      <a href="#/memory" data-view="memory">记忆</a>
+      <a href="#/workbench" data-view="workbench">工作台</a>
+      <a href="#/world" data-view="world">世界</a>
+      <a href="#/settings" data-view="settings">设置</a>
+    </nav>
+    <div class="side-foot">
+      <div id="health-dot" class="dot">连接中…</div>
+      <div class="tiny">单实例 · 一个人 · 一台电脑</div>
+    </div>
+  </aside>
+  <main>
+    <header class="topbar">
+      <div>
+        <h1 id="page-title">今天</h1>
+        <p id="page-sub" class="sub"></p>
+      </div>
+      <div id="state-pills" class="pills"></div>
+    </header>
+    <section id="view" class="view"></section>
+  </main>
+</div>
+<script src="/littly/app.js"></script>
+</body>
+</html>

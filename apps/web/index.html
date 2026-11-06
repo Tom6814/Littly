@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <!-- interactive-widget=resizes-content: Android Chrome shrinks the layout
+         viewport itself when the software keyboard opens, so the h-dvh app
+         frames (and with them the composer) end at the keyboard natively. iOS
+         Safari ignores the hint and pans the page up instead. Both are left
+         to the browser: the app adds no keyboard offset of its own. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
+    <!-- Theme before the first paint. The settings store sets the dark class and
+         the color scheme on <html> only once the app script has run; until then
+         the page paints the default light background, a bright flash before a
+         dark theme. This reads the same saved preferences (store/settings:
+         `theme`, `color-scheme`; no saved theme means follow the system) so the
+         first frame already has the right background. The store takes over once
+         the app starts. -->
+    <script>
+      (function () {
+        try {
+          var root = document.documentElement
+          var theme = localStorage.getItem('theme')
+          if (theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+            root.classList.add('dark')
+          }
+          var colorScheme = localStorage.getItem('color-scheme')
+          if (colorScheme) root.dataset.colorScheme = colorScheme
+        } catch (e) {}
+      })()
+    </script>
+    <title>Memoh</title>
+    <!-- Home-screen install on mobile. Icons are generated from logo.svg by
+         `pnpm --filter @memohai/web icons`. The theme-color pair is the initial
+         guess from the OS preference (memoh scheme --background); the settings
+         store replaces it with the resolved app background once the app boots. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Memoh" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#faf8f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#060606" media="(prefers-color-scheme: dark)" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

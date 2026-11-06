@@ -1,0 +1,1192 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/labstack/echo/v4"
+
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/botworkspace"
+	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
+	displaypkg "github.com/felinics/memoh/internal/display"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/policy"
+	"github.com/felinics/memoh/internal/server"
+	"github.com/felinics/memoh/internal/workspace"
+)
+
+type ContainerdHandler struct {
+	manager          containerWorkspace
+	cfg              config.WorkspaceConfig
+	containerBackend string
+	logger           *slog.Logger
+	toolGateway      *mcp.ToolGatewayService
+	toolContexts     *mcp.ToolSessionContextStore
+	acpRuntimes      acpRuntimeContextResolver
+	mcpStdioMu       sync.Mutex
+	mcpStdioSess     map[string]*mcpStdioSession
+	workspaces       workspaceIntents
+	botService       *bots.Service
+	accountService   *accounts.Service
+	policyService    *policy.Service
+	displayService   *displaypkg.Service
+	browserSessions  *browserSessionStore
+	workspaceDeps    workspaceDependencyService
+	// wsHeartbeat and terminalIdleTimeout time the terminal socket. Zero
+	// values mean defaultWSHeartbeat and the terminalIdleTimeout constant;
+	// tests set shorter ones.
+	wsHeartbeat         wsHeartbeat
+	terminalIdleTimeout time.Duration
+}
+
+type ContainerGPURequest struct {
+	Devices []string `json:"devices,omitempty"`
+}
+
+type CreateContainerRequest struct {
+	// RestoreData imports the preserved /data archive into the new workspace
+	// once it is running. Backends that expose snapshot mounts restore the
+	// archive while starting regardless of this flag; the flag matters for
+	// backends that restore through the bridge.
+	RestoreData bool                 `json:"restore_data,omitempty"`
+	Image       string               `json:"image,omitempty"`
+	GPU         *ContainerGPURequest `json:"gpu,omitempty"`
+}
+
+type CreateContainerResponse struct {
+	ContainerID      string   `json:"container_id"`
+	WorkspaceBackend string   `json:"workspace_backend"`
+	RuntimeBackend   string   `json:"runtime_backend,omitempty"`
+	ContainerPath    string   `json:"container_path"`
+	Image            string   `json:"image"`
+	Snapshotter      string   `json:"snapshotter"`
+	CDIDevices       []string `json:"cdi_devices,omitempty"`
+	Started          bool     `json:"started"`
+	DataRestored     bool     `json:"data_restored"`
+	HasPreservedData bool     `json:"has_preserved_data"`
+}
+
+// codesync(container-create-stream): keep these SSE payloads in sync with
+// packages/sdk/src/container-stream.ts.
+type createContainerPullingEvent struct {
+	Type  string `json:"type"`
+	Image string `json:"image"`
+}
+
+type createContainerPullProgressEvent struct {
+	Type   string            `json:"type"`
+	Layers []ctr.LayerStatus `json:"layers"`
+}
+
+type createContainerPullStatusEvent struct {
+	Type    string `json:"type"`
+	Image   string `json:"image"`
+	Message string `json:"message,omitempty"`
+}
+
+type createContainerCreatingEvent struct {
+	Type string `json:"type"`
+}
+
+type createContainerCompleteEvent struct {
+	Type      string                  `json:"type"`
+	Container CreateContainerResponse `json:"container"`
+}
+
+type createContainerRestoringEvent struct {
+	Type string `json:"type"`
+}
+
+// sendWorkspaceStreamFailure ends a workspace stream with the error event for
+// the catalog code code and returns the error the handler returns. The event
+// carries the code's detail and none of the text of cause; the request's
+// result record carries cause. The response is already committed, so the
+// access log records the returned error without answering it again. The
+// handler chose code, so the event names it whatever has become of ctx, such
+// as a stream budget that ran out; the result record still reads the
+// request's own context.
+func sendWorkspaceStreamFailure(ctx context.Context, send func(payload any) bool, code apperror.Code, cause error, requestID string) error {
+	frame, rendered := server.NewStreamError(context.WithoutCancel(ctx), apperror.Wrap(code, cause, nil), requestID)
+	_ = send(frame)
+	return rendered
+}
+
+type GetContainerResponse struct {
+	ContainerID      string                    `json:"container_id"`
+	WorkspaceBackend string                    `json:"workspace_backend"`
+	RuntimeBackend   string                    `json:"runtime_backend,omitempty"`
+	Image            string                    `json:"image"`
+	Status           string                    `json:"status"`
+	Namespace        string                    `json:"namespace"`
+	ContainerPath    string                    `json:"container_path"`
+	CDIDevices       []string                  `json:"cdi_devices,omitempty"`
+	TaskRunning      bool                      `json:"task_running"`
+	HasPreservedData bool                      `json:"has_preserved_data"`
+	Legacy           bool                      `json:"legacy"`
+	CreatedAt        time.Time                 `json:"created_at"`
+	UpdatedAt        time.Time                 `json:"updated_at"`
+	Removal          *WorkspaceRemovalResponse `json:"removal,omitempty"`
+}
+
+// WorkspaceRemovalResponse is a requested removal that is still running, or
+// that failed and waits for the user to retry or cancel it.
+type WorkspaceRemovalResponse struct {
+	State        string    `json:"state" enums:"removing,failed"`
+	PreserveData bool      `json:"preserve_data"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+func workspaceRemovalResponse(w botworkspace.Workspace) *WorkspaceRemovalResponse {
+	state := w.RemovalState()
+	if state == "" {
+		return nil
+	}
+	return &WorkspaceRemovalResponse{State: state, PreserveData: w.PreserveData, UpdatedAt: w.UpdatedAt}
+}
+
+type ContainerMetricsStatusResponse struct {
+	Exists      bool `json:"exists"`
+	TaskRunning bool `json:"task_running"`
+}
+
+type ContainerCPUMetricsResponse struct {
+	Cores             int64   `json:"cores,omitempty"`
+	UsagePercent      float64 `json:"usage_percent"`
+	UsageNanoseconds  uint64  `json:"usage_nanoseconds"`
+	UsageNanocores    uint64  `json:"usage_nanocores"`
+	UserNanoseconds   uint64  `json:"user_nanoseconds"`
+	KernelNanoseconds uint64  `json:"kernel_nanoseconds"`
+}
+
+type ContainerMemoryMetricsResponse struct {
+	UsageBytes   uint64  `json:"usage_bytes"`
+	LimitBytes   uint64  `json:"limit_bytes"`
+	UsagePercent float64 `json:"usage_percent"`
+}
+
+type ContainerStorageMetricsResponse struct {
+	Path string `json:"path"`
+	// UsedBytes is omitted when only the allotment is known.
+	UsedBytes  *uint64 `json:"used_bytes,omitempty"`
+	LimitBytes uint64  `json:"limit_bytes,omitempty"`
+}
+
+type ContainerMetricsPayloadResponse struct {
+	CPU     *ContainerCPUMetricsResponse     `json:"cpu,omitempty"`
+	Memory  *ContainerMemoryMetricsResponse  `json:"memory,omitempty"`
+	Storage *ContainerStorageMetricsResponse `json:"storage,omitempty"`
+}
+
+type GetContainerMetricsResponse struct {
+	Supported         bool                               `json:"supported"`
+	Backend           string                             `json:"backend"`
+	UnsupportedReason string                             `json:"unsupported_reason,omitempty"`
+	Status            ContainerMetricsStatusResponse     `json:"status"`
+	Metrics           ContainerMetricsPayloadResponse    `json:"metrics"`
+	ResourceLimits    GetContainerResourceLimitsResponse `json:"resource_limits"`
+	SampledAt         *time.Time                         `json:"sampled_at,omitempty"`
+}
+
+type ContainerResourceLimitValuesResponse struct {
+	CPUMillicores int64 `json:"cpu_millicores"`
+	MemoryBytes   int64 `json:"memory_bytes"`
+	StorageBytes  int64 `json:"storage_bytes"`
+}
+
+type ContainerResourceLimitCapabilityResponse struct {
+	HardLimitSupported bool `json:"hard_limit_supported"`
+	SoftLimitSupported bool `json:"soft_limit_supported"`
+}
+
+type ContainerResourceLimitCapabilitiesResponse struct {
+	CPU     ContainerResourceLimitCapabilityResponse `json:"cpu"`
+	Memory  ContainerResourceLimitCapabilityResponse `json:"memory"`
+	Storage ContainerResourceLimitCapabilityResponse `json:"storage"`
+}
+
+type ContainerResourceLimitObservedResponse struct {
+	CPUUsagePercent      float64 `json:"cpu_usage_percent"`
+	MemoryUsageBytes     uint64  `json:"memory_usage_bytes"`
+	MemoryLimitBytes     uint64  `json:"memory_limit_bytes"`
+	StorageUsedBytes     uint64  `json:"storage_used_bytes"`
+	StorageOverSoftLimit bool    `json:"storage_over_soft_limit"`
+}
+
+type GetContainerResourceLimitsResponse struct {
+	Desired          ContainerResourceLimitValuesResponse       `json:"desired"`
+	Applied          ContainerResourceLimitValuesResponse       `json:"applied"`
+	Capabilities     ContainerResourceLimitCapabilitiesResponse `json:"capabilities"`
+	Observed         ContainerResourceLimitObservedResponse     `json:"observed"`
+	Status           string                                     `json:"status"`
+	RequiresRecreate bool                                       `json:"requires_recreate"`
+	Backend          string                                     `json:"backend"`
+	WorkspaceBackend string                                     `json:"workspace_backend"`
+	RuntimeBackend   string                                     `json:"runtime_backend,omitempty"`
+}
+
+type UpdateContainerResourceLimitsRequest struct {
+	CPUMillicores int64 `json:"cpu_millicores"`
+	MemoryBytes   int64 `json:"memory_bytes"`
+	StorageBytes  int64 `json:"storage_bytes"`
+}
+
+type UpdateContainerMetricsRequest struct {
+	ResourceLimits *UpdateContainerResourceLimitsRequest `json:"resource_limits"`
+}
+
+type RollbackRequest struct {
+	Version int `json:"version"`
+}
+
+type CreateSnapshotRequest struct {
+	SnapshotName string `json:"snapshot_name"`
+}
+
+type CreateSnapshotResponse struct {
+	ContainerID         string `json:"container_id"`
+	SnapshotName        string `json:"snapshot_name"`
+	RuntimeSnapshotName string `json:"runtime_snapshot_name"`
+	DisplayName         string `json:"display_name"`
+	Snapshotter         string `json:"snapshotter"`
+	Version             int    `json:"version"`
+	Source              string `json:"source"`
+}
+
+type SnapshotInfo struct {
+	Snapshotter string            `json:"snapshotter"`
+	Name        string            `json:"name"`
+	DisplayName string            `json:"display_name,omitempty"`
+	RuntimeName string            `json:"runtime_snapshot_name"`
+	Parent      string            `json:"parent,omitempty"`
+	Kind        string            `json:"kind"`
+	CreatedAt   time.Time         `json:"created_at,omitempty"`
+	UpdatedAt   time.Time         `json:"updated_at,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Source      string            `json:"source"`
+	Managed     bool              `json:"managed"`
+	Version     *int              `json:"version,omitempty"`
+}
+
+type ListSnapshotsResponse struct {
+	Snapshotter string         `json:"snapshotter"`
+	Snapshots   []SnapshotInfo `json:"snapshots"`
+}
+
+func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg config.WorkspaceConfig, containerBackend string, displayService *displaypkg.Service, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *ContainerdHandler {
+	h := &ContainerdHandler{
+		manager:          manager,
+		cfg:              cfg,
+		containerBackend: containerBackend,
+		logger:           log.With(slog.String("handler", "containerd")),
+		mcpStdioSess:     make(map[string]*mcpStdioSession),
+		botService:       botService,
+		accountService:   accountService,
+		policyService:    policyService,
+		browserSessions:  newBrowserSessionStore(browserSessionIdleTTL),
+	}
+	h.displayService = displayService
+	return h
+}
+
+// SetWorkspaceIntents wires the botworkspace reconciler used by the workspace
+// create/delete endpoints.
+func (h *ContainerdHandler) SetWorkspaceIntents(intents workspaceIntents) {
+	h.workspaces = intents
+}
+
+func (h *ContainerdHandler) Register(e *echo.Echo) {
+	e.Pre(h.handleBrowserProxyPre)
+
+	e.GET("/bots/:bot_id/skills/catalog", h.ListSafeSkills)
+
+	group := e.Group("/bots/:bot_id/container")
+	group.POST("", h.CreateContainer)
+	group.GET("", h.GetContainer)
+	group.GET("/metrics", h.GetContainerMetrics)
+	group.PUT("/metrics", h.UpdateContainerMetrics)
+	group.DELETE("", h.DeleteContainer)
+	group.POST("/removal/cancel", h.CancelContainerRemoval)
+	group.POST("/start", h.StartContainer)
+	group.POST("/stop", h.StopContainer)
+	group.POST("/snapshots", h.CreateSnapshot)
+	group.GET("/snapshots", h.ListSnapshots)
+	group.POST("/snapshots/rollback", h.RollbackSnapshot)
+	group.POST("/data/restore", h.RestorePreservedData)
+	group.GET("/skills", h.ListSkills)
+	group.POST("/skills", h.UpsertSkills)
+	group.DELETE("/skills", h.DeleteSkills)
+	group.POST("/skills/actions", h.ApplySkillAction)
+	// Terminal routes
+	group.GET("/terminal", h.GetTerminalInfo)
+	group.GET("/terminal/ws", h.HandleTerminalWS)
+	// Browser routes
+	group.POST("/browser/sessions", h.CreateBrowserSession)
+	group.POST("/browser/sessions/:session_id/keepalive", h.KeepAliveBrowserSession)
+	group.DELETE("/browser/sessions/:session_id", h.DeleteBrowserSession)
+	// Display routes
+	group.GET("/display", h.GetDisplayInfo)
+	group.POST("/display/prepare", h.PrepareDisplay)
+	group.GET("/display/sessions", h.ListDisplaySessions)
+	group.DELETE("/display/sessions/:session_id", h.CloseDisplaySession)
+	group.POST("/display/webrtc/offer", h.HandleDisplayWebRTCOffer)
+	// File manager routes
+	group.GET("/fs", h.FSStat)
+	group.GET("/fs/list", h.FSList)
+	group.GET("/fs/read", h.FSRead)
+	group.GET("/fs/download", h.FSDownload)
+	group.POST("/fs/archive", h.FSArchive)
+	group.POST("/fs/write", h.FSWrite)
+	group.POST("/fs/upload", h.FSUpload)
+	group.POST("/fs/mkdir", h.FSMkdir)
+	group.POST("/fs/delete", h.FSDelete)
+	group.POST("/fs/rename", h.FSRename)
+	group.POST("/fs/extract", h.FSExtract)
+	root := e.Group("/bots/:bot_id")
+	root.POST("/mcp-stdio", h.CreateMCPStdio)
+	root.POST("/mcp-stdio/:connection_id", h.HandleMCPStdio)
+	root.POST("/tools", h.HandleMCPTools)
+	// Workspace dependency routes. Dependencies are installed and removed
+	// through Apps (/bots/:bot_id/packages); these routes inspect and
+	// maintain the copies an App references.
+	e.GET("/workspace-dependencies", h.ListWorkspaceDependencyCatalog)
+	e.GET("/workspace-dependencies/icons/:digest", h.GetWorkspaceDependencyIcon)
+	deps := e.Group("/bots/:bot_id/dependencies")
+	deps.GET("", h.ListWorkspaceDependencies)
+	deps.POST("/preflight", h.PreflightWorkspaceDependencies)
+	deps.POST("/check-updates", h.CheckWorkspaceDependencyUpdates)
+	deps.GET("/:dep_id/script", h.GetWorkspaceDependencyScript)
+	deps.POST("/:dep_id/install", h.InstallWorkspaceDependency)
+	deps.POST("/:dep_id/update", h.UpdateWorkspaceDependency)
+	deps.POST("/:dep_id/reinstall", h.ReinstallWorkspaceDependency)
+	deps.POST("/:dep_id/rollback", h.RollbackWorkspaceDependency)
+}
+
+// CreateContainer godoc
+// @Summary Create workspace for bot
+// @Description Records the intent for a running workspace and streams the
+// reconciler's provisioning progress as SSE events until it settles.
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Param payload body CreateContainerRequest true "Create workspace payload"
+// @Success 200 {object} CreateContainerResponse "SSE stream of workspace creation events"
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container [post].
+func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.workspaces == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
+	}
+
+	var req CreateContainerRequest
+	if err := c.Bind(&req); err != nil {
+		return apperror.Wrap(apperror.CodeWorkspaceCreateRequestInvalid, err, nil)
+	}
+	ctx := c.Request().Context()
+	// Image override lets administrators specify a custom base image.
+	// NOTE(saas): if this becomes a multi-tenant SaaS, image override must be
+	// validated against an allowlist to prevent SSRF and resource abuse.
+	imageOverride := strings.TrimSpace(req.Image)
+	if req.GPU != nil {
+		// The GPU preference is read by the reconciler when it provisions, so
+		// it is persisted before the intent.
+		if err := h.manager.RememberWorkspaceGPU(ctx, botID, workspace.WorkspaceGPUConfig{Devices: req.GPU.Devices}); err != nil {
+			return apperror.Wrap(apperror.CodeWorkspaceCreateFailed, err, nil)
+		}
+	}
+
+	flusher, ok := c.Response().Writer.(http.Flusher)
+	if !ok {
+		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
+	}
+	setSSEHeaders(c)
+	c.Response().WriteHeader(http.StatusOK)
+	writer := c.Response().Writer
+
+	var mu sync.Mutex
+	send := func(payload any) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return false
+		}
+		return writeSSEData(writer, flusher, string(data)) == nil
+	}
+	events, unsubscribe := h.workspaces.Subscribe(botID)
+	defer unsubscribe()
+
+	intentCtx, cancelIntent := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	intent, err := h.workspaces.EnsurePresent(intentCtx, botID, imageOverride)
+	cancelIntent()
+	if err != nil {
+		return sendWorkspaceStreamFailure(ctx, send, apperror.CodeWorkspaceCreateFailed, err, httpx.RequestID(c))
+	}
+
+	streamCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceStreamBudget)
+	defer cancel()
+	outcome := streamWorkspaceProvisioning(streamCtx, send, events, func(ctx context.Context) (botworkspace.Workspace, error) {
+		return h.workspaces.Await(ctx, botID, intent.DesiredGeneration)
+	}, httpx.RequestID(c))
+	if outcome.Disconnected {
+		return nil
+	}
+	if outcome.Err != nil {
+		return outcome.Err
+	}
+
+	// The archive is imported after the workspace settled so the single
+	// "complete" event already reports data_restored.
+	dataRestored := false
+	if req.RestoreData && h.manager.HasPreservedData(botID) {
+		send(createContainerRestoringEvent{Type: "restoring"})
+		if err := h.manager.RestorePreservedData(streamCtx, botID); err != nil {
+			return sendWorkspaceStreamFailure(streamCtx, send, apperror.CodeWorkspaceRestoreFailed, err, httpx.RequestID(c))
+		}
+		dataRestored = true
+	}
+	complete, ok := workspaceCompleteEvent(streamCtx, h.logger, h.manager, botID, outcome)
+	if !ok {
+		return nil
+	}
+	complete.Container.DataRestored = complete.Container.DataRestored || dataRestored
+	if strings.TrimSpace(complete.Container.Snapshotter) == "" {
+		complete.Container.Snapshotter = h.cfg.Snapshotter
+	}
+	send(complete)
+	return nil
+}
+
+// GetContainer godoc
+// @Summary Get workspace info for bot
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} GetContainerResponse
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container [get].
+func (h *ContainerdHandler) GetContainer(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	// The removal is read before the workspace: the other way round, a removal
+	// finishing in between would answer "still there, nothing being removed".
+	var removal *WorkspaceRemovalResponse
+	if h.workspaces != nil {
+		w, err := h.workspaces.Get(c.Request().Context(), botID)
+		if err != nil && !errors.Is(err, botworkspace.ErrNotFound) {
+			return apperror.Wrap(apperror.CodeWorkspaceLoadFailed, err, nil)
+		}
+		removal = workspaceRemovalResponse(w)
+	}
+	status, err := h.manager.GetContainerInfo(c.Request().Context(), botID)
+	if err != nil {
+		if errors.Is(err, workspace.ErrContainerNotFound) {
+			return apperror.New(apperror.CodeWorkspaceNotFound, nil)
+		}
+		return apperror.Wrap(apperror.CodeWorkspaceLoadFailed, err, nil)
+	}
+	return c.JSON(http.StatusOK, GetContainerResponse{
+		ContainerID:      status.ContainerID,
+		WorkspaceBackend: status.WorkspaceBackend,
+		RuntimeBackend:   status.RuntimeBackend,
+		Image:            status.Image,
+		Status:           status.Status,
+		Namespace:        status.Namespace,
+		ContainerPath:    status.ContainerPath,
+		CDIDevices:       status.CDIDevices,
+		TaskRunning:      status.TaskRunning,
+		HasPreservedData: status.HasPreservedData,
+		Legacy:           status.Legacy,
+		CreatedAt:        status.CreatedAt,
+		UpdatedAt:        status.UpdatedAt,
+		Removal:          removal,
+	})
+}
+
+// GetContainerMetrics godoc
+// @Summary Get current workspace metrics for bot
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} GetContainerMetricsResponse
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container/metrics [get].
+func (h *ContainerdHandler) GetContainerMetrics(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+
+	response, err := h.buildContainerMetricsResponse(c.Request().Context(), botID, nil)
+	if err != nil {
+		return apperror.Wrap(apperror.CodeWorkspaceMetricsLoadFailed, err, nil)
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+// UpdateContainerMetrics godoc
+// @Summary Update workspace metrics settings for bot
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Param payload body UpdateContainerMetricsRequest true "Metrics settings payload"
+// @Success 200 {object} GetContainerMetricsResponse
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container/metrics [put].
+func (h *ContainerdHandler) UpdateContainerMetrics(c echo.Context) error {
+	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionManage)
+	if err != nil {
+		return err
+	}
+
+	var req UpdateContainerMetricsRequest
+	if err := c.Bind(&req); err != nil {
+		return apperror.Wrap(apperror.CodeWorkspaceResourceLimitsInvalid, err, nil)
+	}
+	if req.ResourceLimits == nil {
+		return apperror.New(apperror.CodeWorkspaceResourceLimitsRequired, nil)
+	}
+	limitsReq := req.ResourceLimits
+	if limitsReq.CPUMillicores < 0 || limitsReq.MemoryBytes < 0 || limitsReq.StorageBytes < 0 {
+		return apperror.New(apperror.CodeWorkspaceResourceLimitsInvalid, nil)
+	}
+	limits, err := h.manager.SetResourceLimits(c.Request().Context(), botID, ctr.ResourceLimits{
+		CPUMillicores: limitsReq.CPUMillicores,
+		MemoryBytes:   limitsReq.MemoryBytes,
+		StorageBytes:  limitsReq.StorageBytes,
+	})
+	if err != nil {
+		return apperror.Wrap(apperror.CodeWorkspaceResourceLimitsSaveFailed, err, nil)
+	}
+	response, err := h.buildContainerMetricsResponse(c.Request().Context(), botID, limits)
+	if err != nil {
+		return apperror.Wrap(apperror.CodeWorkspaceMetricsLoadFailed, err, nil)
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+func (h *ContainerdHandler) buildContainerMetricsResponse(
+	ctx context.Context,
+	botID string,
+	resourceLimits *workspace.ResourceLimitsResult,
+) (GetContainerMetricsResponse, error) {
+	metrics, err := h.manager.GetContainerMetrics(ctx, botID)
+	if err != nil {
+		return GetContainerMetricsResponse{}, err
+	}
+	if resourceLimits == nil {
+		resourceLimits, err = h.manager.GetResourceLimits(ctx, botID)
+		if err != nil {
+			return GetContainerMetricsResponse{}, err
+		}
+	}
+
+	response := GetContainerMetricsResponse{
+		Supported:         metrics.Supported,
+		Backend:           h.containerBackend,
+		UnsupportedReason: metrics.UnsupportedReason,
+		Status: ContainerMetricsStatusResponse{
+			Exists:      metrics.Status.Exists,
+			TaskRunning: metrics.Status.TaskRunning,
+		},
+		Metrics: ContainerMetricsPayloadResponse{
+			CPU:     toContainerCPUMetricsResponse(metrics.CPU),
+			Memory:  toContainerMemoryMetricsResponse(metrics.Memory),
+			Storage: toContainerStorageMetricsResponse(metrics.Storage),
+		},
+		ResourceLimits: h.toContainerResourceLimitsResponse(resourceLimits),
+	}
+	if !metrics.SampledAt.IsZero() {
+		sampledAt := metrics.SampledAt
+		response.SampledAt = &sampledAt
+	}
+	return response, nil
+}
+
+// DeleteContainer godoc
+// @Summary Delete workspace for bot
+// @Description Records the removal and answers at once. The workspace is gone when GET answers 404; until then GET reports the removal's state.
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Param preserve_data query bool false "Export /data before deletion"
+// @Success 202
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container [delete].
+func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.workspaces == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
+	}
+	preserveData := c.QueryParam("preserve_data") == "true"
+	if _, err := h.workspaces.RequestAbsent(c.Request().Context(), botID, preserveData); err != nil {
+		return apperror.Wrap(apperror.CodeWorkspaceDeleteFailed, err, nil)
+	}
+	// The reconciler removes it. The request does not wait: an export can
+	// outlast any proxy, and the outcome has to survive a reload anyway.
+	return c.NoContent(http.StatusAccepted)
+}
+
+// CancelContainerRemoval godoc
+// @Summary Withdraw a failed workspace removal
+// @Description Keeps the workspace after its removal failed. Does nothing when no removal has failed; one still in progress cannot be withdrawn.
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Success 204
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container/removal/cancel [post].
+func (h *ContainerdHandler) CancelContainerRemoval(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.workspaces == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
+	}
+	if err := h.workspaces.CancelRemoval(c.Request().Context(), botID); err != nil {
+		return errs.Wrap(err, "cancel workspace removal", slog.String("bot_id", botID))
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// StartContainer godoc
+// @Summary Start workspace for bot
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} object
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container/start [post].
+func (h *ContainerdHandler) StartContainer(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if err := h.manager.EnsureNativeRunning(c.Request().Context(), botID); err != nil {
+		if errors.Is(err, workspace.ErrContainerNotFound) {
+			return apperror.New(apperror.CodeWorkspaceNotFound, nil)
+		}
+		return apperror.Wrap(apperror.CodeWorkspaceStartFailed, err, nil)
+	}
+	h.observeWorkspace(c.Request().Context(), botID)
+	return c.JSON(http.StatusOK, map[string]bool{"started": true})
+}
+
+// StopContainer godoc
+// @Summary Stop workspace for bot
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} object
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container/stop [post].
+func (h *ContainerdHandler) StopContainer(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if err := h.manager.StopBot(c.Request().Context(), botID); err != nil {
+		if errors.Is(err, workspace.ErrContainerNotFound) {
+			return apperror.New(apperror.CodeWorkspaceNotFound, nil)
+		}
+		return apperror.Wrap(apperror.CodeWorkspaceStopFailed, err, nil)
+	}
+	h.observeWorkspace(c.Request().Context(), botID)
+	return c.JSON(http.StatusOK, map[string]bool{"stopped": true})
+}
+
+// observeWorkspace refreshes the reconciler's observation after a user-driven
+// start or stop so the recorded state (running / stopped) follows the action.
+func (h *ContainerdHandler) observeWorkspace(ctx context.Context, botID string) {
+	if h.workspaces == nil {
+		return
+	}
+	obsCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	if _, err := h.workspaces.Observe(obsCtx, botID); err != nil && !errors.Is(err, botworkspace.ErrNotFound) {
+		h.logger.WarnContext(ctx, "refresh workspace observation failed", slog.String("bot_id", botID), slog.Any("error", err))
+	}
+}
+
+// CreateSnapshot godoc
+// @Summary Create workspace snapshot for bot
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Param payload body CreateSnapshotRequest true "Create snapshot payload"
+// @Success 200 {object} CreateSnapshotResponse
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 501 {object} server.Problem "Snapshots currently not supported on this backend"
+// @Router /bots/{bot_id}/container/snapshots [post].
+func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
+	if h.containerBackend == "apple" {
+		return apperror.New(apperror.CodeWorkspaceSnapshotsUnsupported, nil)
+	}
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.manager == nil {
+		return apperror.New(apperror.CodeWorkspaceSnapshotManagerUnavailable, nil)
+	}
+	var req CreateSnapshotRequest
+	if err := c.Bind(&req); err != nil {
+		return apperror.Wrap(apperror.CodeWorkspaceSnapshotRequestInvalid, err, nil)
+	}
+	created, err := h.manager.CreateSnapshot(c.Request().Context(), botID, req.SnapshotName, workspace.SnapshotSourceManual)
+	if err != nil {
+		if ctr.IsNotFound(err) {
+			return apperror.New(apperror.CodeWorkspaceNotFound, nil)
+		}
+		return apperror.Wrap(apperror.CodeWorkspaceSnapshotCreateFailed, err, nil)
+	}
+	return c.JSON(http.StatusOK, CreateSnapshotResponse{
+		ContainerID:         created.ContainerID,
+		SnapshotName:        created.SnapshotName,
+		RuntimeSnapshotName: created.RuntimeSnapshotName,
+		DisplayName:         created.DisplayName,
+		Snapshotter:         created.Snapshotter,
+		Version:             created.Version,
+		Source:              workspace.SnapshotSourceManual,
+	})
+}
+
+// ListSnapshots godoc
+// @Summary List snapshots
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Param snapshotter query string false "Snapshotter name"
+// @Success 200 {object} ListSnapshotsResponse
+// @Failure 501 {object} server.Problem "Snapshots currently not supported on this backend"
+// @Router /bots/{bot_id}/container/snapshots [get].
+func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
+	if h.containerBackend == "apple" {
+		return apperror.New(apperror.CodeWorkspaceSnapshotsUnsupported, nil)
+	}
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.manager == nil {
+		return apperror.New(apperror.CodeWorkspaceSnapshotManagerUnavailable, nil)
+	}
+
+	data, err := h.manager.ListBotSnapshotData(c.Request().Context(), botID)
+	if err != nil {
+		if ctr.IsNotFound(err) {
+			return apperror.New(apperror.CodeWorkspaceNotFound, nil)
+		}
+		return apperror.Wrap(apperror.CodeWorkspaceSnapshotsLoadFailed, err, nil)
+	}
+
+	if req := strings.TrimSpace(c.QueryParam("snapshotter")); req != "" && req != data.Snapshotter {
+		return apperror.New(apperror.CodeWorkspaceSnapshotterMismatch, nil)
+	}
+
+	snapshotKey := strings.TrimSpace(data.Info.StorageRef.Key)
+
+	resp, ok := buildSnapshotListResponse(data)
+	if !ok {
+		return apperror.Wrap(apperror.CodeWorkspaceSnapshotChainNotFound, errs.New("container snapshot chain root not found",
+			slog.String("container_id", data.ContainerID),
+			slog.String("snapshotter", data.Snapshotter),
+			slog.String("snapshot_key", snapshotKey),
+		), nil)
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+// RollbackSnapshot godoc
+// @Summary Roll back workspace to a previous snapshot version
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Param payload body RollbackRequest true "Rollback payload"
+// @Success 200 {object} object
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container/snapshots/rollback [post].
+func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.manager == nil {
+		return apperror.New(apperror.CodeWorkspaceManagerUnavailable, nil)
+	}
+
+	var req RollbackRequest
+	if err := c.Bind(&req); err != nil {
+		return apperror.New(apperror.CodeWorkspaceSnapshotRollbackRequestInvalid, nil)
+	}
+	if req.Version < 1 {
+		return apperror.New(apperror.CodeWorkspaceSnapshotVersionInvalid, nil)
+	}
+
+	if err := h.manager.RollbackVersion(c.Request().Context(), botID, req.Version); err != nil {
+		return apperror.Wrap(apperror.CodeWorkspaceSnapshotRollbackFailed, err, nil)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"rolled_back_to": req.Version})
+}
+
+// RestorePreservedData godoc
+// @Summary Restore previously preserved data into workspace
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} object
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container/data/restore [post].
+func (h *ContainerdHandler) RestorePreservedData(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.manager == nil {
+		return apperror.New(apperror.CodeWorkspaceManagerUnavailable, nil)
+	}
+
+	if !h.manager.HasPreservedData(botID) {
+		return apperror.New(apperror.CodeWorkspacePreservedDataNotFound, nil)
+	}
+
+	if err := h.manager.RestorePreservedData(c.Request().Context(), botID); err != nil {
+		return apperror.Wrap(apperror.CodeWorkspaceRestoreFailed, err, nil)
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"restored": true})
+}
+
+func toContainerCPUMetricsResponse(metrics *ctr.CPUMetrics) *ContainerCPUMetricsResponse {
+	if metrics == nil {
+		return nil
+	}
+	return &ContainerCPUMetricsResponse{
+		Cores:             metrics.Cores,
+		UsagePercent:      metrics.UsagePercent,
+		UsageNanoseconds:  metrics.UsageNanoseconds,
+		UsageNanocores:    metrics.UsageNanocores,
+		UserNanoseconds:   metrics.UserNanoseconds,
+		KernelNanoseconds: metrics.KernelNanoseconds,
+	}
+}
+
+func toContainerMemoryMetricsResponse(metrics *ctr.MemoryMetrics) *ContainerMemoryMetricsResponse {
+	if metrics == nil {
+		return nil
+	}
+	return &ContainerMemoryMetricsResponse{
+		UsageBytes:   metrics.UsageBytes,
+		LimitBytes:   metrics.LimitBytes,
+		UsagePercent: metrics.UsagePercent,
+	}
+}
+
+func toContainerStorageMetricsResponse(metrics *workspace.ContainerStorageMetrics) *ContainerStorageMetricsResponse {
+	if metrics == nil {
+		return nil
+	}
+	resp := &ContainerStorageMetricsResponse{
+		Path:       metrics.Path,
+		LimitBytes: metrics.LimitBytes,
+	}
+	if !metrics.UsedUnknown {
+		used := metrics.UsedBytes
+		resp.UsedBytes = &used
+	}
+	return resp
+}
+
+func (h *ContainerdHandler) toContainerResourceLimitsResponse(result *workspace.ResourceLimitsResult) GetContainerResourceLimitsResponse {
+	if result == nil {
+		return GetContainerResourceLimitsResponse{Backend: h.containerBackend}
+	}
+	return GetContainerResourceLimitsResponse{
+		Desired:          toContainerResourceLimitValuesResponse(result.Desired),
+		Applied:          toContainerResourceLimitValuesResponse(result.Applied),
+		Capabilities:     toContainerResourceLimitCapabilitiesResponse(result.Capabilities),
+		Observed:         toContainerResourceLimitObservedResponse(result.Observed),
+		Status:           result.Status,
+		RequiresRecreate: result.RequiresRecreate,
+		Backend:          h.containerBackend,
+		WorkspaceBackend: result.WorkspaceBackend,
+		RuntimeBackend:   result.RuntimeBackend,
+	}
+}
+
+func toContainerResourceLimitValuesResponse(limits ctr.ResourceLimits) ContainerResourceLimitValuesResponse {
+	return ContainerResourceLimitValuesResponse{
+		CPUMillicores: limits.CPUMillicores,
+		MemoryBytes:   limits.MemoryBytes,
+		StorageBytes:  limits.StorageBytes,
+	}
+}
+
+func toContainerResourceLimitCapabilityResponse(capability workspace.ResourceLimitCapability) ContainerResourceLimitCapabilityResponse {
+	return ContainerResourceLimitCapabilityResponse{
+		HardLimitSupported: capability.HardLimitSupported,
+		SoftLimitSupported: capability.SoftLimitSupported,
+	}
+}
+
+func toContainerResourceLimitCapabilitiesResponse(caps workspace.ResourceLimitCapabilities) ContainerResourceLimitCapabilitiesResponse {
+	return ContainerResourceLimitCapabilitiesResponse{
+		CPU:     toContainerResourceLimitCapabilityResponse(caps.CPU),
+		Memory:  toContainerResourceLimitCapabilityResponse(caps.Memory),
+		Storage: toContainerResourceLimitCapabilityResponse(caps.Storage),
+	}
+}
+
+func toContainerResourceLimitObservedResponse(observed workspace.ResourceLimitObserved) ContainerResourceLimitObservedResponse {
+	return ContainerResourceLimitObservedResponse{
+		CPUUsagePercent:      observed.CPUUsagePercent,
+		MemoryUsageBytes:     observed.MemoryUsageBytes,
+		MemoryLimitBytes:     observed.MemoryLimitBytes,
+		StorageUsedBytes:     observed.StorageUsedBytes,
+		StorageOverSoftLimit: observed.StorageOverSoftLimit,
+	}
+}
+
+func buildSnapshotListResponse(data *workspace.BotSnapshotData) (ListSnapshotsResponse, bool) {
+	if data == nil {
+		return ListSnapshotsResponse{}, false
+	}
+
+	snapshotter := strings.TrimSpace(data.Snapshotter)
+	runtimeByName := make(map[string]ctr.SnapshotInfo, len(data.RuntimeSnapshots))
+	for _, info := range data.RuntimeSnapshots {
+		name := strings.TrimSpace(info.Name)
+		if name == "" {
+			continue
+		}
+		runtimeByName[name] = info
+	}
+
+	snapshotKey := strings.TrimSpace(data.Info.StorageRef.Key)
+	lineage, ok := snapshotLineage(snapshotKey, data.RuntimeSnapshots)
+	if !ok {
+		if snapshotLineageRootRequired(snapshotter) {
+			return ListSnapshotsResponse{}, false
+		}
+		lineage = nil
+	}
+
+	items := make([]SnapshotInfo, 0, len(lineage)+len(data.ManagedMeta))
+	seen := make(map[string]struct{}, len(lineage)+len(data.ManagedMeta))
+	appendRuntime := func(runtimeInfo ctr.SnapshotInfo, fallbackSource string, meta *workspace.ManagedSnapshotMeta) {
+		source := fallbackSource
+		managed := false
+		var version *int
+		displayName := ""
+		itemSnapshotter := snapshotter
+		if meta != nil {
+			if metaSource := strings.TrimSpace(meta.Source); metaSource != "" {
+				source = metaSource
+			}
+			if metaSnapshotter := strings.TrimSpace(meta.Snapshotter); metaSnapshotter != "" {
+				itemSnapshotter = metaSnapshotter
+			}
+			managed = true
+			version = meta.Version
+			displayName = strings.TrimSpace(meta.DisplayName)
+		}
+		if strings.EqualFold(runtimeInfo.Kind, "archive") || hasArchiveSnapshotPrefix(runtimeInfo.Name) {
+			itemSnapshotter = "archive"
+		}
+
+		name := displayName
+		if name == "" {
+			if version != nil {
+				name = fmt.Sprintf("Version %d", *version)
+			} else {
+				name = runtimeInfo.Name
+			}
+		}
+		items = append(items, SnapshotInfo{
+			Snapshotter: itemSnapshotter,
+			Name:        name,
+			DisplayName: displayName,
+			RuntimeName: runtimeInfo.Name,
+			Parent:      runtimeInfo.Parent,
+			Kind:        runtimeInfo.Kind,
+			CreatedAt:   runtimeInfo.Created,
+			UpdatedAt:   runtimeInfo.Updated,
+			Labels:      runtimeInfo.Labels,
+			Source:      source,
+			Managed:     managed,
+			Version:     version,
+		})
+		seen[strings.TrimSpace(runtimeInfo.Name)] = struct{}{}
+	}
+
+	for _, runtimeInfo := range lineage {
+		name := strings.TrimSpace(runtimeInfo.Name)
+		if meta, hasMeta := data.ManagedMeta[name]; hasMeta {
+			appendRuntime(runtimeInfo, "image_layer", &meta)
+			continue
+		}
+		appendRuntime(runtimeInfo, "image_layer", nil)
+	}
+
+	for name, meta := range data.ManagedMeta {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		runtimeInfo, exists := runtimeByName[name]
+		if !exists {
+			var syntheticOK bool
+			runtimeInfo, syntheticOK = managedArchiveRuntimeInfo(name, meta)
+			if !syntheticOK {
+				continue
+			}
+		}
+		appendRuntime(runtimeInfo, "managed", &meta)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].Name < items[j].Name
+		}
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+
+	return ListSnapshotsResponse{
+		Snapshotter: snapshotter,
+		Snapshots:   items,
+	}, true
+}
+
+func snapshotLineageRootRequired(snapshotter string) bool {
+	switch strings.ToLower(strings.TrimSpace(snapshotter)) {
+	case "archive", "docker", "local":
+		return false
+	default:
+		return true
+	}
+}
+
+func managedArchiveRuntimeInfo(name string, meta workspace.ManagedSnapshotMeta) (ctr.SnapshotInfo, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" || !managedSnapshotIsArchive(name, meta) {
+		return ctr.SnapshotInfo{}, false
+	}
+	return ctr.SnapshotInfo{
+		Name:    name,
+		Parent:  strings.TrimSpace(meta.ParentRuntimeSnapshotName),
+		Kind:    "archive",
+		Created: meta.CreatedAt,
+		Updated: meta.CreatedAt,
+	}, true
+}
+
+func managedSnapshotIsArchive(name string, meta workspace.ManagedSnapshotMeta) bool {
+	return strings.EqualFold(strings.TrimSpace(meta.Snapshotter), "archive") || hasArchiveSnapshotPrefix(name)
+}
+
+func hasArchiveSnapshotPrefix(name string) bool {
+	return strings.HasPrefix(strings.TrimSpace(name), "archive:")
+}
+
+func snapshotLineage(root string, all []ctr.SnapshotInfo) ([]ctr.SnapshotInfo, bool) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return nil, false
+	}
+	index := make(map[string]ctr.SnapshotInfo, len(all))
+	for _, info := range all {
+		name := strings.TrimSpace(info.Name)
+		if name == "" {
+			continue
+		}
+		index[name] = info
+	}
+	if _, ok := index[root]; !ok {
+		return nil, false
+	}
+	lineage := make([]ctr.SnapshotInfo, 0, len(index))
+	visited := make(map[string]struct{}, len(index))
+	current := root
+	for current != "" {
+		if _, seen := visited[current]; seen {
+			break
+		}
+		info, ok := index[current]
+		if !ok {
+			break
+		}
+		lineage = append(lineage, info)
+		visited[current] = struct{}{}
+		current = strings.TrimSpace(info.Parent)
+	}
+	return lineage, true
+}
+
+// ---------- auth helpers ----------
+
+// requireBotAccess extracts bot_id from path, validates user auth, and authorizes bot access.
+func (h *ContainerdHandler) requireBotAccess(c echo.Context) (string, error) {
+	return h.requireBotAccessWithPermission(c, bots.PermissionManage)
+}
+
+func (h *ContainerdHandler) requireBotAccessWithPermission(c echo.Context, permission string) (string, error) {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return "", err
+	}
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", err
+	}
+	if _, err := h.authorizeBotAccessWithPermission(c.Request().Context(), channelIdentityID, botID, permission); err != nil {
+		return "", err
+	}
+	return botID, nil
+}
+
+func (*ContainerdHandler) requireChannelIdentityID(c echo.Context) (string, error) {
+	return RequireChannelIdentityID(c)
+}
+
+func (h *ContainerdHandler) authorizeBotAccessWithPermission(ctx context.Context, channelIdentityID, botID, permission string) (bots.Bot, error) {
+	return AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, channelIdentityID, botID, permission)
+}
+
+// requireBotAccessWithGuest is like requireBotAccess but also allows guest access
+// via ACL when the caller explicitly opts into guest-compatible access.
+func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, error) {
+	channelIdentityID, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return "", err
+	}
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", err
+	}
+	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
+		return "", err
+	}
+	return botID, nil
+}
