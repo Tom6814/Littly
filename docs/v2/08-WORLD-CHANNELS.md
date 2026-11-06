@@ -149,7 +149,7 @@ CREATE TABLE littly_channel_events (
 - 身份查找 `littly_channel_identities(channel, external_id)`：
   - 命中 → `people_id`；`identity.display_name` 更新，`people.display_name` 不动（§4.2）。
   - 私聊未命中：若 `external_id == owner_external_id` → 映射到 `relationship=owner` 的 people（不存在则报配置错误）；否则**创建** people：`relationship=stranger`、`closeness=10`、`important=false`，再建 identity。onboarding 必须填 `owner_external_id`；为空时所有私聊按陌生人处理并提示管理员绑定。
-  - 群聊未命中且未 @/回复她 → 不创建 people；@/回复她 → 按陌生人创建（避免给每个群成员建卡）。
+  - 群聊未命中且未 @/回复她 → 不创建 people；@/回复她 → 按陌生人创建（避免给每个群成员建卡）。已归档（tier=archived）的外部身份：仍命中身份行，但**不自动恢复**；她按陌生人处理，可主动 `recall_person` 找回。
 - 会话：`conversation_key=private:<uin>` 或 `group:<gid>`；`littly_channel_conversations` upsert，记录 `last_inbound_at`、群标题（可选 `get_group_info`，失败留空）。
 - `littly_attention_events(kind=message)` 由 server 写，不在 worker 写。
 

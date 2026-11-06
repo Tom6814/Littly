@@ -302,6 +302,32 @@ embedding 缺失 → 纯词法；分词器异常 → `ILIKE`/trgm + audit；查�
 
 `littly_people.notes`：卡片是真相，`notes` 是 ≤400 字符派生摘要（"她是谁"首句 + 关系 + 1 条边界），卡片写成功后同事务更新；只有 `people.go` 写 `notes`，08 其他字段用列级 UPDATE，禁止整行 upsert。有卡无 notes → 重算；有 notes 无卡 → 以 notes + 空模板重建并 audit。
 
+### 7.3 遗忘、归档与回收站（可恢复）
+
+**生命周期**：`active`（friend/intimate/important 独立卡）→ `dormant`（acquaintance，聚合一行）→ `archived`（tier=archived，回收站）。
+
+| 状态 | 触发 | 她的认知 | 上下文注入 |
+|---|---|---|---|
+| dormant | acquaintance 且 90 天无互动、未 pin | 聚合一行 brief | 相关时最多 1 行 |
+| archived | dormant 超过 90 天（即约 180 天无互动）或手动归档 | **不再记得**（只有身份行 + 冷记录） | **不注入** |
+| restored | 她主动恢复/用户恢复 | 回到 acquaintance（或按历史升 friend） | 恢复后按 tier 注入 |
+
+- 归档动作：从 `people/acquaintances.md` 删掉该行；`_history/people/<id>/` 保留卡片（若有）；DB 行 `tier=archived` + `archived_at/archive_reason`；**记忆不删除**（可见性不变，只是不主动检索）。
+- 重要的人（important/friend/intimate）**永不自动归档**，除非用户显式归档。
+- 重要人物卡不是"冷冻"：没有新证据就不改；有新互动再由 Dream 补卡/更新。
+
+**回收站内容**：身份行（姓名/别名/渠道/首次-最后/一句话印象）+ 记忆指针（mem_id 列表，不复制正文）+ 历史卡路径。归档的人再发消息：身份仍命中，但**不自动恢复**；她按陌生人处理，可主动 `recall_person` 检索。
+
+**工具**：
+| 工具 | 作用 | 返回 |
+|---|---|---|
+| `recall_person(query)` | 在回收站/全部人物里按姓名/别名/渠道/事件关键词搜索（FTS+trgm；可带近期消息摘要） | 候选列表：id/名字/别名/渠道/最后互动/brief/匹配理由/相关记忆摘要；无结果返回空 |
+| `restore_person(id, confidence?)` | 恢复归档人物：tier=acquaintance（或按互动历史升 friend）、重建 brief/人物卡、写审计 | `{restored:true, tier, card_path}`；**恢复前必须自己确认像不像** |
+
+- **不自动恢复**：系统不会因为名字匹配就悄悄恢复；"她忘了"必须是真忘。
+- 检索结果只给她自己用；回复当前人时不得泄露第三人的私密细节（见 §8）。
+- 误恢复保护：同名/同群/换号时返回多个候选；她可以问一句"你是那个…吗？"确认后再恢复。
+
 ## 8. 隐私
 
 | 点 | 规则 | 失败 |

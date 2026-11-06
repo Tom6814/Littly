@@ -169,6 +169,15 @@ type ToolError struct { Code, Message string; Retryable bool; RetryAfter time.Du
 
 `memory.remember` 走 05 的写入路径：`Submit` 到 staging（同步轻校验）→ 立即尝试该条 ingest；成功返回 `memory_id`，失败返回 `staging_id` + `pending`，由对账器重试。她明确记下的东西不应等 Dream；但绝不由工具直接写 vault。`memory.recall` 的可见性过滤由 memoryvault 强制，不信任模型传参。
 
+### 3.6 人物与记忆（回收站）
+
+| 工具 | 输入（必填；可选省略） | 输出 | 风险 | 限额/失败 |
+|---|---|---|---|---|
+| `recall_person` | `query`；`limit=5` `include_active=true` | `candidates[{people_id,name,aliases,channel,last_seen,brief,score,memories[]}]` | auto | 只读；无结果空列表；不返回 private 正文（只摘要） |
+| `restore_person` | `people_id`；`confidence` `note` | `{restored,tier,card_path}` | notify | 需当前人确认或高置信；写审计；不恢复 blocked |
+
+补充：`recall_person` 只用于"这个人是不是我认识的"和找回身份；不用于向当前对话者展示第三人的隐私。恢复成功后按 05 §7.3 重建 brief/卡；同名多候选时她应先问确认。
+
 ## 4. 活动执行
 
 ### 4.1 活动类型 → 工具组合
