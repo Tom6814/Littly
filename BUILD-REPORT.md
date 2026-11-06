@@ -158,7 +158,7 @@ skills`。
 ## 最终镜像验证（从源码构建，不靠 docker cp）
 
 ```text
-docker build -f docker/Dockerfile.server.local -t memohai/server:latest .   → Successfully built d6b543a24d8e（最新：含 model test / waiting_login）
+docker build -f docker/Dockerfile.server.local -t memohai/server:latest .   → Successfully built 9302669c5f7d（含 browser sidecar + raw file）
 docker compose up -d --force-recreate server                                 → memoh-server Healthy
 schema_migrations: 174|f (clean)
 GET /            → 302 → /littly/
@@ -169,6 +169,11 @@ GET /littly/api/today → 8 messages, 12 memories, 1 activity (from Postgres)
 POST /littly/api/terminal {"command":"echo image-ok; pwd"} → image-ok + /opt/memoh/data/littly/workspace
 POST /littly/api/test-model → {"ok":true,"model":"deepseek-flash","latency_ms":656,"reply":"ok"}
 GET /littly/api/health → snowluma.state=waiting_login（登录前预期）
+GET /littly/api/browser/status → Chrome/157，ok=true
+POST /littly/api/browser {"url":"http://memoh-web:8082/littly/","screenshot":true}
+→ title=Littly · 她, screenshot=home/browser/20261107-032522.png
+GET /littly/api/files/raw?path=home/browser/...png → 200 image/png
+POST /littly/api/test-model → ok deepseek-flash
 ```
 
 构建过程中 colima 磁盘一度写满（`No space left on device`），用 `docker image prune -f` 清理 dangling 镜像后恢复；迁移重跑成功，版本 174。
