@@ -430,6 +430,11 @@ func TestAPIEndToEnd(t *testing.T) {
 	want(200, do("GET", "/littly/api/files/raw?path=home/e2e.md", ""), "file raw")
 	want(200, do("GET", "/littly/api/events", ""), "events")
 	want(200, do("GET", "/littly/api/archive?q=E2E", ""), "archive")
+	want(200, do("GET", "/littly/api/diaries", ""), "diaries")
+	want(200, do("POST", "/littly/api/snapshots", ""), "snapshot")
+	want(200, do("GET", "/littly/api/snapshots", ""), "snapshot list")
+	// browser validation happens before any network call
+	want(502, do("POST", "/littly/api/browser", `{"url":"file:///etc/passwd"}`), "browser rejects file url")
 }
 
 func TestDiariesAPI(t *testing.T) {

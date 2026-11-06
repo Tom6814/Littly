@@ -227,7 +227,7 @@ skills`。
 
 ## 回归测试：六面 API e2e
 
-`TestAPIEndToEnd` 用 httptest 串起：bootstrap / health / chat / today / config / terminal / test-model / activities/run / activities / artifacts / people / memories / heartbeat / heartbeat schedule / world / file write/list/content/raw / events / archive，全部 200。
+`TestAPIEndToEnd` 用 httptest 串起：bootstrap / health / chat / today / config / terminal / test-model / activities/run / activities / artifacts / people / memories / heartbeat / heartbeat schedule / world / file write/list/content/raw / events / archive / diaries / snapshots / browser 非 http 拒绝（502）。
 
 ## 最终镜像验证（从源码构建，不靠 docker cp）
 
