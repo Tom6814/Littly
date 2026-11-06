@@ -11,6 +11,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	littlyagent "github.com/felinics/memoh/internal/littly/agentctx"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
@@ -93,6 +94,15 @@ func GenerateSystemSections(params SystemPromptParams) []SystemSection {
 		},
 		{ID: sectionIDBody, Kind: contextfrag.KindSystemPrompt, Priority: priorityBody, RetentionTier: contextfrag.RetentionRequired, Text: body},
 		{ID: sectionIDTail, Kind: contextfrag.KindSystemPrompt, Priority: priorityTail, RetentionTier: contextfrag.RetentionRequired, Text: tail},
+	}
+
+	if persona := littlyagent.SystemSection(); persona != "" {
+		// LITTLY: one fork-wide persona, injected into every native agent turn.
+		sections = append(sections, SystemSection{
+			ID: "system.littly_persona", Kind: contextfrag.KindBotIdentity,
+			Priority: priorityBotIdentity + 1, RetentionTier: contextfrag.RetentionPreferred,
+			Text: persona,
+		})
 	}
 
 	sections = append(sections, buildPlatformIdentitySections(params)...)

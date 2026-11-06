@@ -58,6 +58,11 @@ go build ./cmd/agent
 - `docker/nginx-app.conf`：`/` → `/littly/`；`/settings`、`/bots` 重定向。
 - `docs/v2/`：完整设计文档（产品/架构/数据模型/生活引擎/记忆/人格回复/心跳/UI/测试/构建）。
 
+## 核心桥接
+
+- `internal/littly/agentctx` 把 Littly 的姓名/SELF/说话方式/边界注入 Memoh 原生 agent 的 system prompt（`system.littly_persona`），平台里的 agent 也以“她”的身份工作。
+- 只注入稳定人格字段，不把高频记忆塞进 system prompt，避免 prompt cache 抖动；记忆仍通过工具/检索走。
+
 ## 与设计文档的差距（诚实记录）
 
 - 运行时状态持久化到 Memoh PostgreSQL：`littly_state`（JSONB，迁移 `0173`）+ **规范化镜像表** `littly_people/memories/activities/artifacts/heartbeats/heartbeat_runs/reply_decisions/outbox/events/diaries/dreams`（迁移 `0174`）；Markdown vault 仍是记忆真相。memory provider 替换仍未完成。

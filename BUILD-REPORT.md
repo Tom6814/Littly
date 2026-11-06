@@ -96,6 +96,13 @@ events|50
 diaries|3
 ```
 
+## M3 进度：人格桥接（Memoh 原生 prompt）
+
+- 新包 `internal/littly/agentctx`：读取 `LITTLY_DATA_DIR/config.json`，生成稳定的 persona section。
+- `internal/agent/runtime/native/prompt_sections.go` 注入 `system.littly_persona`（排在 bot identity 之后，RetentionPreferred）。
+- 只含 name/bio/SELF/style/boundaries，避免动态记忆破坏 prompt cache。
+- 测试：`internal/littly/agentctx` 单测 + `internal/agent/runtime/native` 全包测试通过。
+
 ## M4 进度：自主活动
 
 - `RunSoloActivity`：有 LLM 时她自选 kind/title 并写第一人称笔记；无 LLM 时降级为“整理最近的想法”。
