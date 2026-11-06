@@ -215,6 +215,18 @@ services:
     networks:
       - memoh-network
 
+  desktop:
+    image: memohai/desktop:latest
+    container_name: littly-desktop
+    security_opt:
+      - seccomp=unconfined
+    shm_size: "512m"
+    ports:
+      - "127.0.0.1:6082:6081"
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
   browser:
     image: chromedp/headless-shell:latest
     container_name: littly-browser

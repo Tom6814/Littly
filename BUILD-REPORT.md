@@ -145,6 +145,14 @@ skills`。
 - 实测打开内部 `/littly/` 页面，返回正文 + `home/browser/20261107-031336.png` artifact。
 - 单测：非 http(s) URL 拒绝。
 
+## M4 进度：虚拟桌面（TigerVNC）
+
+- 基于 SnowLuma 镜像安装 `tigervnc-standalone-server`，用 Xvnc（标准 RFB）替代不稳定的 x11vnc WebSocket 层。
+- compose `littly-desktop` 只绑定 `127.0.0.1:6082`；noVNC + openbox + xterm。
+- X11 framebuffer 截图验证：xterm/openbox 正常渲染。
+- Workbench 内嵌 noVNC iframe + 新标签链接。
+- 注：headless Chrome 的 noVNC 客户端连接时序不稳，真实浏览器/人类查看为目标场景。
+
 ## D7 刹车：危险命令审批
 
 - `riskyCommand` 识别 `rm -rf`、`mkfs`、`dd`、关机/重启、`curl|sh` 等。

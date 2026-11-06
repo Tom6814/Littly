@@ -1,0 +1,6 @@
+FROM motricseven7/snowluma:v2.2.1
+RUN apt-get update -qq && apt-get install -y -qq tigervnc-standalone-server && rm -rf /var/lib/apt/lists/*
+COPY docker/desktop.sh /opt/desktop.sh
+RUN chmod +x /opt/desktop.sh
+EXPOSE 6081
+ENTRYPOINT ["bash", "/opt/desktop.sh"]

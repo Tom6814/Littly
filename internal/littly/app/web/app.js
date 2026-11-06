@@ -232,6 +232,9 @@ async function renderWorkbench() {
       <div class="row"><input id="term-cmd" placeholder="cd /opt/memoh/data/littly/workspace 下执行…" style="flex:1" onkeydown="if(event.key==='Enter')runTerminal()" /><button class="primary" onclick="runTerminal()">执行</button></div>
       <pre id="term-out" class="mono" style="white-space:pre-wrap;max-height:240px;overflow:auto;margin-top:10px;color:var(--muted)">（输出）</pre>
       <div class="muted tiny">受 workbench.allow_shell 控制；限时 15 秒、输出 16KB。这是她自己的电脑，不是安全沙箱。</div></section>
+    <section class="card col-12"><h3>她的桌面</h3>
+      <div class="row" style="margin-bottom:8px"><a class="badge" href="http://127.0.0.1:6082/vnc.html?autoconnect=true&resize=scale&host=127.0.0.1&port=6082&path=websockify" target="_blank">新标签打开桌面</a><span class="muted tiny">TigerVNC · 1280×800 · 只绑定 127.0.0.1</span></div>
+      <iframe src="http://127.0.0.1:6082/vnc.html?autoconnect=true&resize=scale&host=127.0.0.1&port=6082&path=websockify" style="width:100%;height:520px;border:1px solid var(--line);border-radius:10px;background:#000" title="Littly desktop"></iframe></section>
     <section class="card col-12"><h3>浏览器 · 她的电脑</h3>
       <div class="row"><input id="browser-url" placeholder="https://example.com" style="flex:1" onkeydown="if(event.key==='Enter')runBrowser()" /><label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" id="browser-shot" checked style="width:auto" /> 截图</label><button class="primary" onclick="runBrowser()">打开</button></div>
       <div id="browser-out" class="muted tiny" style="margin-top:8px;white-space:pre-wrap;max-height:260px;overflow:auto"></div></section>
