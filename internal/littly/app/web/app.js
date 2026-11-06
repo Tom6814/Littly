@@ -196,8 +196,10 @@ async function renderPeople() {
   $("#mem-body").innerHTML = `<div class="grid-people">${people.map((p) => `<div class="list-item"><div class="row between"><b>${esc(p.name)}</b><span class="badge ${p.important ? "warn" : ""}">${esc(p.tier)}</span></div>
     <div class="m">${esc(p.brief || "")}</div><div class="m">亲密度 ${p.closeness} · ${esc(p.channel)} · 互动 ${p.interactions || 0}</div>
     <div class="row" style="margin-top:8px"><button class="ghost" onclick="toggleImportant('${p.id}',${!p.important})">${p.important ? "取消重要" : "标为重要"}</button>
+    ${p.relationship === "owner" ? "" : `<select onchange="setTier('${p.id}', this.value)" style="width:auto"><option value="stranger" ${p.tier === "stranger" ? "selected" : ""}>陌生</option><option value="acquaintance" ${p.tier === "acquaintance" ? "selected" : ""}>泛泛之交</option><option value="friend" ${p.tier === "friend" ? "selected" : ""}>朋友</option><option value="intimate" ${p.tier === "intimate" ? "selected" : ""}>亲密</option></select>`}
     <button class="ghost danger" onclick="archivePerson('${p.id}')">放进回收站</button></div></div>`).join("") || `<div class="empty">还没有人物</div>`}</div>`;
 }
+async function setTier(id, tier) { try { await api(`/people/${id}/tier`, { method: "POST", body: JSON.stringify({ tier }) }); toast("关系已调整"); renderPeople(); } catch (e) { toast(e.message, true); } }
 async function toggleImportant(id, important) { try { await api(`/people/${id}/important`, { method: "POST", body: JSON.stringify({ important }) }); renderPeople(); } catch (e) { toast(e.message, true); } }
 async function archivePerson(id) { try { await api(`/people/${id}/archive`, { method: "POST" }); toast("已归档"); renderPeople(); } catch (e) { toast(e.message, true); } }
 async function renderArchive() {

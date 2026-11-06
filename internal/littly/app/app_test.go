@@ -522,3 +522,21 @@ func TestInQuietWindow(t *testing.T) {
 		t.Fatalf("13:30 must be quiet")
 	}
 }
+
+func TestSetTierAPI(t *testing.T) {
+	s := newTestService(t)
+	p, err := s.EnsureContact("manual", "tier-test", "阿岚")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.SetTier(p.ID, TierFriend)
+	if err != nil {
+		t.Fatalf("set tier: %v", err)
+	}
+	if got.Tier != TierFriend || got.CardMode != "full" {
+		t.Fatalf("unexpected person: %+v", got)
+	}
+	if _, err := s.SetTier(p.ID, "nope"); err == nil {
+		t.Fatalf("expected invalid tier error")
+	}
+}

@@ -143,6 +143,13 @@ skills`。
 - 实测打开内部 `/littly/` 页面，返回正文 + `home/browser/20261107-031336.png` artifact。
 - 单测：非 http(s) URL 拒绝。
 
+## 人物分层手动调整
+
+- `POST /littly/api/people/:id/tier`（stranger/acquaintance/friend/intimate）；owner 不可改。
+- friend/intimate 生成人物卡，其余走摘要；重建 acquaintances.md。
+- UI 人物列表下拉框直接改关系。
+- 单测 `TestSetTierAPI`；实测把人手动设为 friend。
+
 ## 安静时段与主动 QQ
 
 - `inQuiet` 读取 `security.quiet_start/quiet_end`；安静时段内她仍活着，但**不主动打扰**（事件记录“留给早上的话”）。

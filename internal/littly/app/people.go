@@ -165,6 +165,54 @@ func (s *Service) SetImportant(peopleID string, important bool) error {
 
 // Archive moves a contact to the recycle bin. Memories stay; the card is moved
 // to _history and the aggregate row disappears.
+// SetTier manually adjusts a relationship tier. Archiving/restoring keeps its
+// dedicated paths so the recycle-bin metadata stays correct.
+func (s *Service) SetTier(peopleID, tier string) (store.Person, error) {
+	allowed := map[string]bool{TierStranger: true, TierAcquaintance: true, TierFriend: true, TierIntimate: true}
+	if !allowed[tier] {
+		return store.Person{}, fmt.Errorf("unsupported tier %q", tier)
+	}
+	now := nowUTC()
+	var out store.Person
+	err := s.st.Mutate(func(st *store.State) error {
+		for i := range st.People {
+			p := &st.People[i]
+			if p.ID != peopleID {
+				continue
+			}
+			if p.Relationship == "owner" {
+				return fmt.Errorf("owner tier cannot be changed")
+			}
+			p.Tier = tier
+			p.Relationship = tier
+			p.Important = tier == TierFriend || tier == TierIntimate || p.Important
+			switch tier {
+			case TierFriend, TierIntimate:
+				p.CardMode = "full"
+				p.CardPath = "people/" + p.ID + ".md"
+			default:
+				p.CardMode = "summary"
+			}
+			p.UpdatedAt = now
+			out = *p
+			return nil
+		}
+		return fmt.Errorf("person not found")
+	})
+	if err != nil {
+		return store.Person{}, err
+	}
+	if out.CardMode == "full" {
+		_, _ = s.vault.WritePersonCard(out, s.recentNotes(out.ID))
+	}
+	_ = s.rebuildAcquaintances()
+	_ = s.st.Mutate(func(st *store.State) error {
+		s.st.AppendEvent(st, "people", "关系调整："+out.DisplayName, tier, out.ID, "")
+		return nil
+	})
+	return out, nil
+}
+
 func (s *Service) Archive(peopleID, reason string) error {
 	now := nowUTC()
 	var p store.Person

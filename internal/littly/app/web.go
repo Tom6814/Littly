@@ -62,6 +62,7 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.POST("/people", h.peopleCreate)
 	api.GET("/people/:id", h.person)
 	api.POST("/people/:id/important", h.personImportant)
+	api.POST("/people/:id/tier", h.personTier)
 	api.POST("/people/:id/archive", h.personArchive)
 	api.GET("/archive", h.archive)
 	api.POST("/archive/:id/restore", h.archiveRestore)
@@ -406,6 +407,20 @@ func (h *Handler) personImportant(c echo.Context) error {
 		return jsonErr(c, 400, "update failed", err)
 	}
 	return c.JSON(200, map[string]any{"ok": true})
+}
+
+func (h *Handler) personTier(c echo.Context) error {
+	var body struct {
+		Tier string `json:"tier"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return jsonErr(c, 400, "bad json", err)
+	}
+	p, err := h.svc.SetTier(c.Param("id"), body.Tier)
+	if err != nil {
+		return jsonErr(c, 400, "set tier failed", err)
+	}
+	return c.JSON(200, map[string]any{"ok": true, "person": p})
 }
 
 func (h *Handler) personArchive(c echo.Context) error {
