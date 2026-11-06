@@ -504,3 +504,21 @@ func TestSnapshotCreateRestore(t *testing.T) {
 		t.Fatalf("expected bad snapshot id error")
 	}
 }
+
+func TestInQuietWindow(t *testing.T) {
+	s := newTestService(t)
+	s.cfg.Security.QuietStart = "23:00"
+	s.cfg.Security.QuietEnd = "08:00"
+	loc := time.FixedZone("CST", 8*3600)
+	if !s.inQuiet(time.Date(2026, 11, 7, 1, 0, 0, 0, loc)) {
+		t.Fatalf("01:00 must be quiet")
+	}
+	if s.inQuiet(time.Date(2026, 11, 7, 12, 0, 0, 0, loc)) {
+		t.Fatalf("12:00 must not be quiet")
+	}
+	s.cfg.Security.QuietStart = "13:00"
+	s.cfg.Security.QuietEnd = "14:00"
+	if !s.inQuiet(time.Date(2026, 11, 7, 13, 30, 0, 0, loc)) {
+		t.Fatalf("13:30 must be quiet")
+	}
+}

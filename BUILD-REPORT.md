@@ -143,6 +143,12 @@ skills`。
 - 实测打开内部 `/littly/` 页面，返回正文 + `home/browser/20261107-031336.png` artifact。
 - 单测：非 http(s) URL 拒绝。
 
+## 安静时段与主动 QQ
+
+- `inQuiet` 读取 `security.quiet_start/quiet_end`；安静时段内她仍活着，但**不主动打扰**（事件记录“留给早上的话”）。
+- 非安静时段的主动消息会通过 SnowLuma 发给主人 QQ（配置 owner_external_id 后）。
+- 单测 `TestInQuietWindow`。
+
 ## World：内嵌 QQ 登录窗口
 
 - World 页面用 `<details>` 内嵌 noVNC iframe（http://127.0.0.1:6081/vnc.html），可直接扫码，不必切标签。

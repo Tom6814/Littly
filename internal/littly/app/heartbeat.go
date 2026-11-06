@@ -169,11 +169,19 @@ func (s *Service) runHeartbeat(kind, reason string) {
 	if verdict.Notify {
 		text := strings.TrimSpace(verdict.Summary)
 		if text != "" {
+			quiet := s.inQuiet(s.LocalNow())
 			_ = s.st.Mutate(func(st *store.State) error {
 				st.Messages = append(st.Messages, store.Message{ID: store.NewID("msg"), ConversationID: "web:owner", Channel: "web", PeopleID: "owner", Role: "assistant", Content: text, At: nowUTC(), Direction: "outbound"})
-				s.st.AppendEvent(st, "proactive", "她主动找你", truncate(text, 80), "owner", "")
+				if quiet {
+					s.st.AppendEvent(st, "proactive", "安静时段：留给早上的话", truncate(text, 80), "owner", "")
+				} else {
+					s.st.AppendEvent(st, "proactive", "她主动找你", truncate(text, 80), "owner", "")
+				}
 				return nil
 			})
+			if !quiet {
+				s.snowlumaSend("owner", text)
+			}
 		}
 	}
 	// no-op governor & next fallback
@@ -310,4 +318,23 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+
+// inQuiet reports whether local time falls inside the configured quiet window.
+func (s *Service) inQuiet(local time.Time) bool {
+	start, end := s.cfg.Security.QuietStart, s.cfg.Security.QuietEnd
+	if strings.TrimSpace(start) == "" || strings.TrimSpace(end) == "" {
+		return false
+	}
+	sm, _ := parseClockSafe(start)
+	em, _ := parseClockSafe(end)
+	m := local.Hour()*60 + local.Minute()
+	if sm == em {
+		return false
+	}
+	if sm < em {
+		return m >= sm && m < em
+	}
+	return m >= sm || m < em
 }
