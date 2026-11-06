@@ -9,6 +9,7 @@ import (
 
 	"github.com/felinics/memoh/internal/littly/memoryapi"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/mcp"
 )
 
 func TestItemsFiltersPrivateAndSearches(t *testing.T) {
@@ -91,5 +92,13 @@ func TestBackendReadWrite(t *testing.T) {
 	before, err := p.OnBeforeChat(context.Background(), memprovider.BeforeChatRequest{Query: "后端"})
 	if err != nil || before == nil || !strings.Contains(before.ContextText, "后端记忆") {
 		t.Fatalf("before=%+v err=%v", before, err)
+	}
+	tools, err := p.ListTools(context.Background(), mcp.ToolSessionContext{})
+	if err != nil || len(tools) != 4 {
+		t.Fatalf("tools=%d err=%v", len(tools), err)
+	}
+	out, err := p.CallTool(context.Background(), mcp.ToolSessionContext{}, memprovider.ToolSearchMemory, map[string]any{"query": "后端"})
+	if err != nil || out["results"] == nil {
+		t.Fatalf("call tool=%+v err=%v", out, err)
 	}
 }

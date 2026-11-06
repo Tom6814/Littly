@@ -348,3 +348,18 @@ func splitTitleBody(s string) (string, string) {
 	body := s
 	return title, body
 }
+
+
+// ListTools returns Littly's own memory tools when the backend is available.
+// Without the backend we preserve the upstream builtin descriptors unchanged.
+func (p *Provider) ListTools(ctx context.Context, session mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
+	if p.backend() == nil {
+		return p.Provider.ListTools(ctx, session)
+	}
+	return []mcp.ToolDescriptor{
+		{Name: memprovider.ToolSearchMemory, Description: "Search her own memory index", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}, "limit": map[string]any{"type": "integer"}}, "required": []any{"query"}}},
+		{Name: memprovider.ToolCreateMemory, Description: "Write a memory into her own index", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"memory": map[string]any{"type": "string"}}, "required": []any{"memory"}}},
+		{Name: memprovider.ToolUpdateMemory, Description: "Update one of her memories", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"memory_id": map[string]any{"type": "string"}, "memory": map[string]any{"type": "string"}}, "required": []any{"memory_id", "memory"}}},
+		{Name: memprovider.ToolDeleteMemory, Description: "Delete one of her memories", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"memory_id": map[string]any{"type": "string"}}, "required": []any{"memory_id"}}},
+	}, nil
+}

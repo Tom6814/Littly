@@ -135,7 +135,7 @@ skills`。
 - `OnAfterChat` 在 backend 模式下 no-op，避免上游重复写入。
 - 核心注册：`registry.Register("__builtin_default__", littlymem.Wrap(defaultProvider))`。
 - 单测：私密过滤、关键词、上下文合并、无 state 透传、backend 读写/BeforeChat。
-- 限制：`ListTools` 仍复用上游描述；还不是 100% 合同级替换。
+- `ListTools` 也换成她的 search/create/update/delete memory 工具；backend 缺失时保留上游描述。已完成默认 provider 的合同级替换（写入/检索/hooks/tools/compact/usage）。
 
 ## M4 进度：浏览器
 
