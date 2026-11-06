@@ -154,3 +154,65 @@ func slug(s string) string {
 
 var _ = json.Marshal
 var _ = os.Getenv
+
+// tickLife runs her autonomous daily rhythm: a Dream pass at her configured
+// hour, and a solo activity when she has been idle for a few hours during the
+// day. Both are guarded against heartbeat/LLM overlap and can be disabled with
+// LITTLY_AUTO_ACTIVITY=0.
+func (s *Service) tickLife(local time.Time) {
+	if os.Getenv("LITTLY_AUTO_ACTIVITY") == "0" || s.LLM() == nil {
+		return
+	}
+	s.mu.Lock()
+	busy := s.heartRunning
+	s.mu.Unlock()
+	if busy {
+		return
+	}
+	if s.dreamDue(local) {
+		go func() {
+			if _, err := s.RunDream(context.Background()); err != nil {
+				s.log.Warn("littly: auto dream", "err", err)
+			}
+		}()
+		return
+	}
+	if s.autoActivityDue(local) {
+		go func() {
+			if _, err := s.RunSoloActivity(context.Background()); err != nil {
+				s.log.Warn("littly: auto activity", "err", err)
+			}
+		}()
+	}
+}
+
+func (s *Service) dreamDue(local time.Time) bool {
+	if local.Hour() != s.cfg.Memory.DreamHour {
+		return false
+	}
+	st := s.st.Snapshot()
+	day := local.Format("2006-01-02")
+	for _, d := range st.Dreams {
+		if d.StartedAt.In(local.Location()).Format("2006-01-02") == day {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) autoActivityDue(local time.Time) bool {
+	if !isDay(local, s.cfg.Heartbeat.DayStart, s.cfg.Heartbeat.DayEnd) {
+		return false
+	}
+	if s.currentRunningActivity() != nil {
+		return false
+	}
+	st := s.st.Snapshot()
+	var last time.Time
+	for _, a := range st.Activities {
+		if a.CreatedAt.After(last) {
+			last = a.CreatedAt
+		}
+	}
+	return last.IsZero() || local.Sub(last) > 3*time.Hour
+}

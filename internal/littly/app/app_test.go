@@ -279,3 +279,41 @@ func TestRunSoloActivityLeavesArtifact(t *testing.T) {
 		t.Fatalf("artifact not under home/notes: %+v", st.Artifacts)
 	}
 }
+
+func TestLifeTickDueRules(t *testing.T) {
+	s := newTestService(t)
+	loc := time.FixedZone("CST", 8*3600)
+	noon := time.Date(2026, 11, 7, 12, 0, 0, 0, loc)
+	if !s.autoActivityDue(noon) {
+		t.Fatalf("expected a solo activity when no activity has run")
+	}
+	if s.autoActivityDue(time.Date(2026, 11, 7, 2, 0, 0, 0, loc)) {
+		t.Fatalf("must not auto-run at night")
+	}
+	if _, err := s.RunSoloActivity(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.st.Mutate(func(st *store.State) error {
+		for i := range st.Activities {
+			st.Activities[i].CreatedAt = noon.Add(-time.Hour)
+		}
+		return nil
+	})
+	if s.autoActivityDue(noon) {
+		t.Fatalf("must not auto-run again within 3h")
+	}
+	// Dream is only due in its configured hour, once per day.
+	s.cfg.Memory.DreamHour = 3
+	three := time.Date(2026, 11, 8, 3, 1, 0, 0, loc)
+	if !s.dreamDue(three) {
+		t.Fatalf("expected dream to be due at 03:01")
+	}
+	now := three.UTC()
+	_ = s.st.Mutate(func(st *store.State) error {
+		st.Dreams = append(st.Dreams, store.Dream{ID: "d1", StartedAt: now, Status: "ok"})
+		return nil
+	})
+	if s.dreamDue(three) {
+		t.Fatalf("dream must not run twice on the same local day")
+	}
+}

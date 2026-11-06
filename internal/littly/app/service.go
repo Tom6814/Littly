@@ -264,6 +264,7 @@ func (s *Service) loop() {
 		case <-tick.C:
 			s.tickLifecycle()
 			s.tickHeartbeat()
+			s.tickLife(s.LocalNow())
 			s.tickOutbox()
 		}
 	}
