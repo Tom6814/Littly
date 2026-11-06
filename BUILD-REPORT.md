@@ -182,6 +182,12 @@ skills`。
 - `store`: Mutate 持久化/重开、Schema/运行时默认值、state.json 落盘、ID 唯一。
 - 全量 `go test ./internal/littly/...` 全绿。
 
+## 一键验证
+
+- `scripts/littly-test.sh`：build + littly + server/native/memory + race。
+- `scripts/littly-build.sh`：构建 server/web 镜像并 compose up。
+- Memoh memory 包全量通过：adapters/builtin/memllm/migrate/segment/slug/storefs/wikistore。
+
 ## 竞态检测
 
 - `go test -race ./internal/littly/...` → 全部通过（修复了 SnowLuma 测试里收集回复切片的竞态）。

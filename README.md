@@ -43,8 +43,15 @@ open http://127.0.0.1:8082/littly/
 ## 测试
 
 ```bash
-go test ./internal/littly/...        # 单测：聊天回退、人物归档/回收站、记忆可见性、心跳裁决/理由、文件路径监狱、SnowLuma WS/去重、回复性格
-go test ./internal/server/...        # 核心 server（含单实例守卫所在包）
+./scripts/littly-test.sh             # build + littly tests + server/native/memory + race
+./scripts/littly-build.sh            # 构建 server/web 镜像并 compose up
+```
+
+或手动：
+
+```bash
+go test ./internal/littly/... ./internal/server ./internal/agent/runtime/native ./internal/memory/...
+go test -race ./internal/littly/...
 go build ./cmd/agent
 ```
 
