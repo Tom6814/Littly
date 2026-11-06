@@ -163,6 +163,13 @@ skills`。
 - SnowLuma 状态新增 `state=waiting_login`：OneBot WS 未监听时显示“等待扫码登录”，不再只显示裸 connection refused。
 - 设置页副标题更新为 基本 / 模型 / 心跳 / QQ / 工作台 / 健康 / 关于。
 
+## 记忆/人物录入
+
+- `POST /littly/api/people`：手动添加联系人（默认 manual 渠道、自动 external id）。
+- `POST /littly/api/memories`：手动写一条记忆（默认 public）。
+- UI：世界页联系人录入行、记忆页“记下”行。
+- 单测 `TestCreatePersonAndMemoryAPIs`。
+
 ## 记忆面：日记视图
 
 - `GET /littly/api/diaries`；记忆页新增“日记”标签，按时间倒序展示 Dream 写下的日记（day/mood/content/summary）。

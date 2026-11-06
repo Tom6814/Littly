@@ -446,3 +446,29 @@ func TestDiariesAPI(t *testing.T) {
 		t.Fatalf("diaries = %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestCreatePersonAndMemoryAPIs(t *testing.T) {
+	s := newTestService(t)
+	h := NewHandler(s)
+	e := echo.New()
+	h.Register(e)
+	defer s.Stop()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/littly/api/people", strings.NewReader(`{"name":"阿岚","channel":"manual"}`))
+	req.Header.Set("Content-Type", "application/json")
+	e.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("create person = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/littly/api/memories", strings.NewReader(`{"title":"新记忆","body":"手动写的一条","domain":"life","importance":3,"visibility":"public"}`))
+	req.Header.Set("Content-Type", "application/json")
+	e.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("create memory = %d %s", rec.Code, rec.Body.String())
+	}
+	st := s.st.Snapshot()
+	if len(st.People) < 2 || len(st.Memories) < 1 {
+		t.Fatalf("people=%d memories=%d", len(st.People), len(st.Memories))
+	}
+}

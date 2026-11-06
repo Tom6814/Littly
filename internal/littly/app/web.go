@@ -56,8 +56,10 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.POST("/chat", h.chat)
 	api.POST("/test-model", h.testModel)
 	api.GET("/memories", h.memories)
+	api.POST("/memories", h.memoriesCreate)
 	api.GET("/diaries", h.diaries)
 	api.GET("/people", h.people)
+	api.POST("/people", h.peopleCreate)
 	api.GET("/people/:id", h.person)
 	api.POST("/people/:id/important", h.personImportant)
 	api.POST("/people/:id/archive", h.personArchive)
@@ -310,6 +312,57 @@ func (h *Handler) people(c echo.Context) error {
 		})
 	}
 	return c.JSON(200, map[string]any{"people": out})
+}
+
+func (h *Handler) peopleCreate(c echo.Context) error {
+	var body struct {
+		Name       string `json:"name"`
+		Channel    string `json:"channel"`
+		ExternalID string `json:"external_id"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return jsonErr(c, 400, "bad json", err)
+	}
+	if strings.TrimSpace(body.Name) == "" {
+		return c.JSON(400, map[string]string{"error": "name required"})
+	}
+	channel := strings.TrimSpace(body.Channel)
+	if channel == "" {
+		channel = "manual"
+	}
+	ext := strings.TrimSpace(body.ExternalID)
+	if ext == "" {
+		ext = "manual:" + store.NewID("p")
+	}
+	p, err := h.svc.EnsureContact(channel, ext, body.Name)
+	if err != nil {
+		return jsonErr(c, 400, "create person failed", err)
+	}
+	return c.JSON(200, map[string]any{"person": p})
+}
+
+func (h *Handler) memoriesCreate(c echo.Context) error {
+	var body struct {
+		Title      string `json:"title"`
+		Body       string `json:"body"`
+		Domain     string `json:"domain"`
+		Importance int    `json:"importance"`
+		Visibility string `json:"visibility"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return jsonErr(c, 400, "bad json", err)
+	}
+	if strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.Body) == "" {
+		return c.JSON(400, map[string]string{"error": "title and body required"})
+	}
+	if body.Visibility == "" {
+		body.Visibility = "public"
+	}
+	m, err := h.svc.addMemory(store.Memory{Domain: body.Domain, Kind: "episodic", Title: body.Title, Body: body.Body, Importance: body.Importance, Visibility: body.Visibility, Source: "owner", EventTime: nowUTC()})
+	if err != nil {
+		return jsonErr(c, 400, "create memory failed", err)
+	}
+	return c.JSON(200, map[string]any{"memory": m})
 }
 
 func (h *Handler) person(c echo.Context) error {

@@ -171,12 +171,24 @@ async function renderMemories() {
   const data = await api("/memories?q=" + encodeURIComponent(S.memQ));
   const list = data.memories || [];
   $("#mem-body").innerHTML = `<div class="row" style="margin-bottom:12px"><input id="mem-q" placeholder="搜她的记忆…" value="${esc(S.memQ)}" onkeydown="if(event.key==='Enter'){S.memQ=this.value;renderMemories()}"/><button onclick="S.memQ=document.getElementById('mem-q').value;renderMemories()">搜索</button></div>
+    <div class="row" style="margin-bottom:12px"><input id="mem-title" placeholder="记忆标题（你替她记一条）" style="flex:1" /><input id="mem-body" placeholder="正文" style="flex:2" /><button onclick="createMemory()">记下</button></div>
     <div class="list">${list.map((m) => `<div class="list-item"><div class="t">${esc(m.title)}</div><div class="m">${esc(m.domain)} · ${esc(m.kind)} · ${fmt(m.event_time)} · ${esc(m.visibility)}</div><div class="tiny" style="margin-top:6px">${esc(m.body)}</div></div>`).join("") || `<div class="empty">还没有记忆</div>`}</div>`;
 }
 async function renderDiaries() {
   const data = await api("/diaries");
   const list = data.diaries || [];
   $("#mem-body").innerHTML = `<div class="list">${list.map((d) => `<div class="list-item"><div class="t">${esc(d.day || fmt(d.at))} <span class="badge">${esc(d.mood || "")}</span></div><div class="tiny" style="margin-top:6px;white-space:pre-wrap">${esc(d.content)}</div><div class="m">${esc(d.summary || "")}</div></div>`).join("") || `<div class="empty">还没有日记。也许今晚 Dream 会写。</div>`}</div>`;
+}
+async function createMemory() {
+  const title = $("#mem-title").value.trim(), body = $("#mem-body").value.trim();
+  if (!title || !body) { toast("标题和正文都要有", true); return; }
+  try { await api("/memories", { method: "POST", body: JSON.stringify({ title, body, domain: "life", importance: 3, visibility: "public" }) }); toast("记下了"); renderMemories(); }
+  catch (e) { toast(e.message, true); }
+}
+async function createPerson() {
+  const name = $("#p-name").value.trim(); if (!name) { toast("名字必填", true); return; }
+  try { await api("/people", { method: "POST", body: JSON.stringify({ name, channel: $("#p-channel").value, external_id: $("#p-ext").value }) }); toast("已添加"); renderWorld(); }
+  catch (e) { toast(e.message, true); }
 }
 async function renderPeople() {
   const data = await api("/people");
@@ -246,7 +258,9 @@ async function renderWorld() {
       <div>账号</div><div>${esc(sl.account || "未绑定")}</div><div>WS</div><div class="mono">${esc(sl.ws_url || "")}</div></div>
       <div class="muted tiny" style="margin-top:8px">QQ 走 SnowLuma OneBot v11；账号唯一归属。首次需要扫码：<a href="http://127.0.0.1:6081/vnc.html" target="_blank">noVNC 扫码登录</a> · <a href="http://127.0.0.1:5099/" target="_blank">SnowLuma WebUI</a></div></section>
     <section class="card col-6"><h3>她的电脑</h3><div class="kv"><div>vault</div><div class="mono">${esc(w.dirs?.vault || "")}</div><div>workspace</div><div class="mono">${esc(w.dirs?.workspace || "")}</div><div>模型</div><div>${esc(w.model || "")}</div></div></section>
-    <section class="card col-12"><h3>联系人</h3><div id="world-people" class="grid-people">加载中…</div></section>`;
+    <section class="card col-12"><h3>联系人</h3>
+      <div class="row" style="margin-bottom:10px"><input id="p-name" placeholder="名字" style="flex:1" /><input id="p-channel" placeholder="渠道（manual/qq/…）" style="flex:1" /><input id="p-ext" placeholder="外部 ID（可空）" style="flex:1" /><button onclick="createPerson()">添加</button></div>
+      <div id="world-people" class="grid-people">加载中…</div></section>`;
   const data = await api("/people");
   $("#world-people").innerHTML = data.people.map((p) => `<div class="list-item"><b>${esc(p.name)}</b><div class="m">${esc(p.tier)} · ${esc(p.channel)} · ${esc(p.brief || "")}</div></div>`).join("") || `<div class="empty">还没有联系人</div>`;
 }
