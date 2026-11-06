@@ -223,7 +223,7 @@ async function renderWorld() {
   setTitle("世界", "渠道、联系人、工具");
   $("#view").innerHTML = `
     <section class="card col-6"><h3>QQ · SnowLuma</h3><div class="kv">
-      <div>开关</div><div>${sl.enabled ? "开" : "关"}</div><div>连接</div><div><span class="badge ${sl.connected ? "ok" : "warn"}">${sl.connected ? "已连接" : (sl.last_error || "未连接")}</span></div>
+      <div>开关</div><div>${sl.enabled ? "开" : "关"}</div><div>连接</div><div><span class="badge ${sl.connected ? "ok" : "warn"}">${sl.connected ? "已连接" : (sl.state === "waiting_login" ? "等待扫码登录" : (sl.last_error || "未连接"))}</span></div>
       <div>账号</div><div>${esc(sl.account || "未绑定")}</div><div>WS</div><div class="mono">${esc(sl.ws_url || "")}</div></div>
       <div class="muted tiny" style="margin-top:8px">QQ 走 SnowLuma OneBot v11；账号唯一归属。首次需要扫码：<a href="http://127.0.0.1:6081/vnc.html" target="_blank">noVNC 扫码登录</a> · <a href="http://127.0.0.1:5099/" target="_blank">SnowLuma WebUI</a></div></section>
     <section class="card col-6"><h3>她的电脑</h3><div class="kv"><div>vault</div><div class="mono">${esc(w.dirs?.vault || "")}</div><div>workspace</div><div class="mono">${esc(w.dirs?.workspace || "")}</div><div>模型</div><div>${esc(w.model || "")}</div></div></section>
@@ -235,7 +235,7 @@ async function renderWorld() {
 async function renderSettings() {
   if (!S.boot) await loadBoot();
   const b = S.boot;
-  setTitle("设置", "把乱七八糟的 bot 设置收成一份：基本 / 模型 / 心跳 / 健康 / 关于");
+  setTitle("设置", "把乱七八糟的 bot 设置收成一份：基本 / 模型 / 心跳 / QQ / 工作台 / 健康 / 关于");
   $("#view").innerHTML = `
     <div class="settings-grid">
       <section class="card"><h3>基本</h3>
@@ -244,7 +244,8 @@ async function renderSettings() {
       <section class="card"><h3>模型</h3>
         <label>模型</label><input id="set-model" value="${esc(b.model.model)}" />
         <label>温度</label><input id="set-temp" type="number" step="0.1" min="0" max="2" value="${b.model.temperature}" />
-        <div class="row" style="margin-top:10px"><button class="primary" onclick="saveModel()">保存</button></div>
+        <div class="row" style="margin-top:10px"><button class="primary" onclick="saveModel()">保存</button><button class="ghost" onclick="testModel()">测试模型连接</button></div>
+        <div id="model-test" class="muted tiny" style="margin-top:6px"></div>
         <div class="muted tiny" style="margin-top:8px">DeepSeek API key 通过环境变量 LITTLY_API_KEY 注入，不落库、不回显。</div></section>
       <section class="card"><h3>心跳</h3>
         <label><input type="checkbox" id="set-hb" ${b.heartbeat.enabled ? "checked" : ""} style="width:auto" /> 启用</label>
@@ -278,6 +279,11 @@ async function renderSettings() {
   updateHealth();
 }
 async function saveModel() { try { await api("/config", { method: "PUT", body: JSON.stringify({ model: $("#set-model").value, temperature: Number($("#set-temp").value) }) }); await loadBoot(); toast("已保存"); } catch (e) { toast(e.message, true); } }
+async function testModel() {
+  const el = $("#model-test"); el.textContent = "测试中…";
+  try { const r = await api("/test-model", { method: "POST" }); el.textContent = `✓ ${r.model} · ${r.latency_ms}ms · ${r.reply}`; }
+  catch (e) { el.textContent = "✗ " + e.message; }
+}
 async function saveHeartbeat() { try { await api("/config", { method: "PUT", body: JSON.stringify({ heartbeat_enabled: $("#set-hb").checked, day_minutes: Number($("#set-day").value), night_minutes: Number($("#set-night").value) }) }); await loadBoot(); toast("已保存"); } catch (e) { toast(e.message, true); } }
 async function saveSnowLuma() {
   try {

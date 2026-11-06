@@ -141,6 +141,12 @@ skills`。
 
 浏览器实测：Headless Chrome 1440×1100，`/littly/#/today` 与 `/littly/#/settings` 均能渲染；健康点显示“她 · 正常”，不再停留在“连接中”。
 
+## 设置/渠道体验
+
+- 设置页“模型”卡新增 **测试模型连接**：`POST /littly/api/test-model` 做一次极小 completion，返回模型名/延迟/回复；避免只看到配置不验证。
+- SnowLuma 状态新增 `state=waiting_login`：OneBot WS 未监听时显示“等待扫码登录”，不再只显示裸 connection refused。
+- 设置页副标题更新为 基本 / 模型 / 心跳 / QQ / 工作台 / 健康 / 关于。
+
 ## 最终镜像验证（从源码构建，不靠 docker cp）
 
 ```text

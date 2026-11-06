@@ -230,6 +230,24 @@ func (s *Service) LocalNow() time.Time {
 	return time.Now().In(loc)
 }
 
+// PingModel performs one tiny completion so the settings page can verify the
+// configured key/model without spending a full turn.
+func (s *Service) PingModel(ctx context.Context) (map[string]any, error) {
+	if s.LLM() == nil {
+		return nil, fmt.Errorf("model not configured")
+	}
+	start := time.Now()
+	res, err := s.LLM().Chat(ctx, llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Content: "只回复：ok"}}, Temperature: 0, MaxTokens: 8})
+	if err != nil {
+		return nil, err
+	}
+	reply := strings.TrimSpace(res.Content)
+	if reply == "" {
+		reply = "(empty)"
+	}
+	return map[string]any{"ok": true, "model": s.LLM().Model(), "reply": reply, "latency_ms": time.Since(start).Milliseconds()}, nil
+}
+
 func (s *Service) Health() map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()

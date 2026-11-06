@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"embed"
 	"net/http"
 	"sort"
@@ -52,6 +53,7 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.GET("/today", h.today)
 	api.GET("/messages", h.messages)
 	api.POST("/chat", h.chat)
+	api.POST("/test-model", h.testModel)
 	api.GET("/memories", h.memories)
 	api.GET("/people", h.people)
 	api.GET("/people/:id", h.person)
@@ -233,6 +235,16 @@ func (h *Handler) chat(c echo.Context) error {
 	res, err := h.svc.HandleChat(c.Request().Context(), body.Content)
 	if err != nil {
 		return jsonErr(c, 500, "chat failed", err)
+	}
+	return c.JSON(200, res)
+}
+
+func (h *Handler) testModel(c echo.Context) error {
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Second)
+	defer cancel()
+	res, err := h.svc.PingModel(ctx)
+	if err != nil {
+		return jsonErr(c, 502, "model test failed", err)
 	}
 	return c.JSON(200, res)
 }

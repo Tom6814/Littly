@@ -22,6 +22,7 @@ type SnowLumaStatus struct {
 	SelfID    int64  `json:"self_id,omitempty"`
 	LastError string `json:"last_error,omitempty"`
 	LastEvent string `json:"last_event,omitempty"`
+	State     string `json:"state,omitempty"`
 }
 
 type SnowLumaClient struct {
@@ -72,11 +73,19 @@ func (s *Service) snowLumaStatus() SnowLumaStatus {
 
 func (s *Service) snowLumaStatusLocked() SnowLumaStatus {
 	if s.snowluma == nil {
-		return SnowLumaStatus{Enabled: s.cfg.Channels.SnowLuma.Enabled, WSURL: s.cfg.Channels.SnowLuma.WSURL, Account: s.cfg.Channels.SnowLuma.AccountRef}
+		return SnowLumaStatus{Enabled: s.cfg.Channels.SnowLuma.Enabled, WSURL: s.cfg.Channels.SnowLuma.WSURL, Account: s.cfg.Channels.SnowLuma.AccountRef, State: "disabled"}
 	}
 	s.snowluma.mu.Lock()
 	defer s.snowluma.mu.Unlock()
-	return s.snowluma.status
+	st := s.snowluma.status
+	if st.Connected {
+		st.State = "connected"
+	} else if strings.Contains(st.LastError, "connection refused") {
+		st.State = "waiting_login"
+	} else if st.Enabled {
+		st.State = "disconnected"
+	}
+	return st
 }
 
 func (c *SnowLumaClient) loop(s *Service) {

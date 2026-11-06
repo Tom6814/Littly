@@ -335,3 +335,15 @@ func TestTerminalToolGatedAndRuns(t *testing.T) {
 		t.Fatalf("output = %q", out)
 	}
 }
+
+func TestPingModel(t *testing.T) {
+	s := newTestService(t)
+	s.SetLLM(&fakeLLM{responses: []llm.Response{{Content: " ok "}}})
+	res, err := s.PingModel(context.Background())
+	if err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+	if res["reply"] != "ok" || res["ok"] != true {
+		t.Fatalf("unexpected ping result: %+v", res)
+	}
+}
