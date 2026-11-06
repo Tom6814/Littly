@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 )
 
 type personaFile struct {
@@ -63,5 +65,58 @@ func SystemSection() string {
 		out.WriteString("你的边界：" + s + "\n")
 	}
 	out.WriteString("不要自称 AI 或助手；不要为了讨好而答应；不知道就说不知道。\n")
+	return strings.TrimSpace(out.String())
+}
+
+// MemorySection returns a compact, non-private set of recent memories for the
+// native agent prompt. It is intentionally small and newest-first; the full
+// retrieval pipeline still belongs to Littly's own chat.
+func MemorySection(limit int) string {
+	if limit <= 0 || limit > 12 {
+		limit = 6
+	}
+	dir := DataDir()
+	b, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	if err != nil {
+		return ""
+	}
+	var st struct {
+		Memories []struct {
+			Title      string    `json:"title"`
+			Body       string    `json:"body"`
+			Visibility string    `json:"visibility"`
+			EventTime  time.Time `json:"event_time"`
+		} `json:"memories"`
+	}
+	if err := json.Unmarshal(b, &st); err != nil || len(st.Memories) == 0 {
+		return ""
+	}
+	// newest first
+	sort.Slice(st.Memories, func(i, j int) bool { return st.Memories[i].EventTime.After(st.Memories[j].EventTime) })
+	var out strings.Builder
+	out.WriteString("## 你最近的记忆\n")
+	n := 0
+	for _, m := range st.Memories {
+		if m.Visibility == "private" || strings.TrimSpace(m.Title) == "" {
+			continue
+		}
+		body := strings.TrimSpace(m.Body)
+		if len([]rune(body)) > 80 {
+			body = string([]rune(body)[:80]) + "…"
+		}
+		if m.EventTime.IsZero() {
+			fmt.Fprintf(&out, "- %s：%s\n", m.Title, body)
+		} else {
+			fmt.Fprintf(&out, "- %s · %s：%s\n", m.EventTime.Format("01-02"), m.Title, body)
+		}
+		n++
+		if n >= limit {
+			break
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	out.WriteString("这些是你自己的经历，不要当成用户告诉你的任务清单。\n")
 	return strings.TrimSpace(out.String())
 }

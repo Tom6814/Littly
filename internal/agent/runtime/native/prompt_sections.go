@@ -96,6 +96,14 @@ func GenerateSystemSections(params SystemPromptParams) []SystemSection {
 		{ID: sectionIDTail, Kind: contextfrag.KindSystemPrompt, Priority: priorityTail, RetentionTier: contextfrag.RetentionRequired, Text: tail},
 	}
 
+	if memories := littlyagent.MemorySection(6); memories != "" {
+		sections = append(sections, SystemSection{
+			ID: "system.littly_memory", Kind: contextfrag.KindMemoryRecall,
+			Priority: priorityBody + 1, RetentionTier: contextfrag.RetentionOptional,
+			Text: memories,
+		})
+	}
+
 	if persona := littlyagent.SystemSection(); persona != "" {
 		// LITTLY: one fork-wide persona, injected into every native agent turn.
 		sections = append(sections, SystemSection{

@@ -28,3 +28,16 @@ func TestSystemSectionMissingConfig(t *testing.T) {
 		t.Fatalf("expected empty section, got %q", got)
 	}
 }
+
+func TestMemorySectionFiltersPrivate(t *testing.T) {
+	dir := t.TempDir()
+	state := `{"memories":[{"title":"公开的事","body":"今天写了笔记","visibility":"public","event_time":"2026-11-07T01:00:00Z"},{"title":"私密","body":"不想让人知道","visibility":"private","event_time":"2026-11-07T02:00:00Z"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LITTLY_DATA_DIR", dir)
+	got := MemorySection(6)
+	if !strings.Contains(got, "公开的事") || strings.Contains(got, "私密") {
+		t.Fatalf("unexpected memory section:\n%s", got)
+	}
+}

@@ -60,7 +60,7 @@ go build ./cmd/agent
 
 ## 核心桥接
 
-- `internal/littly/agentctx` 把 Littly 的姓名/SELF/说话方式/边界注入 Memoh 原生 agent 的 system prompt（`system.littly_persona`），平台里的 agent 也以“她”的身份工作。
+- `internal/littly/agentctx` 把 Littly 的姓名/SELF/说话方式/边界注入 Memoh 原生 agent 的 system prompt（`system.littly_persona`），并把最近 6 条非私密记忆作为 `system.littly_memory` 注入；平台里的 agent 也以“她”的身份工作、记得她最近经历过什么。
 - 只注入稳定人格字段，不把高频记忆塞进 system prompt，避免 prompt cache 抖动；记忆仍通过工具/检索走。
 
 ## 与设计文档的差距（诚实记录）
