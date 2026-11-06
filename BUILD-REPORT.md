@@ -285,7 +285,7 @@ GET /littly/ → 200
 ## 最终镜像验证（从源码构建，不靠 docker cp）
 
 ```text
-docker build -f docker/Dockerfile.server.local -t memohai/server:latest .   → Successfully built 123c6e6c8da0（含 browser、raw file、合同级 memory provider、日记/人物/记忆录入、作息/安静时段、快照/恢复、内嵌 noVNC、手动分层、休息恢复精力、危险命令审批）
+docker build -f docker/Dockerfile.server.local -t memohai/server:latest .   → Successfully built e359a3dad587（含 browser、raw file、合同级 memory provider、日记/人物/记忆录入、作息/安静时段、快照/恢复、内嵌 noVNC、手动分层、休息恢复精力、危险命令审批、TigerVNC 虚拟桌面）
 docker compose up -d --force-recreate server                                 → memoh-server Healthy
 schema_migrations: 174|f (clean)
 GET /            → 302 → /littly/
