@@ -65,6 +65,7 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.GET("/files", h.files)
 	api.GET("/files/content", h.fileContent)
 	api.PUT("/files/content", h.fileWrite)
+	api.POST("/terminal", h.terminal)
 	api.GET("/events", h.events)
 	api.GET("/heartbeat", h.heartbeatInfo)
 	api.POST("/heartbeat", h.heartbeatControl)
@@ -86,6 +87,7 @@ func (h *Handler) bootstrap(c echo.Context) error {
 		"health": h.svc.Health(),
 		"next_heartbeat": h.svc.nextHeartbeatInfo(),
 		"channels": map[string]any{"snowluma": h.svc.snowLumaStatus()},
+		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork},
 	})
 }
 
@@ -112,6 +114,8 @@ func (h *Handler) putConfig(c echo.Context) error {
 		SLToken       *string        `json:"snowluma_token"`
 		SLAccount     *string        `json:"snowluma_account"`
 		SLOwner       *string        `json:"snowluma_owner"`
+		AllowShell    *bool          `json:"allow_shell"`
+		AllowNetwork  *bool          `json:"allow_network"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return jsonErr(c, 400, "bad json", err)
@@ -164,6 +168,12 @@ func (h *Handler) putConfig(c echo.Context) error {
 		}
 		if body.SLOwner != nil {
 			cfg.Channels.SnowLuma.OwnerExternalID = *body.SLOwner
+		}
+		if body.AllowShell != nil {
+			cfg.Workbench.AllowShell = *body.AllowShell
+		}
+		if body.AllowNetwork != nil {
+			cfg.Workbench.AllowNetwork = *body.AllowNetwork
 		}
 	})
 	if err != nil {
@@ -361,6 +371,20 @@ func (h *Handler) fileWrite(c echo.Context) error {
 	return c.Blob(200, "application/json", []byte(res))
 }
 
+func (h *Handler) terminal(c echo.Context) error {
+	var body struct {
+		Command string `json:"command"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return jsonErr(c, 400, "bad json", err)
+	}
+	out, err := h.svc.RunTerminalCommand(c.Request().Context(), body.Command)
+	if err != nil {
+		return jsonErr(c, 400, "terminal failed", err)
+	}
+	return c.JSON(200, map[string]any{"output": out})
+}
+
 func (h *Handler) events(c echo.Context) error {
 	st := h.svc.Store().Snapshot()
 	var out []store.Event
@@ -429,6 +453,7 @@ func (h *Handler) world(c echo.Context) error {
 	cfg := h.svc.Config().Redacted()
 	return c.JSON(200, map[string]any{
 		"channels": map[string]any{"snowluma": h.svc.snowLumaStatus()},
+		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork},
 		"owner":    h.svc.Person(),
 		"model":    cfg.Brain.Model,
 		"dirs":     map[string]string{"vault": cfg.Memory.VaultDir, "workspace": cfg.Workbench.Dir},

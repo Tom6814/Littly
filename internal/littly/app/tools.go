@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -57,6 +58,7 @@ func (s *Service) toolSpecs() []llm.Tool {
 		t("file_write", "写文件到工作台（她的产出）", schema(map[string]any{"path": pString("相对路径，例如 home/notes/x.md"), "content": pString("内容")}, "path", "content")),
 		t("activity_start", "开始做一件自己的事", schema(map[string]any{"kind": pString("learn|research|organize|write|create|maintain|social|rest"), "title": pString("做什么"), "detail": pString("可选的计划")}, "kind", "title")),
 		t("activity_finish", "结束当前活动", schema(map[string]any{"id": pString("活动 id（可空=当前）"), "summary": pString("结果"), "progress": pInt("0-100")})),
+		t("terminal_exec", "在她的电脑（工作台目录）执行 shell 命令；用于真正的动手做事", schema(map[string]any{"command": pString("shell 命令"), "timeout_seconds": pInt("超时秒数，默认 10，最大 30")}, "command")),
 		t("web_fetch", "抓取一个网页（只读文本）", schema(map[string]any{"url": pString("https URL")}, "url")),
 	}
 }
@@ -151,6 +153,8 @@ func (s *Service) execTool(ctx context.Context, name, args, actorID, convID stri
 		return s.toolActivityStart(str("kind"), str("title"), str("detail"))
 	case "activity_finish":
 		return s.toolActivityFinish(str("id"), str("summary"), integer("progress"))
+	case "terminal_exec":
+		return s.runTerminal(ctx, str("command"), integer("timeout_seconds"))
 	case "web_fetch":
 		return s.toolWebFetch(ctx, str("url"))
 	default:
@@ -356,4 +360,48 @@ func mimeOf(p string) string {
 	default:
 		return "text/plain"
 	}
+}
+
+
+// runTerminal executes a shell command inside her workspace. It is gated by
+// workbench.allow_shell, bounded by a timeout and an output cap. This is not a
+// security sandbox: it is her own computer, local single-person mode.
+func (s *Service) runTerminal(ctx context.Context, command string, timeoutSeconds int) (string, error) {
+	if !s.cfg.Workbench.AllowShell {
+		return "", fmt.Errorf("shell is disabled (workbench.allow_shell=false)")
+	}
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return "", fmt.Errorf("empty command")
+	}
+	if len([]rune(command)) > 4000 {
+		return "", fmt.Errorf("command too long")
+	}
+	if timeoutSeconds <= 0 || timeoutSeconds > 30 {
+		timeoutSeconds = 10
+	}
+	if err := os.MkdirAll(s.cfg.Workbench.Dir, 0o755); err != nil {
+		return "", err
+	}
+	c, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(c, "sh", "-c", command)
+	cmd.Dir = s.cfg.Workbench.Dir
+	out, err := cmd.CombinedOutput()
+	text := string(out)
+	if len(text) > 16000 {
+		text = text[:16000] + "\n...[output truncated]"
+	}
+	if c.Err() == context.DeadlineExceeded {
+		text += "\n[timeout]"
+	}
+	if err != nil && c.Err() != context.DeadlineExceeded {
+		text += "\n[exit: " + err.Error() + "]"
+	}
+	return text, nil
+}
+
+// RunTerminalCommand is the UI/API entry point.
+func (s *Service) RunTerminalCommand(ctx context.Context, command string) (string, error) {
+	return s.runTerminal(ctx, command, 15)
 }

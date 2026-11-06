@@ -109,6 +109,17 @@ diaries|3
 - 与心跳/LLM 调用互斥（`heartRunning` 检查），`LITTLY_AUTO_ACTIVITY=0` 可整体关闭。
 - 单测：`TestLifeTickDueRules`（白天/夜间、3 小时冷却、Dream 同日只一次）。
 
+## M4 进度：工作台终端
+
+- 新工具 `terminal_exec` + `POST /littly/api/terminal`：在她的 workspace 下执行 `sh -c`，默认 10s（UI 15s）、输出上限 16KB；由 `workbench.allow_shell` 控制。
+- 设置页新增“工作台”卡（目录 / allow_shell / allow_network）；Workbench 页新增终端面板。
+- 实测：`pwd; echo hello-from-terminal; ls` → `/opt/memoh/data/littly/workspace
+hello-from-terminal
+home
+scripts
+skills`。
+- 单测 `TestTerminalToolGatedAndRuns`：未开启报错、开启后执行成功。
+
 ## M5 进度：SnowLuma 容器
 
 - 已启动 `littly-snowluma`（`motricseven7/snowluma:v2.2.1`，`SYS_PTRACE`，`memoh_memoh-network`），端口 `3001`（OneBot WS）/`5099`（WebUI）/`6081`（noVNC）。

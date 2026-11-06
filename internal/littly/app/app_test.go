@@ -13,6 +13,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/littly/config"
 	"github.com/felinics/memoh/internal/littly/llm"
 	"github.com/felinics/memoh/internal/littly/store"
 )
@@ -315,5 +316,22 @@ func TestLifeTickDueRules(t *testing.T) {
 	})
 	if s.dreamDue(three) {
 		t.Fatalf("dream must not run twice on the same local day")
+	}
+}
+
+func TestTerminalToolGatedAndRuns(t *testing.T) {
+	s := newTestService(t)
+	if _, err := s.execTool(context.Background(), "terminal_exec", `{"command":"echo hi"}`, "owner", ""); err == nil {
+		t.Fatalf("expected shell disabled error")
+	}
+	if err := s.UpdateConfig(func(c *config.Config) { c.Workbench.AllowShell = true }); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.execTool(context.Background(), "terminal_exec", `{"command":"echo hello-terminal"}`, "owner", "")
+	if err != nil {
+		t.Fatalf("terminal: %v", err)
+	}
+	if !strings.Contains(out, "hello-terminal") {
+		t.Fatalf("output = %q", out)
 	}
 }

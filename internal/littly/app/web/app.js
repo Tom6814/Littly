@@ -202,8 +202,18 @@ async function renderWorkbench() {
       <div class="list">${entries.map((f) => `<div class="list-item" style="cursor:pointer" onclick="${f.dir ? `S.filesPath='${esc((S.filesPath ? S.filesPath + "/" : "") + f.name)}';renderWorkbench()` : `openFile('${esc((S.filesPath ? S.filesPath + "/" : "") + f.name)}')`}">${f.dir ? "📁" : "📄"} ${esc(f.name)} <span class="muted tiny">${f.size ? Math.round(f.size / 1024) + " KB" : ""}</span></div>`).join("") || `<div class="empty">空目录</div>`}</div>
     </section>
     <section class="card col-8"><h3>${S.file ? esc(S.file.path) : "文件内容"}</h3>${content}</section>
+    <section class="card col-12"><h3>终端 · 她的电脑</h3>
+      <div class="row"><input id="term-cmd" placeholder="cd /opt/memoh/data/littly/workspace 下执行…" style="flex:1" onkeydown="if(event.key==='Enter')runTerminal()" /><button class="primary" onclick="runTerminal()">执行</button></div>
+      <pre id="term-out" class="mono" style="white-space:pre-wrap;max-height:240px;overflow:auto;margin-top:10px;color:var(--muted)">（输出）</pre>
+      <div class="muted tiny">受 workbench.allow_shell 控制；限时 15 秒、输出 16KB。这是她自己的电脑，不是安全沙箱。</div></section>
     <section class="card col-6"><h3>产出（artifacts）</h3><div class="list">${arts.artifacts.map((a) => `<div class="list-item"><div class="t">${esc(a.title)}</div><div class="m">${esc(a.path)} · ${a.bytes || 0} B · ${fmt(a.created_at)}</div></div>`).join("") || `<div class="empty">还没有产出</div>`}</div></section>
     <section class="card col-6"><h3>活动</h3><div class="list">${acts.activities.map((a) => `<div class="list-item"><div class="t">${esc(a.title)} <span class="badge">${esc(a.status)}</span></div><div class="m">${esc(a.kind)} · ${a.progress || 0}% · ${esc(a.summary || "")}</div></div>`).join("") || `<div class="empty">还没有活动</div>`}</div></section>`;
+}
+async function runTerminal() {
+  const cmd = $("#term-cmd").value.trim(); if (!cmd) return;
+  $("#term-out").textContent = "…";
+  try { const r = await api("/terminal", { method: "POST", body: JSON.stringify({ command: cmd }) }); $("#term-out").textContent = r.output || "(无输出)"; }
+  catch (e) { $("#term-out").textContent = "错误：" + e.message; }
 }
 async function openFile(path) { try { S.file = await api("/files/content?path=" + encodeURIComponent(path)); renderWorkbench(); } catch (e) { toast(e.message, true); } }
 
@@ -250,6 +260,12 @@ async function renderSettings() {
         <div class="row" style="margin-top:10px"><button class="primary" onclick="saveSnowLuma()">保存并连接</button></div>
         <div class="muted tiny" style="margin-top:8px">单账号；扫码登录：<a href="http://127.0.0.1:6081/vnc.html" target="_blank">noVNC</a>；登录后把 QQ 号填到上面。</div>
       </section>
+      <section class="card"><h3>工作台</h3>
+        <div class="kv"><div>目录</div><div class="mono">${esc(b.dirs?.workspace || "")}</div></div>
+        <label><input type="checkbox" id="set-shell" ${b.workbench?.allow_shell ? "checked" : ""} style="width:auto" /> 允许她执行 shell（终端）</label>
+        <label><input type="checkbox" id="set-net" ${b.workbench?.allow_network ? "checked" : ""} style="width:auto" /> 允许联网</label>
+        <div class="row" style="margin-top:10px"><button class="primary" onclick="saveWorkbench()">保存</button></div>
+      </section>
       <section class="card"><h3>健康</h3><div id="health-box" class="kv">检查中…</div>
         <div class="row" style="margin-top:10px"><button class="ghost" onclick="updateHealth(true)">重新检查</button></div></section>
       <section class="card" style="grid-column:span 12"><h3>关于</h3>
@@ -273,6 +289,10 @@ async function saveSnowLuma() {
     await api("/config", { method: "PUT", body: JSON.stringify(body) });
     await loadBoot(); toast("渠道配置已保存，正在连接"); renderSettings();
   } catch (e) { toast(e.message, true); }
+}
+async function saveWorkbench() {
+  try { await api("/config", { method: "PUT", body: JSON.stringify({ allow_shell: $("#set-shell").checked, allow_network: $("#set-net").checked }) }); await loadBoot(); toast("已保存"); renderSettings(); }
+  catch (e) { toast(e.message, true); }
 }
 async function updateHealth(force) {
   try {
