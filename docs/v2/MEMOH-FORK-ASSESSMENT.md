@@ -14,7 +14,7 @@
 | 活跃度 | 2.8k star / 266 fork；2026-11-06 仍有提交 |
 | 后端 | **Go**（624,806 行，含测试）；PostgreSQL 18（仅支持 Postgres）；可选 pgvector 记忆向量 |
 | 前端 | Vue 3 + TS（208,844 行）；`apps/web` 345 个 `.vue` 文件；`apps/desktop` |
-| 工作区 | containerd 后端（server 镜像内启动）；文件/终端/Node/Python/浏览器/可视化桌面；快照/导入导出 |
+| 工作区 | 支持 `containerd` / `docker` / `apple` 三种 backend（官方 compose 用 containerd；本地 Mac 优先 docker）；文件/终端/Node/Python/浏览器/可视化桌面；快照/导入导出 |
 | 渠道 | 渠道 worker 进程（`memoh-channel`）：Telegram/Discord/Slack/Lark/微信/QQ/飞书/钉钉/LINE/企微等 |
 | 其他 | Schedule(cron)、Hooks、Skills、MCP、Connect-It 连接器、审批、ACL、上下文压缩、记忆 provider 接口 |
 | 部署 | Docker Compose：postgres + pgvector + migrate + server + channel + web（+ connect-it / webhook-tunnel） |
@@ -177,9 +177,10 @@ internal/life/
 2. **修改原则**：新能力尽量放新包（`internal/life` 等）；核心文件改动最小化并写清楚理由；每季度 diff 上游 commit，人工评估可合并的修复。
 3. **许可证**：v2 整体 **AGPL-3.0**；保留 Memoh 版权与来源说明；新增 `NOTICE`；文档注明分叉来源与时间。
 4. **品牌**：项目名/UI 品牌改成 Littly；上游 issue/PR 不外发，除非回馈社区。
-5. **旧项目资产**：
-   - 后端 TS（vault/growth/state/scheduler）→ 以设计/测试用例形式移植到 Go；
-   - 前端 Vue 设计/页面 → 可移植到 `apps/web`；
+5. **融合策略（不是移植）**：
+   - **以 Memoh 的 Go 后端为骨架**做改造，Littly 的差异化能力（自传记忆、生活引擎、人格回复、成长、工作台驱动、健康/防复发）作为**新包/新表/新接口**长在 Memoh 的模块结构里；
+   - 旧项目的 TS 代码/设计只作为**参考与测试语义来源**，不逐行搬迁、不搬旧架构与技术债；
+   - 前端 Vue 设计/页面可复用到 `apps/web`（同栈）；
    - 旧库仅备份，不迁移。
 
 ---
