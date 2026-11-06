@@ -182,6 +182,11 @@ skills`。
 - `store`: Mutate 持久化/重开、Schema/运行时默认值、state.json 落盘、ID 唯一。
 - 全量 `go test ./internal/littly/...` 全绿。
 
+## 竞态检测
+
+- `go test -race ./internal/littly/...` → 全部通过（修复了 SnowLuma 测试里收集回复切片的竞态）。
+- `go test -race ./internal/server ./internal/agent/runtime/native` → 通过。
+
 ## 回归测试：六面 API e2e
 
 `TestAPIEndToEnd` 用 httptest 串起：bootstrap / health / chat / today / config / terminal / test-model / activities/run / activities / artifacts / people / memories / heartbeat / heartbeat schedule / world / file write/list/content/raw / events / archive，全部 200。

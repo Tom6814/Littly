@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,7 @@ func contextOrBackground() context.Context { return context.Background() }
 
 func TestSnowLumaPrivateMessageAndDedupe(t *testing.T) {
 	var got []string
+	var gotMu sync.Mutex
 	up := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := up.Upgrade(w, r, nil)
@@ -49,8 +51,11 @@ func TestSnowLumaPrivateMessageAndDedupe(t *testing.T) {
 			if msg["action"] == "send_private_msg" {
 				params, _ := msg["params"].(map[string]any)
 				text, _ := params["message"].(string)
+				gotMu.Lock()
 				got = append(got, text)
-				if len(got) >= 2 {
+				n := len(got)
+				gotMu.Unlock()
+				if n >= 2 {
 					return
 				}
 			}
@@ -71,14 +76,23 @@ func TestSnowLumaPrivateMessageAndDedupe(t *testing.T) {
 	s.startSnowLuma()
 	defer s.stopSnowLuma()
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && len(got) < 2 {
+	for time.Now().Before(deadline) {
+		gotMu.Lock()
+		n := len(got)
+		gotMu.Unlock()
+		if n >= 2 {
+			break
+		}
 		time.Sleep(80 * time.Millisecond)
 	}
-	if len(got) < 2 {
-		t.Fatalf("expected 2 replies (dedupe one duplicate), got %d: %v", len(got), got)
+	gotMu.Lock()
+	gotCopy := append([]string(nil), got...)
+	gotMu.Unlock()
+	if len(gotCopy) < 2 {
+		t.Fatalf("expected 2 replies (dedupe one duplicate), got %d: %v", len(gotCopy), gotCopy)
 	}
-	if len(got) > 2 {
-		t.Fatalf("dedupe failed, got %d", len(got))
+	if len(gotCopy) > 2 {
+		t.Fatalf("dedupe failed, got %d", len(gotCopy))
 	}
 }
 
