@@ -80,7 +80,8 @@ async function renderToday() {
       <div class="row" style="margin-top:10px"><button class="ghost" onclick="act('dream')">整理今天（Dream）</button></div>
     </section>
     <section class="card col-4"><h3>她正在做</h3>${run ? `<h2>${esc(run.title)}</h2><div class="muted tiny">${esc(run.kind)} · ${run.progress || 0}% · ${esc(run.status)}</div>` : `<div class="empty">现在没在做事</div>`}
-      <div class="muted tiny" style="margin-top:8px">活动会自动在她自己的时间里发生；你也可以在下方跟她聊。</div></section>
+      <div class="row" style="margin-top:10px"><button class="ghost" onclick="runActivity()">让她自己做点事</button></div>
+      <div class="muted tiny" style="margin-top:8px">活动也会在她自己的时间里发生；你也可以在下方跟她聊。</div></section>
     <section class="card col-8"><h3>和她说话</h3><div class="chat">
       <div class="msgs" id="msgs">${msgs}</div>
       <div class="composer"><input id="chat-input" placeholder="说点什么…（Enter 发送）" /><button class="primary" onclick="sendChat()">发送</button></div>
@@ -100,6 +101,10 @@ async function sendChat() {
     else toast(r.reason || "她这次没回");
     await renderToday();
   } catch (e) { toast(e.message, true); }
+}
+async function runActivity() {
+  try { const r = await api("/activities/run", { method: "POST" }); toast("她开始做：" + (r.activity?.title || "事情")); await renderToday(); }
+  catch (e) { toast(e.message, true); }
 }
 async function act(kind, action) {
   try {
@@ -210,7 +215,7 @@ async function renderWorld() {
     <section class="card col-6"><h3>QQ · SnowLuma</h3><div class="kv">
       <div>开关</div><div>${sl.enabled ? "开" : "关"}</div><div>连接</div><div><span class="badge ${sl.connected ? "ok" : "warn"}">${sl.connected ? "已连接" : (sl.last_error || "未连接")}</span></div>
       <div>账号</div><div>${esc(sl.account || "未绑定")}</div><div>WS</div><div class="mono">${esc(sl.ws_url || "")}</div></div>
-      <div class="muted tiny" style="margin-top:8px">QQ 仍走 SnowLuma OneBot v11；账号唯一归属。渠道 worker 完整收发在 M5 接入。</div></section>
+      <div class="muted tiny" style="margin-top:8px">QQ 走 SnowLuma OneBot v11；账号唯一归属。首次需要扫码：<a href="http://127.0.0.1:6081/vnc.html" target="_blank">noVNC 扫码登录</a> · <a href="http://127.0.0.1:5099/" target="_blank">SnowLuma WebUI</a></div></section>
     <section class="card col-6"><h3>她的电脑</h3><div class="kv"><div>vault</div><div class="mono">${esc(w.dirs?.vault || "")}</div><div>workspace</div><div class="mono">${esc(w.dirs?.workspace || "")}</div><div>模型</div><div>${esc(w.model || "")}</div></div></section>
     <section class="card col-12"><h3>联系人</h3><div id="world-people" class="grid-people">加载中…</div></section>`;
   const data = await api("/people");
@@ -243,7 +248,7 @@ async function renderSettings() {
         <label>主人 QQ 号</label><input id="set-sl-owner" value="" placeholder="用于主动消息" />
         <label>Access Token</label><input id="set-sl-token" type="password" value="" placeholder="${b.channels?.snowluma?.last_error ? "连接异常：" + esc(b.channels.snowluma.last_error) : "留空则不修改"}" />
         <div class="row" style="margin-top:10px"><button class="primary" onclick="saveSnowLuma()">保存并连接</button></div>
-        <div class="muted tiny" style="margin-top:8px">单账号；扫码登录由 SnowLuma 容器提供（noVNC）。</div>
+        <div class="muted tiny" style="margin-top:8px">单账号；扫码登录：<a href="http://127.0.0.1:6081/vnc.html" target="_blank">noVNC</a>；登录后把 QQ 号填到上面。</div>
       </section>
       <section class="card"><h3>健康</h3><div id="health-box" class="kv">检查中…</div>
         <div class="row" style="margin-top:10px"><button class="ghost" onclick="updateHealth(true)">重新检查</button></div></section>

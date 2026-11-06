@@ -60,6 +60,7 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.GET("/archive", h.archive)
 	api.POST("/archive/:id/restore", h.archiveRestore)
 	api.GET("/activities", h.activities)
+	api.POST("/activities/run", h.activityRun)
 	api.GET("/artifacts", h.artifacts)
 	api.GET("/files", h.files)
 	api.GET("/files/content", h.fileContent)
@@ -300,6 +301,14 @@ func (h *Handler) archiveRestore(c echo.Context) error {
 		return jsonErr(c, 400, "restore failed", err)
 	}
 	return c.JSON(200, map[string]any{"ok": true, "person": p})
+}
+
+func (h *Handler) activityRun(c echo.Context) error {
+	a, err := h.svc.RunSoloActivity(c.Request().Context())
+	if err != nil {
+		return jsonErr(c, 500, "activity failed", err)
+	}
+	return c.JSON(200, map[string]any{"activity": a})
 }
 
 func (h *Handler) activities(c echo.Context) error {

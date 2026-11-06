@@ -96,6 +96,20 @@ events|50
 diaries|3
 ```
 
+## M4 进度：自主活动
+
+- `RunSoloActivity`：有 LLM 时她自选 kind/title 并写第一人称笔记；无 LLM 时降级为“整理最近的想法”。
+- 产出：`home/notes/<时间>-<标题>.md` + `littly_artifacts` + `littly_activities` + 一条 public 记忆。
+- API：`POST /littly/api/activities/run`；Today 页有“让她自己做点事”入口。
+- 实测返回：`kind=organize, title=把记忆检索方法记成三步, status=done`，artifact 落盘。
+
+## M5 进度：SnowLuma 容器
+
+- 已启动 `littly-snowluma`（`motricseven7/snowluma:v2.2.1`，`SYS_PTRACE`，`memoh_memoh-network`），端口 `3001`（OneBot WS）/`5099`（WebUI）/`6081`（noVNC）。
+- onebot token 从容器 `/app/data/config/onebot.json` 读取并写入 Littly 配置；`ws_url=ws://littly-snowluma:3001`。
+- 当前状态：OneBot WS 在 QQ 登录前不监听，`/api/health` 显示 `connected:false, last_error: connection refused`；扫码入口已可用，登录后自动重连。
+- 用户操作：打开 `http://127.0.0.1:6081/vnc.html` 扫码，再把 QQ 号填入设置页。
+
 ## UI 截图
 
 - `docs/v2/screenshots/today.png`：今天页（状态、心跳、聊天、事件、活动）。

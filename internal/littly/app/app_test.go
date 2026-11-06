@@ -255,3 +255,27 @@ func TestSettingsUpdateReflectedInBootstrap(t *testing.T) {
 		t.Fatalf("style = %q", got)
 	}
 }
+
+func TestRunSoloActivityLeavesArtifact(t *testing.T) {
+	s := newTestService(t)
+	a, err := s.RunSoloActivity(context.Background())
+	if err != nil {
+		t.Fatalf("activity: %v", err)
+	}
+	if a.Status != "done" || a.Title == "" {
+		t.Fatalf("unexpected activity: %+v", a)
+	}
+	st := s.st.Snapshot()
+	if len(st.Artifacts) == 0 {
+		t.Fatalf("expected an artifact")
+	}
+	found := false
+	for _, x := range st.Artifacts {
+		if strings.Contains(x.Path, "home/notes/") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("artifact not under home/notes: %+v", st.Artifacts)
+	}
+}
