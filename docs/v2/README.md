@@ -23,6 +23,7 @@
 | D10 | **本地优先** | 先在 Mac（Docker Desktop）上完整跑通；服务器后续再评估 |
 | D11 | **QQ 用 SnowLuma** | OneBot v11，单账号归属，复用旧项目的 SnowLuma 适配协议 |
 | D12 | **旧数据只备份** | v2 首版不迁移历史；旧库/记忆/配置打包备份，迁移单独立项 |
+| D14 | **人物认知分层** | 身份行每个渠道联系人都保留（身份/可见性/回复必需）；**人物卡只给 important/friend/intimate**；泛泛之交写进一份 `people/acquaintances.md`（一人一行，上限+老化）；stranger 只有 DB 行；晋升/降级可逆 |
 | D13 | **心跳模型** | 只有**心跳**可以有规律（fallback 抖动）；行动/互动无生活频率表；她可 `heartbeat_after/heartbeat_at` 自心跳（reason 必填）；系统保底心跳防漏；**不做阻塞式 wait_for_user_reply**（见 16） |
 
 ## 文档索引

@@ -123,7 +123,7 @@ Submit → staging(pending) → 校验 → 去重 → 落 Markdown → 写索引
 
 ### 3.1 目录（严格沿用 03 §4）
 
-`SELF.md`、`people/<people_id>.md`、`domains/<domain>/<mem_id>.md`、`threads/<thread_id>.md`、`diary/YYYY-MM-DD.md`、`_staging/<id>.md`、`_history/<mem_id>.md`；`_staging/` 只在排障模式落 raw 副本（DB 为准），`threads/` 由 04 经本包文档 API 写叙述正文。
+`SELF.md`、`people/<people_id>.md`（仅 friend/intimate/important）、`people/acquaintances.md`（泛泛之交聚合，一行一人）、`domains/<domain>/<mem_id>.md`、`threads/<thread_id>.md`、`diary/YYYY-MM-DD.md`、`_staging/<id>.md`、`_history/<mem_id>.md`；`_staging/` 只在排障模式落 raw 副本（DB 为准），`threads/` 由 04 经本包文档 API 写叙述正文。
 
 **实现期扩展（保留子目录，需回写 03 下一版）**：`_history/SELF/YYYY-MM-DD.md`、`_history/people/<id>/YYYY-MM-DD.md`、`_history/dream/YYYY-MM-DD.md`（`dream_reports.report_path`）。此外根目录不接受任何新路径。
 
@@ -266,7 +266,35 @@ embedding 缺失 → 纯词法；分词器异常 → `ILIKE`/trgm + audit；查�
 
 **接口**：`DreamKey{PersonID, ReportID, Day, SleepStart, SleepEnd, WeeklySelf bool}`；`Digest`/`Stats` 为内部类型；`ReportFile{Path,Bytes}`。
 
-## 7. 人物卡
+## 7. 人物卡（分层）
+
+**分层原则**：不给每个聊天对象都写人物小传。身份行（`littly_people`）每个渠道联系人都保留（身份/可见性/回复决策必需）；**人物卡只给重要的人**。
+
+| tier | 文件 | 内容 | 注入 |
+|---|---|---|---|
+| intimate / friend / important | `people/<id>.md` | 完整卡：她是谁/关系/在意的事/一起经历/边界/最近变化 | 当前人必带；相关人按需 |
+| acquaintance | **无独立文件**；`people/acquaintances.md` 一行 | `名字（别名/渠道）· 首次-最后 · 一句话印象 · 来源` | 相关时最多 1 行 |
+| stranger / blocked | 无文件（仅 DB 行） | 名字/渠道；blocked 不生成主动内容 | 仅名字；blocked 不注入 |
+
+- `people/acquaintances.md` 是**聚合文档**（Dream 生成/更新，不接受手写）：上限 200 行；90 天无互动且未 pin → 移入 `_history/people/acquaintances/YYYY-MM.md`；stranger 不写入（直到晋升 acquaintance）。
+- 聚合文档是她的内部认知（private），不进入任何对外上下文；敏感细节只留在 `relationship` 可见性的记忆里，不写进一行印象。
+
+### 7.1 晋升 / 降级（可逆）
+
+| 方向 | 条件 | 动作 |
+|---|---|---|
+| 晋升 friend | interaction_count ≥ 20 且跨度 ≥ 14 天；或 closeness ≥ 60；或手动 pin/important | 从已有 episodic 记忆生成 `people/<id>.md`；`card_path` 落库；审计 |
+| 晋升 intimate | owner/close_friend；或手动标记；或长期高亲密 | 完整卡 + 边界/雷区/长期主题 |
+| 降级 | 180 天无互动且未 pin | 卡片移入 `_history/people/<id>/`；聚合保留一行；**记忆与可见性不变** |
+| blocked | 用户/她明确阻断 | 停止主动；保留身份行 |
+
+> Dream 可提议晋升/降级，但关系枚举/important 的变更仍需用户确认（沿用既有规则）；手动 pin 立即生效。
+
+### 7.2 检索与提示词
+
+- 当前对话人：intimate/friend → 完整卡（≤350 tok）；acquaintance → brief 一行；stranger → 名字/渠道。
+- 其他相关人：只有 friend/intimate 卡片可按需注入；acquaintance 不批量注入。
+- 她需要回忆泛泛之交时可用 `lookup_contact` 工具（返回 brief + 相关记忆摘要），不把整份聚合塞进上下文。
 
 模板：frontmatter `id/display_name/relationship/closeness/important/aliases/updated_at/sources` + 六节 `## 她是谁`、`## 我们的关系`、`## TA 在意的事`、`## 一起经历过`、`## 边界与雷区`（包在 `<!-- manual -->…<!-- /manual -->`）、`## 最近变化`（留 5 条）。
 

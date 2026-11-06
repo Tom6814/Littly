@@ -187,14 +187,21 @@ CREATE TABLE littly_people (
   aliases      jsonb NOT NULL DEFAULT '[]',
   relationship text NOT NULL DEFAULT 'acquaintance'
                CHECK (relationship IN ('owner','friend','close_friend','acquaintance','stranger','blocked')),
+  tier         text NOT NULL DEFAULT 'stranger'
+               CHECK (tier IN ('stranger','acquaintance','friend','intimate','blocked')),
   closeness    smallint NOT NULL DEFAULT 30 CHECK (closeness BETWEEN 0 AND 100),
-  important    boolean NOT NULL DEFAULT false,
-  boundaries   text NOT NULL DEFAULT '',         -- 她与 TA 的边界
-  notes        text NOT NULL DEFAULT '',         -- 她对 TA 的理解（也写 people/<id>.md）
+  important    boolean NOT NULL DEFAULT false,   -- 手动 pin/重要
+  brief        text NOT NULL DEFAULT '',         -- 一句话印象（泛泛之交；不进独立卡）
+  card_path    text NOT NULL DEFAULT '',         -- people/<id>.md；空 = 无独立人物卡
+  interaction_count integer NOT NULL DEFAULT 0,
+  last_interaction_at timestamptz,
+  boundaries   text NOT NULL DEFAULT '',         -- 她与 TA 的边界（friend/intimate）
+  notes        text NOT NULL DEFAULT '',         -- 完整理解（仅 friend/intimate/important）
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX ix_people_person ON littly_people(person_id, important, closeness);
+CREATE INDEX ix_people_tier ON littly_people(person_id, tier, last_interaction_at DESC);
 
 -- 渠道身份映射：外部账号 ↔ 她认识的人
 CREATE TABLE littly_channel_identities (
