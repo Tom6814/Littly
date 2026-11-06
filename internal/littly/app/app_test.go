@@ -144,6 +144,9 @@ func TestHeartbeatStructuredVerdict(t *testing.T) {
 	if st.Runtime.NoopStreak != 1 {
 		t.Fatalf("noop streak = %d", st.Runtime.NoopStreak)
 	}
+	if st.Runtime.Energy <= 60 {
+		t.Fatalf("resting heartbeat should restore energy, got %d", st.Runtime.Energy)
+	}
 }
 
 func TestHeartbeatAfterRequiresReason(t *testing.T) {

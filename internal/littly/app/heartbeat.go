@@ -160,9 +160,13 @@ func (s *Service) runHeartbeat(kind, reason string) {
 		} else {
 			st.Runtime.NoopStreak = 0
 		}
-		// gentle state drift
+		// gentle state drift: resting restores energy, activity spends it.
 		st.Runtime.Mood = clamp(st.Runtime.Mood+1, 0, 100)
-		st.Runtime.Energy = clamp(st.Runtime.Energy-2, 0, 100)
+		if outcome == "resting" || outcome == "noop" {
+			st.Runtime.Energy = clamp(st.Runtime.Energy+5, 0, 100)
+		} else {
+			st.Runtime.Energy = clamp(st.Runtime.Energy-2, 0, 100)
+		}
 		s.st.AppendEvent(st, "heartbeat", "心跳："+outcome, verdict.Summary, "", "")
 		return nil
 	})

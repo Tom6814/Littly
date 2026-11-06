@@ -145,6 +145,12 @@ skills`。
 - 实测打开内部 `/littly/` 页面，返回正文 + `home/browser/20261107-031336.png` artifact。
 - 单测：非 http(s) URL 拒绝。
 
+## 修复：休息恢复精力
+
+- 心跳 outcome=resting/noop 时精力 +5；活动类 outcome 才 -2。
+- 修复整夜 resting 后 energy=0 的问题；单测断言 resting 后 energy 上升。
+- 实机验证：凌晨心跳后 energy 从 0 回到 5，并继续恢复。
+
 ## 人物分层手动调整
 
 - `POST /littly/api/people/:id/tier`（stranger/acquaintance/friend/intimate）；owner 不可改。
