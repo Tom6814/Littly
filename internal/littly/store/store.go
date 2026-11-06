@@ -14,31 +14,46 @@ import (
 )
 
 type Store struct {
-	mu   sync.Mutex
-	dir  string
-	path string
-	data State
+	mu      sync.Mutex
+	dir     string
+	path    string
+	data    State
+	loadPG  func() ([]byte, error)
+	savePG  func([]byte) error
 }
 
-func Open(dir string) (*Store, error) {
+// Open uses the local JSON file only (tests, no-DB dev).
+func Open(dir string) (*Store, error) { return OpenWithHooks(dir, nil, nil) }
+
+// OpenWithHooks prefers a provided loader (e.g. Postgres JSONB) and mirrors
+// every write to a provided persister. The local file remains a fallback and a
+// human-inspectable mirror.
+func OpenWithHooks(dir string, load func() ([]byte, error), save func([]byte) error) (*Store, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("data dir is required")
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	s := &Store{dir: dir, path: filepath.Join(dir, "state.json")}
-	b, err := os.ReadFile(s.path)
-	switch {
-	case err == nil:
-		if err := json.Unmarshal(b, &s.data); err != nil {
+	s := &Store{dir: dir, path: filepath.Join(dir, "state.json"), loadPG: load, savePG: save}
+	var raw []byte
+	if load != nil {
+		if b, err := load(); err == nil && len(b) > 0 {
+			raw = b
+		}
+	}
+	if len(raw) == 0 {
+		if b, err := os.ReadFile(s.path); err == nil {
+			raw = b
+		}
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &s.data); err != nil {
 			return nil, fmt.Errorf("load state: %w", err)
 		}
-	case os.IsNotExist(err):
+	} else {
 		s.data = State{Schema: SchemaVersion, Meta: map[string]any{}}
 		s.data.Runtime = RuntimeState{Energy: 60, Mood: 60, SocialNeed: 40, Satiety: 60, LastTickAt: time.Now().UTC()}
-	default:
-		return nil, err
 	}
 	if s.data.Schema == 0 {
 		s.data.Schema = SchemaVersion
@@ -72,7 +87,15 @@ func (s *Store) saveLocked() error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	if err := os.Rename(tmp, s.path); err != nil {
+		return err
+	}
+	if s.savePG != nil {
+		if err := s.savePG(b); err != nil {
+			return fmt.Errorf("persist postgres state: %w", err)
+		}
+	}
+	return nil
 }
 
 // NewID returns a time-sortable id with a prefix.

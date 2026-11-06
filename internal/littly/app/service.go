@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/felinics/memoh/internal/littly/config"
 	"github.com/felinics/memoh/internal/littly/llm"
 	"github.com/felinics/memoh/internal/littly/store"
@@ -40,6 +42,7 @@ type Service struct {
 	lastErr     string
 	lastBeatAt  time.Time
 	activityID  string
+	usingPG     bool
 	heartRunning bool
 	snowluma    *SnowLumaClient
 }
@@ -51,7 +54,24 @@ func DataDir() string {
 	return "/opt/memoh/data/littly"
 }
 
-func New(log *slog.Logger) (*Service, error) {
+type options struct {
+	pool     *pgxpool.Pool
+	personID string
+}
+
+// Option customizes the Littly service (tests omit it; the server injects the
+// Memoh Postgres pool so state survives container recreation).
+type Option func(*options)
+
+func WithPool(pool *pgxpool.Pool) Option {
+	return func(o *options) { o.pool = pool }
+}
+
+func New(log *slog.Logger, opts ...Option) (*Service, error) {
+	o := options{personID: "owner"}
+	for _, fn := range opts {
+		fn(&o)
+	}
 	dataDir := DataDir()
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, err
@@ -83,7 +103,12 @@ func New(log *slog.Logger) (*Service, error) {
 	if cfg.Workbench.Dir == "" {
 		cfg.Workbench.Dir = filepath.Join(dataDir, "workspace")
 	}
-	st, err := store.Open(dataDir)
+	var st *store.Store
+	if o.pool != nil {
+		st, err = store.OpenPostgres(context.Background(), dataDir, o.pool, o.personID)
+	} else {
+		st, err = store.Open(dataDir)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +125,7 @@ func New(log *slog.Logger) (*Service, error) {
 	for _, sub := range []string{"home/notes", "home/docs", "home/projects", "home/reading", "home/drafts", "home/assets", "home/inbox", "home/journal", "skills", "scripts"} {
 		_ = os.MkdirAll(filepath.Join(cfg.Workbench.Dir, sub), 0o755)
 	}
-	s := &Service{log: log, cfg: cfg, cfgPath: cfgPath, dataDir: dataDir, st: st, vault: vault, stop: make(chan struct{})}
+	s := &Service{log: log, cfg: cfg, cfgPath: cfgPath, dataDir: dataDir, st: st, vault: vault, stop: make(chan struct{}), usingPG: o.pool != nil}
 	if c, err := llm.NewDeepSeek(cfg.Brain); err != nil {
 		s.lastErr = err.Error()
 		s.log.Warn("littly: LLM not configured; running degraded", "err", err)
@@ -216,8 +241,12 @@ func (s *Service) Health() map[string]any {
 	if s.llm != nil {
 		model = s.llm.Model()
 	}
+	vaultTest := filepath.Join(s.cfg.Memory.VaultDir, ".healthcheck")
+	vaultOK := os.WriteFile(vaultTest, []byte("ok"), 0o644) == nil
+	_ = os.Remove(vaultTest)
 	return map[string]any{
 		"status": status, "model": model, "last_error": s.lastErr,
+		"storage": map[string]any{"postgres": s.usingPG, "vault": s.cfg.Memory.VaultDir, "vault_ok": vaultOK},
 		"heartbeat_running": s.running, "heartbeat_paused": s.paused,
 		"last_heartbeat": s.lastBeatAt, "fallback_at": s.fallbackAt,
 		"snowluma": s.snowLumaStatusLocked(),

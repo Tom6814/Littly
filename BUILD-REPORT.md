@@ -28,7 +28,7 @@
 
 ## 已知缺口
 
-1. 持久化是 JSON + Markdown vault，未落到设计的 PostgreSQL `littly_*` 表（M3 剩余）。
+1. 运行时状态已落到 PostgreSQL `littly_state`（JSONB，迁移 `0173`），容器重启/重建后从 PG 恢复；Markdown vault 仍是记忆真相。规范化 `littly_people/memories/...` 子表与 memory provider 替换仍未完成（M3 剩余）。
 2. 未替换 Memoh builtin memory provider / agent context；Littly 聊天使用独立 prompt/工具循环。
 3. 工作台活动仍是文件/产物级；终端/浏览器/桌面/快照与夜间 Dream 自动调度未接入（M4 剩余）。
 4. SnowLuma 真实 QQ 扫码登录未验证；协议与 mock 测试已过（M1/M5 剩余）。
@@ -66,6 +66,16 @@ $ curl -X POST .../littly/api/chat -d '{"content":"你好，我是主人"}'
 ### 运行中的容器
 
 `memoh-postgres` (healthy) · `memoh-pgvector` (healthy) · `memoh-server` (healthy) · `memoh-channel` (healthy) · `memoh-web` (up)
+
+## M3 进度：PostgreSQL 持久化
+
+- 新增迁移 `db/postgres/migrations/0173_littly_state.{up,down}.sql`。
+- `internal/littly/store/pg.go`：启动时 `CREATE TABLE IF NOT EXISTS littly_state`，读取/写入单行 JSONB（person_id=`owner`）；本地 `state.json` 保留为镜像/回退。
+- 注入：`provideLittlyHandler(log, *pgxpool.Pool)` → `app.WithPool`。
+- 验证：
+  - `select person_id, jsonb_array_length(data->'memories'), jsonb_array_length(data->'messages') from littly_state` → `owner|9|6`
+  - `docker restart memoh-server` 后 `/api/today` 仍返回 6 条消息、9 条记忆。
+  - `/api/health` 新增 `storage: {postgres:true, vault_ok:true}`。
 
 ## UI 截图
 
