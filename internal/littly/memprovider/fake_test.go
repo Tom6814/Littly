@@ -3,8 +3,8 @@ package memprovider
 import (
 	"context"
 
-	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/mcp"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 type fakeProvider struct{}

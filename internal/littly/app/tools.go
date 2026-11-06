@@ -51,7 +51,7 @@ func (s *Service) toolSpecs() []llm.Tool {
 			"outcome": pString("living|progress|done|blocked|resting|needs_attention|noop"),
 			"notify":  map[string]any{"type": "boolean", "description": "是否给主人发一条消息"},
 			"summary": pString("这次心跳做了什么"),
-			"next": map[string]any{"type": "object", "properties": map[string]any{"in_minutes": pInt("多久后"), "reason": pString("理由")}},
+			"next":    map[string]any{"type": "object", "properties": map[string]any{"in_minutes": pInt("多久后"), "reason": pString("理由")}},
 		}, "outcome", "summary")),
 		t("file_list", "看工作台里的文件", schema(map[string]any{"path": pString("相对路径，默认 .")})),
 		t("file_read", "读工作台文件", schema(map[string]any{"path": pString("相对路径")}, "path")),
@@ -368,7 +368,6 @@ func mimeOf(p string) string {
 		return "text/plain"
 	}
 }
-
 
 // runTerminal executes a shell command inside her workspace. It is gated by
 // workbench.allow_shell, bounded by a timeout and an output cap. This is not a

@@ -37,7 +37,7 @@ func (s *Service) HandleChat(ctx context.Context, content string) (ChatResult, e
 		st.ReplyDecisions = append(st.ReplyDecisions, store.ReplyDecision{
 			ID: decisionID, PeopleID: owner.ID, Channel: "web", InboundRef: "", ReceivedAt: now,
 			Factors: map[string]any{"traits": s.cfg.Person.Traits, "action": decision.Action, "delay": decision.DelaySeconds},
-			Action: decision.Action, Reason: decision.Reason, DecidedAt: nowUTC(),
+			Action:  decision.Action, Reason: decision.Reason, DecidedAt: nowUTC(),
 		})
 		return nil
 	})

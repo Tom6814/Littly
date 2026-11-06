@@ -3,10 +3,10 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"sync"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 

@@ -13,9 +13,9 @@ import (
 )
 
 type ReplyAction struct {
-	Action        string `json:"action"`
-	Reason        string `json:"reason"`
-	DelaySeconds  int    `json:"delay_seconds,omitempty"`
+	Action       string `json:"action"`
+	Reason       string `json:"reason"`
+	DelaySeconds int    `json:"delay_seconds,omitempty"`
 }
 
 func (s *Service) trait(name string) int {

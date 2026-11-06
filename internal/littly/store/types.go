@@ -5,30 +5,30 @@ import "time"
 const SchemaVersion = 2
 
 type Person struct {
-	ID              string    `json:"id"`
-	DisplayName     string    `json:"display_name"`
-	Nickname        string    `json:"nickname"`
-	Timezone        string    `json:"timezone"`
-	Channel         string    `json:"channel"` // primary contact channel (web/snowluma)
-	ExternalID      string    `json:"external_id"`
-	Aliases         []string  `json:"aliases"`
-	Tier            string    `json:"tier"`     // stranger|acquaintance|friend|intimate|blocked|archived
-	Relationship    string    `json:"relationship"`
-	Closeness       int       `json:"closeness"`
-	Important       bool      `json:"important"`
-	Brief           string    `json:"brief"`
-	CardPath        string    `json:"card_path"`
-	CardMode        string    `json:"card_mode"` // full|summary|archived
-	Notes           string    `json:"notes"`
-	Boundaries      string    `json:"boundaries"`
-	InteractionCount int      `json:"interaction_count"`
+	ID                string     `json:"id"`
+	DisplayName       string     `json:"display_name"`
+	Nickname          string     `json:"nickname"`
+	Timezone          string     `json:"timezone"`
+	Channel           string     `json:"channel"` // primary contact channel (web/snowluma)
+	ExternalID        string     `json:"external_id"`
+	Aliases           []string   `json:"aliases"`
+	Tier              string     `json:"tier"` // stranger|acquaintance|friend|intimate|blocked|archived
+	Relationship      string     `json:"relationship"`
+	Closeness         int        `json:"closeness"`
+	Important         bool       `json:"important"`
+	Brief             string     `json:"brief"`
+	CardPath          string     `json:"card_path"`
+	CardMode          string     `json:"card_mode"` // full|summary|archived
+	Notes             string     `json:"notes"`
+	Boundaries        string     `json:"boundaries"`
+	InteractionCount  int        `json:"interaction_count"`
 	LastInteractionAt *time.Time `json:"last_interaction_at,omitempty"`
-	ArchivedAt      *time.Time `json:"archived_at,omitempty"`
-	ArchiveReason   string    `json:"archive_reason"`
-	RestoredAt      *time.Time `json:"restored_at,omitempty"`
-	RestoreCount    int       `json:"restore_count"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ArchivedAt        *time.Time `json:"archived_at,omitempty"`
+	ArchiveReason     string     `json:"archive_reason"`
+	RestoredAt        *time.Time `json:"restored_at,omitempty"`
+	RestoreCount      int        `json:"restore_count"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 type Memory struct {
@@ -49,18 +49,18 @@ type Memory struct {
 }
 
 type Activity struct {
-	ID         string     `json:"id"`
-	Kind       string     `json:"kind"` // learn|research|organize|write|create|maintain|social|rest
-	Title      string     `json:"title"`
-	Detail     string     `json:"detail"`
-	Status     string     `json:"status"` // planned|running|paused|done|failed|cancelled
-	Progress   int        `json:"progress"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	EndedAt    *time.Time `json:"ended_at,omitempty"`
-	Summary    string     `json:"summary"`
-	ArtifactIDs []string  `json:"artifact_ids"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID          string     `json:"id"`
+	Kind        string     `json:"kind"` // learn|research|organize|write|create|maintain|social|rest
+	Title       string     `json:"title"`
+	Detail      string     `json:"detail"`
+	Status      string     `json:"status"` // planned|running|paused|done|failed|cancelled
+	Progress    int        `json:"progress"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	EndedAt     *time.Time `json:"ended_at,omitempty"`
+	Summary     string     `json:"summary"`
+	ArtifactIDs []string   `json:"artifact_ids"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 type Artifact struct {
@@ -85,31 +85,31 @@ type Approval struct {
 }
 
 type Heartbeat struct {
-	ID            string    `json:"id"`
-	Kind          string    `json:"kind"` // self|manual
-	DueAt         time.Time `json:"due_at"`
-	Reason        string    `json:"reason"`
-	Status        string    `json:"status"` // pending|fired|cancelled|superseded|missed|expired
-	NoopCount     int       `json:"noop_count"`
-	LifetimeUntil *time.Time `json:"lifetime_until,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	FiredAt       *time.Time `json:"fired_at,omitempty"`
+	ID            string         `json:"id"`
+	Kind          string         `json:"kind"` // self|manual
+	DueAt         time.Time      `json:"due_at"`
+	Reason        string         `json:"reason"`
+	Status        string         `json:"status"` // pending|fired|cancelled|superseded|missed|expired
+	NoopCount     int            `json:"noop_count"`
+	LifetimeUntil *time.Time     `json:"lifetime_until,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	FiredAt       *time.Time     `json:"fired_at,omitempty"`
 	Meta          map[string]any `json:"meta,omitempty"`
 }
 
 type HeartbeatRun struct {
-	ID         string     `json:"id"`
-	HeartbeatID string    `json:"heartbeat_id,omitempty"`
-	Kind       string     `json:"kind"` // self|fallback|event|manual
-	StartedAt  time.Time  `json:"started_at"`
-	EndedAt    *time.Time `json:"ended_at,omitempty"`
-	Outcome    string     `json:"outcome"` // living|progress|done|blocked|resting|needs_attention|noop|interrupted|error
-	Notify     *bool      `json:"notify,omitempty"`
-	Summary    string     `json:"summary"`
-	ModelTurns int        `json:"model_turns"`
-	NextDueAt  *time.Time `json:"next_due_at,omitempty"`
-	NextReason string     `json:"next_reason"`
-	Error      string     `json:"error"`
+	ID          string     `json:"id"`
+	HeartbeatID string     `json:"heartbeat_id,omitempty"`
+	Kind        string     `json:"kind"` // self|fallback|event|manual
+	StartedAt   time.Time  `json:"started_at"`
+	EndedAt     *time.Time `json:"ended_at,omitempty"`
+	Outcome     string     `json:"outcome"` // living|progress|done|blocked|resting|needs_attention|noop|interrupted|error
+	Notify      *bool      `json:"notify,omitempty"`
+	Summary     string     `json:"summary"`
+	ModelTurns  int        `json:"model_turns"`
+	NextDueAt   *time.Time `json:"next_due_at,omitempty"`
+	NextReason  string     `json:"next_reason"`
+	Error       string     `json:"error"`
 }
 
 type ReplyDecision struct {
@@ -160,13 +160,13 @@ type Message struct {
 }
 
 type Conversation struct {
-	ID           string    `json:"id"`
-	Channel      string    `json:"channel"`
-	PeopleID     string    `json:"people_id"`
-	ExternalKey  string    `json:"external_key"`
-	GroupID      string    `json:"group_id,omitempty"`
-	Title        string    `json:"title"`
-	LastAt       time.Time `json:"last_at"`
+	ID          string    `json:"id"`
+	Channel     string    `json:"channel"`
+	PeopleID    string    `json:"people_id"`
+	ExternalKey string    `json:"external_key"`
+	GroupID     string    `json:"group_id,omitempty"`
+	Title       string    `json:"title"`
+	LastAt      time.Time `json:"last_at"`
 }
 
 type Diary struct {
@@ -179,11 +179,11 @@ type Diary struct {
 }
 
 type Dream struct {
-	ID        string     `json:"id"`
-	StartedAt time.Time  `json:"started_at"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
-	Status    string     `json:"status"` // running|ok|failed
-	Summary   string     `json:"summary"`
+	ID        string         `json:"id"`
+	StartedAt time.Time      `json:"started_at"`
+	EndedAt   *time.Time     `json:"ended_at,omitempty"`
+	Status    string         `json:"status"` // running|ok|failed
+	Summary   string         `json:"summary"`
 	Stats     map[string]any `json:"stats"`
 }
 
@@ -233,39 +233,39 @@ type Event struct {
 }
 
 type RuntimeState struct {
-	Energy          int        `json:"energy"`
-	Mood            int        `json:"mood"`
-	SocialNeed      int        `json:"social_need"`
-	Satiety         int        `json:"satiety"`
-	Attention       string     `json:"attention"`
-	CurrentActivityID string   `json:"current_activity_id,omitempty"`
-	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
-	LastWakeAt      *time.Time `json:"last_wake_at,omitempty"`
-	LastTickAt      time.Time  `json:"last_tick_at"`
-	NoopStreak      int        `json:"noop_streak"`
-	HeartbeatPaused bool       `json:"heartbeat_paused"`
+	Energy            int        `json:"energy"`
+	Mood              int        `json:"mood"`
+	SocialNeed        int        `json:"social_need"`
+	Satiety           int        `json:"satiety"`
+	Attention         string     `json:"attention"`
+	CurrentActivityID string     `json:"current_activity_id,omitempty"`
+	LastHeartbeatAt   *time.Time `json:"last_heartbeat_at,omitempty"`
+	LastWakeAt        *time.Time `json:"last_wake_at,omitempty"`
+	LastTickAt        time.Time  `json:"last_tick_at"`
+	NoopStreak        int        `json:"noop_streak"`
+	HeartbeatPaused   bool       `json:"heartbeat_paused"`
 }
 
 type State struct {
-	Schema        int            `json:"schema"`
-	Person        *Person        `json:"person,omitempty"`
-	People        []Person       `json:"people"`
-	Memories      []Memory       `json:"memories"`
-	Activities    []Activity     `json:"activities"`
-	Artifacts     []Artifact     `json:"artifacts"`
-	Heartbeats    []Heartbeat    `json:"heartbeats"`
-	HeartbeatRuns []HeartbeatRun `json:"heartbeat_runs"`
+	Schema         int             `json:"schema"`
+	Person         *Person         `json:"person,omitempty"`
+	People         []Person        `json:"people"`
+	Memories       []Memory        `json:"memories"`
+	Activities     []Activity      `json:"activities"`
+	Artifacts      []Artifact      `json:"artifacts"`
+	Heartbeats     []Heartbeat     `json:"heartbeats"`
+	HeartbeatRuns  []HeartbeatRun  `json:"heartbeat_runs"`
 	ReplyDecisions []ReplyDecision `json:"reply_decisions"`
-	Outbox        []Outbox       `json:"outbox"`
-	Messages      []Message      `json:"messages"`
-	Conversations []Conversation `json:"conversations"`
-	Diaries       []Diary        `json:"diaries"`
-	Approvals     []Approval     `json:"approvals"`
-	Dreams        []Dream        `json:"dreams"`
-	Interests     []Interest     `json:"interests"`
-	Goals         []Goal         `json:"goals"`
-	Threads       []Thread       `json:"threads"`
-	Events        []Event        `json:"events"`
-	Runtime       RuntimeState   `json:"runtime"`
-	Meta          map[string]any `json:"meta,omitempty"`
+	Outbox         []Outbox        `json:"outbox"`
+	Messages       []Message       `json:"messages"`
+	Conversations  []Conversation  `json:"conversations"`
+	Diaries        []Diary         `json:"diaries"`
+	Approvals      []Approval      `json:"approvals"`
+	Dreams         []Dream         `json:"dreams"`
+	Interests      []Interest      `json:"interests"`
+	Goals          []Goal          `json:"goals"`
+	Threads        []Thread        `json:"threads"`
+	Events         []Event         `json:"events"`
+	Runtime        RuntimeState    `json:"runtime"`
+	Meta           map[string]any  `json:"meta,omitempty"`
 }

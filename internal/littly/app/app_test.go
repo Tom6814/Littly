@@ -554,7 +554,6 @@ func TestSetTierAPI(t *testing.T) {
 	}
 }
 
-
 func TestChatLLMErrorReturns500WithoutPanic(t *testing.T) {
 	s := newTestService(t)
 	s.SetLLM(&fakeLLM{err: errors.New("upstream down")})

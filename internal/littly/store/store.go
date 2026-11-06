@@ -14,12 +14,12 @@ import (
 )
 
 type Store struct {
-	mu      sync.Mutex
-	dir     string
-	path    string
-	data    State
-	loadPG  func() ([]byte, error)
-	savePG  func([]byte) error
+	mu     sync.Mutex
+	dir    string
+	path   string
+	data   State
+	loadPG func() ([]byte, error)
+	savePG func([]byte) error
 }
 
 // Open uses the local JSON file only (tests, no-DB dev).

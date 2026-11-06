@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/littly/memoryapi"
-	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/mcp"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 type Provider struct {
@@ -162,7 +162,6 @@ func (p *Provider) Search(ctx context.Context, req memprovider.SearchRequest) (m
 	}
 	return res, nil
 }
-
 
 func (p *Provider) backend() memoryapi.Backend { return memoryapi.Get() }
 
@@ -316,24 +315,37 @@ func (p *Provider) CallTool(ctx context.Context, session mcp.ToolSessionContext,
 	if b == nil {
 		return p.Provider.CallTool(ctx, session, toolName, arguments)
 	}
-	str := func(k string) string { if v, ok := arguments[k].(string); ok { return v }; return "" }
+	str := func(k string) string {
+		if v, ok := arguments[k].(string); ok {
+			return v
+		}
+		return ""
+	}
 	switch toolName {
 	case memprovider.ToolSearchMemory:
 		hits, err := b.Search(ctx, str("query"), 8)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		return map[string]any{"results": hitsToItems(hits)}, nil
 	case memprovider.ToolCreateMemory:
 		title, body := splitTitleBody(strings.TrimSpace(str("memory") + "\n" + str("text")))
 		h, err := b.Add(ctx, title, body)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		return map[string]any{"id": h.ID, "memory": h.Title}, nil
 	case memprovider.ToolUpdateMemory:
 		title, body := splitTitleBody(str("memory"))
 		h, err := b.Update(ctx, str("memory_id"), title, body)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		return map[string]any{"id": h.ID}, nil
 	case memprovider.ToolDeleteMemory:
-		if err := b.Delete(ctx, str("memory_id")); err != nil { return nil, err }
+		if err := b.Delete(ctx, str("memory_id")); err != nil {
+			return nil, err
+		}
 		return map[string]any{"deleted": true}, nil
 	}
 	return p.Provider.CallTool(ctx, session, toolName, arguments)
@@ -341,14 +353,17 @@ func (p *Provider) CallTool(ctx context.Context, session mcp.ToolSessionContext,
 
 func splitTitleBody(s string) (string, string) {
 	s = strings.TrimSpace(s)
-	if s == "" { return "", "" }
+	if s == "" {
+		return "", ""
+	}
 	lines := strings.SplitN(s, "\n", 2)
 	title := strings.TrimSpace(lines[0])
-	if len([]rune(title)) > 40 { title = string([]rune(title)[:40]) }
+	if len([]rune(title)) > 40 {
+		title = string([]rune(title)[:40])
+	}
 	body := s
 	return title, body
 }
-
 
 // ListTools returns Littly's own memory tools when the backend is available.
 // Without the backend we preserve the upstream builtin descriptors unchanged.

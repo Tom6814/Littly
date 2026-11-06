@@ -97,15 +97,15 @@ func (h *Handler) bootstrap(c echo.Context) error {
 	cfg := h.svc.Config().Redacted()
 	p := h.svc.Person()
 	return c.JSON(200, map[string]any{
-		"person": map[string]any{"id": p.ID, "name": p.DisplayName, "nickname": p.Nickname, "timezone": p.Timezone, "traits": cfg.Person.Traits, "self": cfg.Person.Self, "style": cfg.Person.Style, "boundaries": cfg.Person.Boundaries, "bio": cfg.Person.Bio},
-		"model": map[string]any{"model": cfg.Brain.Model, "base_url": cfg.Brain.BaseURL, "temperature": cfg.Brain.Temperature},
-		"heartbeat": map[string]any{"enabled": cfg.Heartbeat.Enabled, "day_minutes": cfg.Heartbeat.FallbackDayMinutes, "night_minutes": cfg.Heartbeat.FallbackNightMinutes, "day_start": cfg.Heartbeat.DayStart, "day_end": cfg.Heartbeat.DayEnd, "quiet_start": cfg.Security.QuietStart, "quiet_end": cfg.Security.QuietEnd},
-		"security": map[string]any{"quiet_start": cfg.Security.QuietStart, "quiet_end": cfg.Security.QuietEnd},
-		"health": h.svc.Health(),
+		"person":         map[string]any{"id": p.ID, "name": p.DisplayName, "nickname": p.Nickname, "timezone": p.Timezone, "traits": cfg.Person.Traits, "self": cfg.Person.Self, "style": cfg.Person.Style, "boundaries": cfg.Person.Boundaries, "bio": cfg.Person.Bio},
+		"model":          map[string]any{"model": cfg.Brain.Model, "base_url": cfg.Brain.BaseURL, "temperature": cfg.Brain.Temperature},
+		"heartbeat":      map[string]any{"enabled": cfg.Heartbeat.Enabled, "day_minutes": cfg.Heartbeat.FallbackDayMinutes, "night_minutes": cfg.Heartbeat.FallbackNightMinutes, "day_start": cfg.Heartbeat.DayStart, "day_end": cfg.Heartbeat.DayEnd, "quiet_start": cfg.Security.QuietStart, "quiet_end": cfg.Security.QuietEnd},
+		"security":       map[string]any{"quiet_start": cfg.Security.QuietStart, "quiet_end": cfg.Security.QuietEnd},
+		"health":         h.svc.Health(),
 		"next_heartbeat": h.svc.nextHeartbeatInfo(),
-		"channels": map[string]any{"snowluma": h.svc.snowLumaStatus()},
-		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork, "auto_activity_minutes": cfg.Workbench.AutoActivityMinutes, "browser_url": cfg.Workbench.BrowserURL},
-		"memory": map[string]any{"dream_hour": cfg.Memory.DreamHour, "vault_dir": cfg.Memory.VaultDir},
+		"channels":       map[string]any{"snowluma": h.svc.snowLumaStatus()},
+		"workbench":      map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork, "auto_activity_minutes": cfg.Workbench.AutoActivityMinutes, "browser_url": cfg.Workbench.BrowserURL},
+		"memory":         map[string]any{"dream_hour": cfg.Memory.DreamHour, "vault_dir": cfg.Memory.VaultDir},
 	})
 }
 
@@ -116,31 +116,31 @@ func (h *Handler) getConfig(c echo.Context) error {
 
 func (h *Handler) putConfig(c echo.Context) error {
 	var body struct {
-		Name          *string        `json:"name"`
-		Nickname      *string        `json:"nickname"`
-		Style         *string        `json:"style"`
-		Self          *string        `json:"self"`
-		Boundaries    *string        `json:"boundaries"`
-		Traits        map[string]int `json:"traits"`
-		Model         *string        `json:"model"`
-		Temperature   *float64       `json:"temperature"`
-		DayMinutes    *int           `json:"day_minutes"`
-		NightMinutes  *int           `json:"night_minutes"`
-		Enabled       *bool          `json:"heartbeat_enabled"`
-		SLEnabled     *bool          `json:"snowluma_enabled"`
-		SLWS          *string        `json:"snowluma_ws"`
-		SLToken       *string        `json:"snowluma_token"`
-		SLAccount     *string        `json:"snowluma_account"`
-		SLOwner       *string        `json:"snowluma_owner"`
-		AllowShell        *bool `json:"allow_shell"`
-		AllowNetwork      *bool `json:"allow_network"`
-		AutoActivityMins  *int  `json:"auto_activity_minutes"`
-		DreamHour         *int  `json:"dream_hour"`
-		DayStart          *string `json:"day_start"`
-		DayEnd            *string `json:"day_end"`
-		QuietStart        *string `json:"quiet_start"`
-		QuietEnd          *string `json:"quiet_end"`
-		GroupAtOnly       *bool   `json:"group_at_only"`
+		Name             *string        `json:"name"`
+		Nickname         *string        `json:"nickname"`
+		Style            *string        `json:"style"`
+		Self             *string        `json:"self"`
+		Boundaries       *string        `json:"boundaries"`
+		Traits           map[string]int `json:"traits"`
+		Model            *string        `json:"model"`
+		Temperature      *float64       `json:"temperature"`
+		DayMinutes       *int           `json:"day_minutes"`
+		NightMinutes     *int           `json:"night_minutes"`
+		Enabled          *bool          `json:"heartbeat_enabled"`
+		SLEnabled        *bool          `json:"snowluma_enabled"`
+		SLWS             *string        `json:"snowluma_ws"`
+		SLToken          *string        `json:"snowluma_token"`
+		SLAccount        *string        `json:"snowluma_account"`
+		SLOwner          *string        `json:"snowluma_owner"`
+		AllowShell       *bool          `json:"allow_shell"`
+		AllowNetwork     *bool          `json:"allow_network"`
+		AutoActivityMins *int           `json:"auto_activity_minutes"`
+		DreamHour        *int           `json:"dream_hour"`
+		DayStart         *string        `json:"day_start"`
+		DayEnd           *string        `json:"day_end"`
+		QuietStart       *string        `json:"quiet_start"`
+		QuietEnd         *string        `json:"quiet_end"`
+		GroupAtOnly      *bool          `json:"group_at_only"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return jsonErr(c, 400, "bad json", err)
@@ -251,7 +251,7 @@ func (h *Handler) today(c echo.Context) error {
 	return c.JSON(200, map[string]any{
 		"person": p, "runtime": st.Runtime, "health": h.svc.Health(), "next_heartbeat": h.svc.nextHeartbeatInfo(),
 		"activities": activities, "events": events, "heartbeat_runs": runs, "messages": msgs,
-		"counts": map[string]int{"memories": len(st.Memories), "people": len(st.People), "artifacts": len(st.Artifacts)},
+		"counts":    map[string]int{"memories": len(st.Memories), "people": len(st.People), "artifacts": len(st.Artifacts)},
 		"approvals": h.svc.ListApprovals(),
 	})
 }
@@ -664,19 +664,18 @@ func (h *Handler) dream(c echo.Context) error {
 func (h *Handler) world(c echo.Context) error {
 	cfg := h.svc.Config().Redacted()
 	return c.JSON(200, map[string]any{
-		"channels": map[string]any{"snowluma": h.svc.snowLumaStatus()},
+		"channels":  map[string]any{"snowluma": h.svc.snowLumaStatus()},
 		"workbench": map[string]any{"dir": cfg.Workbench.Dir, "allow_shell": cfg.Workbench.AllowShell, "allow_network": cfg.Workbench.AllowNetwork, "auto_activity_minutes": cfg.Workbench.AutoActivityMinutes, "browser_url": cfg.Workbench.BrowserURL},
-		"memory": map[string]any{"dream_hour": cfg.Memory.DreamHour, "vault_dir": cfg.Memory.VaultDir},
-		"owner":    h.svc.Person(),
-		"model":    cfg.Brain.Model,
-		"dirs":     map[string]string{"vault": cfg.Memory.VaultDir, "workspace": cfg.Workbench.Dir},
+		"memory":    map[string]any{"dream_hour": cfg.Memory.DreamHour, "vault_dir": cfg.Memory.VaultDir},
+		"owner":     h.svc.Person(),
+		"model":     cfg.Brain.Model,
+		"dirs":      map[string]string{"vault": cfg.Memory.VaultDir, "workspace": cfg.Workbench.Dir},
 	})
 }
 
 func jsonErr(c echo.Context, code int, msg string, err error) error {
 	return c.JSON(code, map[string]any{"error": msg, "detail": err.Error()})
 }
-
 
 // BrokenHandler is registered when the Littly service cannot initialize. It
 // keeps the server booting while making the failure visible instead of a 404.

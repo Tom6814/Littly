@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/littly/memoryapi"
-	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/mcp"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 func TestItemsFiltersPrivateAndSearches(t *testing.T) {

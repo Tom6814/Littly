@@ -11,8 +11,8 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
-	littlyagent "github.com/felinics/memoh/internal/littly/agentctx"
 	tools "github.com/felinics/memoh/internal/agent/tool"
+	littlyagent "github.com/felinics/memoh/internal/littly/agentctx"
 )
 
 // SystemSection is one typed, priority-ordered piece of the system prompt.

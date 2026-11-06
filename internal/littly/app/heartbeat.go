@@ -324,7 +324,6 @@ func clamp(v, lo, hi int) int {
 	return v
 }
 
-
 // inQuiet reports whether local time falls inside the configured quiet window.
 func (s *Service) inQuiet(local time.Time) bool {
 	start, end := s.cfg.Security.QuietStart, s.cfg.Security.QuietEnd

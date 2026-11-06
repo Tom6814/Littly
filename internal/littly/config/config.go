@@ -17,8 +17,8 @@ type Person struct {
 	Gender     string         `json:"gender,omitempty"`
 	Appearance string         `json:"appearance,omitempty"`
 	Bio        string         `json:"bio,omitempty"`
-	Self       string         `json:"self,omitempty"`      // SELF.md seed
-	Style      string         `json:"style,omitempty"`     // speaking style
+	Self       string         `json:"self,omitempty"`  // SELF.md seed
+	Style      string         `json:"style,omitempty"` // speaking style
 	Boundaries string         `json:"boundaries,omitempty"`
 	Traits     map[string]int `json:"traits"`
 }
@@ -35,16 +35,16 @@ type Brain struct {
 }
 
 type Heartbeat struct {
-	Enabled             bool   `json:"enabled"`
-	FallbackDayMinutes  int    `json:"fallback_day_minutes"`
-	FallbackNightMinutes int   `json:"fallback_night_minutes"`
-	MaxGapHours         int    `json:"max_gap_hours"`
-	SpacingSeconds      int    `json:"spacing_seconds"`
-	DayStart            string `json:"day_start"`
-	DayEnd              string `json:"day_end"`
-	NoopSlowAfter       int    `json:"noop_slow_after"`
-	NoopPauseAfter      int    `json:"noop_pause_after"`
-	MaxTurnsPerDay      int    `json:"max_turns_per_day"`
+	Enabled              bool   `json:"enabled"`
+	FallbackDayMinutes   int    `json:"fallback_day_minutes"`
+	FallbackNightMinutes int    `json:"fallback_night_minutes"`
+	MaxGapHours          int    `json:"max_gap_hours"`
+	SpacingSeconds       int    `json:"spacing_seconds"`
+	DayStart             string `json:"day_start"`
+	DayEnd               string `json:"day_end"`
+	NoopSlowAfter        int    `json:"noop_slow_after"`
+	NoopPauseAfter       int    `json:"noop_pause_after"`
+	MaxTurnsPerDay       int    `json:"max_turns_per_day"`
 }
 
 type Memory struct {
@@ -66,12 +66,12 @@ type Workbench struct {
 }
 
 type SnowLuma struct {
-	Enabled          bool   `json:"enabled"`
-	WSURL            string `json:"ws_url"`
-	Token            string `json:"token"`
-	AccountRef       string `json:"account_ref"`
-	OwnerExternalID  string `json:"owner_external_id"`
-	GroupAtOnly      bool   `json:"group_at_only"`
+	Enabled         bool   `json:"enabled"`
+	WSURL           string `json:"ws_url"`
+	Token           string `json:"token"`
+	AccountRef      string `json:"account_ref"`
+	OwnerExternalID string `json:"owner_external_id"`
+	GroupAtOnly     bool   `json:"group_at_only"`
 }
 
 type Channels struct {
@@ -79,10 +79,10 @@ type Channels struct {
 }
 
 type Security struct {
-	QuietStart string `json:"quiet_start"`
-	QuietEnd   string `json:"quiet_end"`
-	Estop      bool   `json:"estop"`
-	ApprovalOutbound bool `json:"approval_outbound"`
+	QuietStart       string `json:"quiet_start"`
+	QuietEnd         string `json:"quiet_end"`
+	Estop            bool   `json:"estop"`
+	ApprovalOutbound bool   `json:"approval_outbound"`
 }
 
 type Server struct {
@@ -224,7 +224,7 @@ func (c *Config) Resolve() error {
 	}
 	if c.Workbench.AutoActivityMinutes == 0 {
 		c.Workbench.AutoActivityMinutes = 180
-	c.Workbench.BrowserURL = "http://littly-browser:9222"
+		c.Workbench.BrowserURL = "http://littly-browser:9222"
 	}
 	if c.Workbench.MaxFileBytes <= 0 {
 		c.Workbench.MaxFileBytes = 8 << 20

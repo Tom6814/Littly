@@ -34,18 +34,18 @@ type Service struct {
 	vault   *Vault
 	llm     llm.Client
 
-	mu          sync.Mutex
-	fallbackAt  time.Time
-	paused      bool
-	running     bool
-	stop        chan struct{}
-	wg          sync.WaitGroup
-	lastErr     string
-	lastBeatAt  time.Time
-	activityID  string
-	usingPG     bool
+	mu           sync.Mutex
+	fallbackAt   time.Time
+	paused       bool
+	running      bool
+	stop         chan struct{}
+	wg           sync.WaitGroup
+	lastErr      string
+	lastBeatAt   time.Time
+	activityID   string
+	usingPG      bool
 	heartRunning bool
-	snowluma    *SnowLumaClient
+	snowluma     *SnowLumaClient
 }
 
 func DataDir() string {
@@ -149,7 +149,7 @@ func (s *Service) Start() {
 	go s.loop()
 	if s.cfg.Channels.SnowLuma.Enabled {
 		memoryapi.Set(memoryBackend{s: s})
-	s.startSnowLuma()
+		s.startSnowLuma()
 	}
 }
 
@@ -266,7 +266,7 @@ func (s *Service) Health() map[string]any {
 	_ = os.Remove(vaultTest)
 	return map[string]any{
 		"status": status, "model": model, "last_error": s.lastErr,
-		"storage": map[string]any{"postgres": s.usingPG, "vault": s.cfg.Memory.VaultDir, "vault_ok": vaultOK},
+		"storage":           map[string]any{"postgres": s.usingPG, "vault": s.cfg.Memory.VaultDir, "vault_ok": vaultOK},
 		"heartbeat_running": s.running, "heartbeat_paused": s.paused,
 		"last_heartbeat": s.lastBeatAt, "fallback_at": s.fallbackAt,
 		"snowluma": s.snowLumaStatusLocked(),

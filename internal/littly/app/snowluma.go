@@ -26,13 +26,13 @@ type SnowLumaStatus struct {
 }
 
 type SnowLumaClient struct {
-	mu        sync.Mutex
-	conn      *websocket.Conn
-	writeMu   sync.Mutex
-	status    SnowLumaStatus
-	stop      chan struct{}
-	seen      map[string]time.Time
-	selfID    int64
+	mu         sync.Mutex
+	conn       *websocket.Conn
+	writeMu    sync.Mutex
+	status     SnowLumaStatus
+	stop       chan struct{}
+	seen       map[string]time.Time
+	selfID     int64
 	accountRef string
 }
 

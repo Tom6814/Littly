@@ -78,7 +78,7 @@ func (s *Service) RunDream(ctx context.Context) (store.Dream, error) {
 			var out struct {
 				Memories []struct {
 					Domain, Kind, Title, Body, Visibility string
-					Importance                         int
+					Importance                            int
 				} `json:"memories"`
 				Diary string `json:"diary"`
 				Mood  string `json:"mood"`
