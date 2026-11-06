@@ -163,6 +163,10 @@ skills`。
 - SnowLuma 状态新增 `state=waiting_login`：OneBot WS 未监听时显示“等待扫码登录”，不再只显示裸 connection refused。
 - 设置页副标题更新为 基本 / 模型 / 心跳 / QQ / 工作台 / 健康 / 关于。
 
+## 回归测试：六面 API e2e
+
+`TestAPIEndToEnd` 用 httptest 串起：bootstrap / health / chat / today / config / terminal / test-model / activities/run / activities / artifacts / people / memories / heartbeat / heartbeat schedule / world / file write/list/content/raw / events / archive，全部 200。
+
 ## 最终镜像验证（从源码构建，不靠 docker cp）
 
 ```text

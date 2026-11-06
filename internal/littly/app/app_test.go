@@ -375,3 +375,57 @@ func TestRawFileServesInsideWorkspace(t *testing.T) {
 		t.Fatalf("traversal must not be served")
 	}
 }
+
+func TestAPIEndToEnd(t *testing.T) {
+	s := newTestService(t)
+	s.SetLLM(&fakeLLM{responses: []llm.Response{{Content: "我在。"}}})
+	h := NewHandler(s)
+	e := echo.New()
+	h.Register(e)
+	defer s.Stop()
+
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		var r *http.Request
+		if body == "" {
+			r = httptest.NewRequest(method, path, nil)
+		} else {
+			r = httptest.NewRequest(method, path, strings.NewReader(body))
+			r.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, r)
+		return rec
+	}
+	want := func(code int, rec *httptest.ResponseRecorder, what string) {
+		t.Helper()
+		if rec.Code != code {
+			t.Fatalf("%s: status %d body=%s", what, rec.Code, rec.Body.String())
+		}
+	}
+
+	want(200, do("GET", "/littly/api/bootstrap", ""), "bootstrap")
+	want(200, do("GET", "/littly/api/health", ""), "health")
+	want(200, do("POST", "/littly/api/chat", `{"content":"你好"}`), "chat")
+	want(200, do("GET", "/littly/api/today", ""), "today")
+	want(200, do("PUT", "/littly/api/config", `{"allow_shell":true,"name":"小璃"}`), "config")
+	want(200, do("POST", "/littly/api/terminal", `{"command":"echo e2e-terminal"}`), "terminal")
+	want(200, do("POST", "/littly/api/test-model", ""), "test-model")
+	want(200, do("POST", "/littly/api/activities/run", ""), "activity")
+	want(200, do("GET", "/littly/api/activities", ""), "activities")
+	want(200, do("GET", "/littly/api/artifacts", ""), "artifacts")
+	if _, err := s.EnsureContact("snowluma", "90001", "E2E"); err != nil {
+		t.Fatal(err)
+	}
+	want(200, do("GET", "/littly/api/people", ""), "people")
+	want(200, do("GET", "/littly/api/memories", ""), "memories")
+	want(200, do("GET", "/littly/api/heartbeat", ""), "heartbeat")
+	want(200, do("POST", "/littly/api/heartbeat", `{"action":"schedule","minutes":20,"reason":"回归测试里安排一次"}`), "heartbeat schedule")
+	want(200, do("GET", "/littly/api/world", ""), "world")
+	want(200, do("PUT", "/littly/api/files/content", `{"path":"home/e2e.md","content":"hello e2e"}`), "file write")
+	want(200, do("GET", "/littly/api/files?path=home", ""), "file list")
+	want(200, do("GET", "/littly/api/files/content?path=home/e2e.md", ""), "file content")
+	want(200, do("GET", "/littly/api/files/raw?path=home/e2e.md", ""), "file raw")
+	want(200, do("GET", "/littly/api/events", ""), "events")
+	want(200, do("GET", "/littly/api/archive?q=E2E", ""), "archive")
+}
