@@ -36,8 +36,13 @@ QQ 首次：World 页展开 noVNC 扫码，登录后把 QQ 号填入设置。
 ./scripts/littly-test.sh
 ```
 
-最后验证镜像：`123c6e6c8da0`（v2.0.3）
+最后验证镜像：`123c6e6c8da0`（v2.0.4 源码；镜像功能集从 v2.0.3 起稳定）
 （`schema_migrations=174|f`，server healthy，浏览器 sidecar ok，snapshot ok，DeepSeek test ok）。
+
+## 测试
+
+- `scripts/littly-test.sh`：build + littly + server/native/memory + race，全绿。
+- 覆盖：LLM 错误、心跳错误、危险命令审批、群聊 @ 门控、六面 API e2e、快照/恢复、人物分层、浏览器/终端、记忆 backend、竞态。
 
 ## 已知缺口
 
