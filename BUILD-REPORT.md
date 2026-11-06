@@ -77,6 +77,25 @@ $ curl -X POST .../littly/api/chat -d '{"content":"你好，我是主人"}'
   - `docker restart memoh-server` 后 `/api/today` 仍返回 6 条消息、9 条记忆。
   - `/api/health` 新增 `storage: {postgres:true, vault_ok:true}`。
 
+## M3 进度：规范化表
+
+迁移 `0174_littly_domain_tables` 新增并同步以下表（每次状态保存事务内 delete+insert，单实例数据量小）：
+
+`littly_people` · `littly_memories` · `littly_activities` · `littly_artifacts` · `littly_heartbeats` · `littly_heartbeat_runs` · `littly_reply_decisions` · `littly_outbox` · `littly_events` · `littly_diaries` · `littly_dreams`
+
+实测（部署后一次聊天触发保存）：
+
+```text
+people|1
+memories|11
+activities|0
+heartbeats|15
+runs|16
+replies|4
+events|50
+diaries|3
+```
+
 ## UI 截图
 
 - `docs/v2/screenshots/today.png`：今天页（状态、心跳、聊天、事件、活动）。

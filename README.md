@@ -60,7 +60,7 @@ go build ./cmd/agent
 
 ## 与设计文档的差距（诚实记录）
 
-- 运行时状态已持久化到 Memoh PostgreSQL（`littly_state` JSONB，迁移 `0173`），Markdown vault 仍是记忆真相；设计的**规范化** `littly_*` 子表与 memory provider 替换尚未完成。
+- 运行时状态持久化到 Memoh PostgreSQL：`littly_state`（JSONB，迁移 `0173`）+ **规范化镜像表** `littly_people/memories/activities/artifacts/heartbeats/heartbeat_runs/reply_decisions/outbox/events/diaries/dreams`（迁移 `0174`）；Markdown vault 仍是记忆真相。memory provider 替换仍未完成。
 - 尚未替换 Memoh 的 builtin memory provider / agent 上下文；Littly 聊天走自己的 prompt/工具循环。Memoh 工作台/容器/渠道作为平台保留。
 - 工作台活动执行目前是文件+产物级别；终端/浏览器/桌面活动、快照、Dream 夜间自动调度尚未接入。
 - SnowLuma 已实现协议与 mock 测试，尚未在真实 QQ 扫码登录下跑通；需要 SnowLuma 容器与账号。

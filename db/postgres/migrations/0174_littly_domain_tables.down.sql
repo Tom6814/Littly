@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS littly_dreams;
+DROP TABLE IF EXISTS littly_diaries;
+DROP TABLE IF EXISTS littly_events;
+DROP TABLE IF EXISTS littly_outbox;
+DROP TABLE IF EXISTS littly_reply_decisions;
+DROP TABLE IF EXISTS littly_heartbeat_runs;
+DROP TABLE IF EXISTS littly_heartbeats;
+DROP TABLE IF EXISTS littly_artifacts;
+DROP TABLE IF EXISTS littly_activities;
+DROP TABLE IF EXISTS littly_memories;
+DROP TABLE IF EXISTS littly_people;
