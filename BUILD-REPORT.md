@@ -168,6 +168,12 @@ GET /littly/ → 200
 
 消息、记忆、活动、日记、快照全部从卷/Postgres 恢复，整栈重建可用。
 
+## 新增协议/审批测试
+
+- `TestSnowLumaGroupAtOnly`：群聊无 @ 不回复；有 @ 只发一条 `send_group_msg`。
+- `TestApprovalAPI`：危险命令经 HTTP 进入待批准；GET 列表含命令；deny 后队列清空。
+- 全量 + race 通过。
+
 ## 失败路径测试
 
 - Chat 遇到 LLM 错误：返回 500，服务不 panic，health 仍 200。

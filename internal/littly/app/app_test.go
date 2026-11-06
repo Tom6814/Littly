@@ -628,3 +628,35 @@ func TestDangerousTerminalRequiresApproval(t *testing.T) {
 		t.Fatalf("file should be deleted after approval: %v", err)
 	}
 }
+
+func TestApprovalAPI(t *testing.T) {
+	s := newTestService(t)
+	if err := s.UpdateConfig(func(c *config.Config) { c.Workbench.AllowShell = true }); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(s)
+	e := echo.New()
+	h.Register(e)
+	defer s.Stop()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/littly/api/terminal", strings.NewReader(`{"command":"rm -rf home/approval-api-test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	e.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "等待主人批准") {
+		t.Fatalf("terminal = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/littly/api/approvals", nil))
+	if !strings.Contains(rec.Body.String(), "approval-api-test") {
+		t.Fatalf("approvals missing: %s", rec.Body.String())
+	}
+	pending := s.ListApprovals()
+	if len(pending) != 1 {
+		t.Fatalf("pending = %d", len(pending))
+	}
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/littly/api/approvals/"+pending[0].ID+"/deny", nil))
+	if rec.Code != 200 || len(s.ListApprovals()) != 0 {
+		t.Fatalf("deny failed: %d %s", rec.Code, rec.Body.String())
+	}
+}
