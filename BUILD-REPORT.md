@@ -232,7 +232,7 @@ skills`。
 ## 最终镜像验证（从源码构建，不靠 docker cp）
 
 ```text
-docker build -f docker/Dockerfile.server.local -t memohai/server:latest .   → Successfully built dc57c4382015（含 browser、raw file、memory bridge、日记/人物/记忆录入、作息设置、快照/恢复、内嵌 noVNC）
+docker build -f docker/Dockerfile.server.local -t memohai/server:latest .   → Successfully built b38339b44bf9（含 browser、raw file、memory bridge、日记/人物/记忆录入、作息/安静时段、快照/恢复、内嵌 noVNC、手动分层）
 docker compose up -d --force-recreate server                                 → memoh-server Healthy
 schema_migrations: 174|f (clean)
 GET /            → 302 → /littly/
