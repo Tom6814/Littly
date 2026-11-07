@@ -221,6 +221,15 @@ GET /littly/ → 200
 - 当前状态：OneBot WS 在 QQ 登录前不监听，`/api/health` 显示 `connected:false, last_error: connection refused`；扫码入口已可用，登录后自动重连。
 - 用户操作：打开 `http://127.0.0.1:6081/vnc.html` 扫码，再把 QQ 号填入设置页。
 
+## UI：复用老版控制台（v2.1.0）
+
+- 用老版 `littly/console` 的完整 UI（AppShell/导航/页面/设计系统）替换手写 HTML。
+- 构建为 hash 路由静态应用，位于 `/littly/`；`/littly/api/` 反向代理到 v2 核心。
+- `littly-ui/public/shim.js` 做 `/api/* → /littly/api/*` 数据适配：chat/messages、characters、diaries、memory vault、contacts/relations、QQ/SnowLuma、settings、stats、auth/onboarding。
+- 新增老版 UI 的「工作台」页（文件/终端/浏览器/快照/产出/活动）。
+- 隐藏未接 v2 的老版入口（插件/MCP/多渠道/成长/相册等）与多 bot 操作/退出登录等杂物。
+- 截图：`docs/v2/screenshots/console-chat.png`、`console-memory.png`、`console-workbench.png`、`console-qq.png`、`console-settings.png`。
+
 ## UI 截图
 
 - `docs/v2/screenshots/today.png`：今天页（状态、心跳、聊天、事件、活动）。

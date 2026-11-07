@@ -138,3 +138,4 @@ config.toml
 data/
 backups/
 docs/v2/BUILD-LOG.md.bak
+.build/

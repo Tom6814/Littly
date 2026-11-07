@@ -1,0 +1,88 @@
+/* App stylesheet — ONLY the design-system imports + app-level chrome that the
+   page shell itself owns. No component styling, no raw values: every visual
+   decision comes from @felinic/ui tokens (packages/ui/AGENTS.md). */
+@import "tailwindcss";
+@import "@felinic/ui/style.css";
+
+/* Tailwind v4 content scan: the vendored library sources and this app. */
+@source "../../packages/ui/src";
+@source "../src";
+
+/* Inter-script spacing (W3C CLREQ), same as the host app; inherited. */
+:root {
+  text-autospace: normal;
+}
+
+/* CJK de-emphasis: CJK glyphs read heavier than Inter at the same weight, so
+   remap the rungs down while the UI language is Chinese. Vendored from the
+   design system's host stylesheet (keep in sync with packages/ui/showcase). */
+@layer utilities {
+  :lang(zh) .font-light {
+    font-weight: 280;
+  }
+  :lang(zh) .font-normal {
+    font-weight: 315;
+  }
+  :lang(zh) .font-medium {
+    font-weight: 370;
+  }
+  :lang(zh) .font-semibold {
+    font-weight: 410;
+  }
+  :lang(zh) .font-bold {
+    font-weight: 450;
+  }
+}
+:lang(zh) body {
+  font-weight: 335;
+}
+
+/* ───────────────────────── Safari / iOS 兼容修正 ─────────────────────────
+   目标：Safari 16.4+（Tailwind v4 与 @felinic/ui 的设计基线）。
+   仅做渐进增强与旧版兜底，不改变设计 token 语义。 */
+
+/* iOS 横竖屏切换时不要放大字号 */
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 去掉 iOS 点击高亮，交互反馈由组件自己负责 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 旧版 Safari 没有 100dvh：用 vh 兜底（AppShell 等 h-dvh 容器） */
+@supports not (height: 100dvh) {
+  .h-dvh {
+    height: 100vh;
+  }
+}
+
+/* 滚动容器在 iOS 上使用惯性滚动；并抑制橡皮筋式整页回弹 */
+.overflow-y-auto,
+.overflow-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* iOS 键盘弹起时，输入框字号 <16px 会触发自动放大页面 —— 移动端统一 16px */
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* 刘海屏安全区：AppShell 已用 safe-area 工具类，这里兜底 body 背景不露白 */
+body {
+  overscroll-behavior-y: none;
+}
+
+/* 原生的 date/time 控件在 Safari 上高度不一致，统一交给组件尺寸 */
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 2.25rem;
+}

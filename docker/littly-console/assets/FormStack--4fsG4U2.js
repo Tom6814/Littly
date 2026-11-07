@@ -1,0 +1,1 @@
+import{Et as e,Ht as t,J as n,zt as r}from"./src-BAOO-xSo.js";var i={},a={class:`space-y-4`};function o(n,i){return r(),e(`div`,a,[t(n.$slots,`default`)])}var s=n(i,[[`render`,o]]);export{s as t};

@@ -14,6 +14,7 @@ WORKDIR /build/apps/web
 RUN pnpm build
 FROM nginx:alpine
 COPY --from=build /build/apps/web/dist /usr/share/nginx/html
+COPY docker/littly-console /usr/share/nginx/html/littly
 ENV MEMOH_SERVER_UPSTREAM=memoh-server:8080 MEMOH_CHANNEL_UPSTREAM=memoh-channel:8081
 COPY docker/nginx.conf /etc/nginx/templates/default.conf.template
 COPY docker/nginx-app.conf /etc/nginx/templates/includes/memoh-app.conf.template
