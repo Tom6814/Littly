@@ -267,7 +267,7 @@ func (s *Service) heartbeatSystemPrompt() string {
 - notify=true 时，summary 就是发给主人的话；没有具体内容就不要打扰。
 - 不要把"HEARTBEAT_OK"之类哨兵文本发出去。
 - 你可以自己刷 B 站（bili_hot/bili_search/bili_video/bili_comments）或看推特（x_view/browser_open），不需要问主人；刷到有意思的可以写进记忆，想分享再分享。
-- 你的 B 站/X 账号是你自己的：可以自己决定发帖（bili_post/x_post）、评论（bili_comment）、点赞（bili_like）、改资料（bili_profile），不用征求主人同意。前提只是浏览器里已经登录了你的账号。
+- 你的 B 站/X 账号是你自己的：可以自己决定发帖（bili_post/x_post）、评论（bili_comment）、点赞（bili_like）、改资料（bili_profile/x_profile），不用征求主人同意。前提只是浏览器里已经登录了你的账号。
 - 这是你自己的时间，做你想做的事；不想刷也可以休息。
 </heartbeat_rules>`
 }

@@ -131,3 +131,37 @@ func (s *Service) biliPost(ctx context.Context, text string) (string, error) {
 	b, _ := json.Marshal(out["result"])
 	return string(b), nil
 }
+
+func (s *Service) xProfile(ctx context.Context, name, bio string) (string, error) {
+	if strings.TrimSpace(name) == "" && strings.TrimSpace(bio) == "" {
+		return "", fmt.Errorf("name or bio required")
+	}
+	script := `
+	const setVal = (el, val) => {
+	  if (!el || !val) return false;
+	  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+	  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+	  setter ? setter.call(el, val) : (el.value = val);
+	  el.dispatchEvent(new Event('input', { bubbles: true }));
+	  el.dispatchEvent(new Event('change', { bubbles: true }));
+	  return true;
+	};
+	const name = document.querySelector('input[name="displayName"]') || document.querySelector('input[autocomplete="name"]');
+	const bio = document.querySelector('textarea[name="description"]') || document.querySelector('textarea');
+	if (!name && !bio) return { ok:false, error:'没有找到资料编辑表单（可能未登录 X）' };
+	setVal(name, ` + jsQuote(name) + `);
+	setVal(bio, ` + jsQuote(bio) + `);
+	await new Promise(r=>setTimeout(r,600));
+	const btn = [...document.querySelectorAll('[data-testid="Profile_Save_Button"],button')].find(b=>/save|保存/i.test(b.textContent||''));
+	if (!btn) return { ok:false, error:'没有找到保存按钮' };
+	btn.click();
+	await new Promise(r=>setTimeout(r,2000));
+	return { ok:true, url: location.href };
+	`
+	out, err := s.BrowserEval(ctx, "https://x.com/settings/profile", script, false)
+	if err != nil {
+		return "", err
+	}
+	b, _ := json.Marshal(out["result"])
+	return string(b), nil
+}

@@ -71,6 +71,7 @@ func (s *Service) toolSpecs() []llm.Tool {
 		t("bili_like", "用她自己的 B 站账号给视频点赞/取消赞", schema(map[string]any{"bvid": pString("BV 号"), "like": map[string]any{"type": "boolean"}}, "bvid")),
 		t("bili_profile", "修改她自己的 B 站昵称/签名", schema(map[string]any{"uname": pString("昵称，可空"), "sign": pString("个性签名，可空")})),
 		t("bili_post", "用她自己的 B 站账号发一条动态", schema(map[string]any{"text": pString("动态内容")}, "text")),
+		t("x_profile", "修改她自己的 X 昵称/简介", schema(map[string]any{"name": pString("昵称，可空"), "bio": pString("简介，可空")})),
 		t("browser_open", "用她的浏览器打开网页，读正文；可选截图存证", schema(map[string]any{"url": pString("http(s) URL"), "screenshot": map[string]any{"type": "boolean", "description": "是否截图"}}, "url")),
 		t("web_fetch", "抓取一个网页（只读文本）", schema(map[string]any{"url": pString("https URL")}, "url")),
 	}
@@ -199,6 +200,8 @@ func (s *Service) execTool(ctx context.Context, name, args, actorID, convID stri
 		return s.biliProfile(ctx, str("uname"), str("sign"))
 	case "bili_post":
 		return s.biliPost(ctx, str("text"))
+	case "x_profile":
+		return s.xProfile(ctx, str("name"), str("bio"))
 	case "browser_open":
 		out, err := s.Browse(ctx, str("url"), in["screenshot"] == true)
 		if err != nil {
