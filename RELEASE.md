@@ -6,7 +6,7 @@
 
 Memoh 硬分叉 + Littly v2 核心：
 
-- **老版控制台 UI**：`/littly/` 复用老版 Littly 控制台（对话/角色卡/日记/工作台/记忆/联系人/QQ/概览/设置），`/` 自动跳转；旧设置入口重定向。
+- **老版控制台 UI（唯一前端）**：`/littly/` 复用老版 Littly 控制台（对话/角色卡/日记/工作台/记忆/联系人/微信/飞书/Telegram/Discord/Slack/QQ/概览/设置）；Memoh 原前端已移除。
 - **单实例一个人**：核心 server 拦截第二次 bot 创建；数据按 `owner` 单例。
 - **人格**：traits / SELF / 说话方式 / 边界；`system.littly_persona` 注入 Memoh 原生 agent。
 - **回复策略**：immediate / short / later / no_reply，决策留痕。

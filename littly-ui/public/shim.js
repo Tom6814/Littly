@@ -120,7 +120,21 @@
       if (path === '/api/onboarding/test-model') return json({ ok: true })
       if (path === '/api/onboarding/complete') return json({ ok: true })
       if (path === '/api/bots') return json({ bots: [{ id: 'owner', name: (await boot()).person.name || '小璃', settings: {} }] })
-      if (path.startsWith('/api/bots/') && path.endsWith('/channels')) return json({ channels: {} })
+      if (path.startsWith('/api/bots/') && path.endsWith('/channels')) {
+        if (method === 'GET') {
+          const d = await core('/connections')
+          const channels = {}
+          for (const c of (d.connections || [])) channels[c.type] = { enabled: !!c.enabled, ...(c.credentials || {}) }
+          return json({ channels })
+        }
+        const channels = (body && body.channels) || {}
+        for (const [type, cfg] of Object.entries(channels)) {
+          const credentials = { ...(cfg || {}) }
+          delete credentials.enabled
+          await core('/connections/' + encodeURIComponent(type), { method: 'PUT', body: JSON.stringify({ enabled: !!(cfg && cfg.enabled), credentials }) })
+        }
+        return json({ ok: true })
+      }
       if (path.startsWith('/api/bots/')) {
         if (method === 'PATCH' || method === 'PUT') return json({ ok: true })
         return json({ bot: { id: 'owner', name: (await boot()).person.name || '小璃', settings: {} } })
@@ -187,6 +201,8 @@
       if (path === '/api/call/requests') return json({ requests: [] })
       if (path.startsWith('/api/call/')) return json({ ok: true })
       if (path === '/api/persona-rules') return json({ content: '', enabled: true })
+      if (path === '/api/bind/status') return json({ items: [] })
+      if (path.startsWith('/api/bind/')) return json({ ok: true })
       if (path === '/api/plugins') return json({ plugins: [] })
       return json({})
     } catch (e) {

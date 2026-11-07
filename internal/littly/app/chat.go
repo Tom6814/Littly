@@ -120,3 +120,63 @@ func (s *Service) fallbackReply(content string) string {
 	}
 	return "嗯，我在想事情。"
 }
+
+// HandleChannelChat answers an inbound external-channel message as a specific
+// person. Replies are returned synchronously (channel adapters send them), so
+// delayed web outbox semantics are not used here.
+func (s *Service) HandleChannelChat(ctx context.Context, p store.Person, convID, channelType, content string) (ChatResult, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ChatResult{}, fmt.Errorf("empty message")
+	}
+	now := nowUTC()
+	_ = s.st.Mutate(func(st *store.State) error {
+		st.Messages = append(st.Messages, store.Message{ID: store.NewID("msg"), ConversationID: convID, Channel: channelType, PeopleID: p.ID, Role: "user", Content: content, At: now, Direction: "inbound"})
+		return nil
+	})
+	p, _ = s.TouchInteraction(p.ID)
+	decision := s.DecideReply(ctx, p, content)
+	_ = s.st.Mutate(func(st *store.State) error {
+		st.ReplyDecisions = append(st.ReplyDecisions, store.ReplyDecision{ID: store.NewID("rd"), PeopleID: p.ID, Channel: channelType, ReceivedAt: now, Action: decision.Action, Reason: decision.Reason, DecidedAt: nowUTC(), Factors: map[string]any{"channel": channelType}})
+		return nil
+	})
+	if decision.Action == "no_reply" {
+		_ = s.st.Mutate(func(st *store.State) error {
+			s.st.AppendEvent(st, "reply", "没有回消息", decision.Reason, p.ID, "")
+			return nil
+		})
+		return ChatResult{Replied: false, Action: decision.Action, Reason: decision.Reason}, nil
+	}
+	reply, err := s.generateReplyFor(ctx, p, convID, content)
+	if err != nil {
+		return ChatResult{}, err
+	}
+	_ = s.st.Mutate(func(st *store.State) error {
+		st.Messages = append(st.Messages, store.Message{ID: store.NewID("msg"), ConversationID: convID, Channel: channelType, PeopleID: p.ID, Role: "assistant", Content: reply, At: nowUTC(), Direction: "outbound"})
+		st.Runtime.SocialNeed = clamp(st.Runtime.SocialNeed-5, 0, 100)
+		s.st.AppendEvent(st, "chat", "在 "+channelType+" 回复了消息", truncate(reply, 60), p.ID, "")
+		return nil
+	})
+	if len([]rune(content)) > 12 {
+		_, _ = s.addMemory(store.Memory{Domain: "life", Kind: "episodic", Title: p.DisplayName + "说：" + truncate(content, 24), Body: content, Importance: 2, Visibility: "relationship", VisibilityPeopleID: p.ID, PeopleIDs: []string{p.ID}, Source: channelType, EventTime: now})
+	}
+	return ChatResult{Reply: reply, Replied: true, Action: decision.Action, Reason: decision.Reason}, nil
+}
+
+func (s *Service) generateReplyFor(ctx context.Context, p store.Person, convID, content string) (string, error) {
+	if s.LLM() == nil {
+		return s.fallbackReply(content), nil
+	}
+	memories := s.retrieveMemories(content, p.ID, s.cfg.Memory.RetrievalTopK)
+	system := s.SystemPrompt(p.ID, memories)
+	history := s.chatHistory(p.ID, 16)
+	history = append(history, llm.Message{Role: llm.RoleUser, Content: content})
+	text, err := s.runTools(ctx, append([]llm.Message{{Role: llm.RoleSystem, Content: system}}, history...), s.toolSpecs(), p.ID, convID, nil)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(text) == "" {
+		return s.fallbackReply(content), nil
+	}
+	return strings.TrimSpace(text), nil
+}

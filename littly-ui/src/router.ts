@@ -58,6 +58,8 @@ const routes: RouteRecordRaw[] = [
   { path: '/channels/email', name: 'channel-email', component: () => import('@/pages/channels/EmailPage.vue'), meta: { title: '邮箱' } },
   { path: '/contacts', name: 'contacts', component: () => import('@/pages/contacts/ContactsPage.vue'), meta: { title: '联系人' } },
 
+  { path: '/channels/feishu', name: 'channel-feishu', component: () => import('@/pages/channels/FeishuPage.vue'), meta: { title: '飞书' } },
+  { path: '/channels/slack', name: 'channel-slack', component: () => import('@/pages/channels/SlackPage.vue'), meta: { title: 'Slack' } },
   // 系统
   { path: '/system/overview', name: 'system-overview', component: () => import('@/pages/system/OverviewPage.vue'), meta: { title: '概览' } },
   { path: '/system/settings', name: 'system-settings', component: () => import('@/pages/system/SettingsPage.vue'), meta: { title: '设置' } },

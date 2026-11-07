@@ -46,6 +46,7 @@ type Service struct {
 	usingPG      bool
 	heartRunning bool
 	snowluma     *SnowLumaClient
+	channels     map[string]*channelRuntime
 }
 
 func DataDir() string {
@@ -126,7 +127,7 @@ func New(log *slog.Logger, opts ...Option) (*Service, error) {
 	for _, sub := range []string{"home/notes", "home/docs", "home/projects", "home/reading", "home/drafts", "home/assets", "home/inbox", "home/journal", "skills", "scripts"} {
 		_ = os.MkdirAll(filepath.Join(cfg.Workbench.Dir, sub), 0o755)
 	}
-	s := &Service{log: log, cfg: cfg, cfgPath: cfgPath, dataDir: dataDir, st: st, vault: vault, stop: make(chan struct{}), usingPG: o.pool != nil}
+	s := &Service{log: log, cfg: cfg, cfgPath: cfgPath, dataDir: dataDir, st: st, vault: vault, stop: make(chan struct{}), usingPG: o.pool != nil, channels: map[string]*channelRuntime{}}
 	if c, err := llm.NewDeepSeek(cfg.Brain); err != nil {
 		s.lastErr = err.Error()
 		s.log.Warn("littly: LLM not configured; running degraded", "err", err)
@@ -147,10 +148,11 @@ func (s *Service) Start() {
 	s.mu.Unlock()
 	s.wg.Add(1)
 	go s.loop()
+	memoryapi.Set(memoryBackend{s: s})
 	if s.cfg.Channels.SnowLuma.Enabled {
-		memoryapi.Set(memoryBackend{s: s})
 		s.startSnowLuma()
 	}
+	s.startChannels()
 }
 
 func (s *Service) Stop() {
@@ -163,6 +165,7 @@ func (s *Service) Stop() {
 	close(s.stop)
 	s.mu.Unlock()
 	s.stopSnowLuma()
+	s.stopChannels()
 	s.wg.Wait()
 }
 

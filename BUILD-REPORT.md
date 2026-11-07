@@ -223,6 +223,14 @@ GET /littly/ → 200
 
 ## UI：复用老版控制台（v2.1.0）
 
+- 单前端：`docker/Dockerfile.web.local` 只复制 `docker/littly-console`，不再构建/部署 apps/web；`/login` 等旧前端路径 404。
+- 渠道页：微信/飞书/Telegram/Discord/Slack 配置页；保存映射到 `/littly/api/connections/:type`。
+- 后端：`internal/littly/app/channels.go` 直接实例化 Memoh adapters（feishu/weixin/telegram/discord/slack），长连接收消息 → `HandleChannelChat` → adapter.Send 原渠道回复。
+- `GET/PUT /littly/api/connections[/:type]`：配置/状态；凭证写入本地 config，API 回显打码；保存后自动重启渠道。
+- 单前端：`/login` 404，root 302 → `/littly/`；Memoh 原前端不再部署。
+- 实测：伪造 Feishu 配置可启动/停止 adapter 且不 panic；连接错误通过 status 返回。真实收发需要用户提供飞书/微信等凭证。
+
+
 - 用老版 `littly/console` 的完整 UI（AppShell/导航/页面/设计系统）替换手写 HTML。
 - 构建为 hash 路由静态应用，位于 `/littly/`；`/littly/api/` 反向代理到 v2 核心。
 - `littly-ui/public/shim.js` 做 `/api/* → /littly/api/*` 数据适配：chat/messages、characters、diaries、memory vault、contacts/relations、QQ/SnowLuma、settings、stats、auth/onboarding。

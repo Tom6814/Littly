@@ -65,6 +65,14 @@ go build ./cmd/agent
 - `docker/nginx-app.conf`：`/` → `/littly/`；`/settings`、`/bots` 重定向。
 - `docs/v2/`：完整设计文档（产品/架构/数据模型/生活引擎/记忆/人格回复/心跳/UI/测试/构建）。
 
+## 渠道（直接复用 Memoh adapters）
+
+- 微信 / 飞书 / Telegram / Discord / Slack：直接复用仓库里 Memoh 的 `internal/channel/adapters/*`，`internal/littly/app/channels.go` 启动长连接；收到消息 → `HandleChannelChat` → adapter.Send 原渠道回复。
+- 配置页（世界 → 微信/飞书/Telegram/Discord/Slack）保存后立即重连，页面显示连接状态/最后错误。
+- UI 的「世界」下有对应配置页（App ID/Secret、Bridge Token、Bot Token 等），保存后立即重连；凭证只存本地 config，API 回显打码。
+- QQ 仍走 SnowLuma；QQ 页面保留。
+- 仅保留一套前端：web 镜像只构建/服务 Littly UI（`/littly/`），不再提供 Memoh 原前端。
+
 ## 核心桥接
 
 - `internal/littly/agentctx` 把 Littly 的姓名/SELF/说话方式/边界注入 Memoh 原生 agent 的 system prompt（`system.littly_persona`），并把最近 6 条非私密记忆作为 `system.littly_memory` 注入；平台里的 agent 也以“她”的身份工作、记得她最近经历过什么。

@@ -74,8 +74,14 @@ type SnowLuma struct {
 	GroupAtOnly     bool   `json:"group_at_only"`
 }
 
+type ChannelConnection struct {
+	Enabled     bool           `json:"enabled"`
+	Credentials map[string]any `json:"credentials,omitempty"`
+}
+
 type Channels struct {
-	SnowLuma SnowLuma `json:"snowluma"`
+	SnowLuma    SnowLuma                      `json:"snowluma"`
+	Connections map[string]ChannelConnection `json:"connections,omitempty"`
 }
 
 type Security struct {
@@ -180,6 +186,9 @@ func (c *Config) Resolve() error {
 	if c.path != "" {
 		base = filepath.Dir(c.path)
 	}
+	if c.Channels.Connections == nil {
+		c.Channels.Connections = map[string]ChannelConnection{}
+	}
 	if c.Server.Addr == "" {
 		c.Server.Addr = "127.0.0.1:8080"
 	}
@@ -277,6 +286,25 @@ func (c Config) Redacted() Config {
 	c.Brain.APIKey = ""
 	if c.Channels.SnowLuma.Token != "" {
 		c.Channels.SnowLuma.Token = "***"
+	}
+	if len(c.Channels.Connections) > 0 {
+		out := make(map[string]ChannelConnection, len(c.Channels.Connections))
+		for k, v := range c.Channels.Connections {
+			creds := make(map[string]any, len(v.Credentials))
+			for ck, cv := range v.Credentials {
+				lk := strings.ToLower(ck)
+				if strings.Contains(lk, "token") || strings.Contains(lk, "secret") || strings.Contains(lk, "password") || strings.Contains(lk, "key") {
+					if s, ok := cv.(string); ok && s != "" {
+						creds[ck] = "***"
+						continue
+					}
+				}
+				creds[ck] = cv
+			}
+			v.Credentials = creds
+			out[k] = v
+		}
+		c.Channels.Connections = out
 	}
 	return c
 }

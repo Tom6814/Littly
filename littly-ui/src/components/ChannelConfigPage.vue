@@ -8,6 +8,7 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
+  Badge,
   Button,
   CalloutBanner,
   Input,
@@ -55,6 +56,8 @@ const saving = ref(false)
 const enabled = ref(false)
 const values = reactive<Record<string, string>>({})
 const secretSet = reactive<Record<string, boolean>>({})
+const statusText = ref('未检查')
+const statusError = ref('')
 
 onMounted(async () => {
   await bots.bootstrap()
@@ -83,6 +86,15 @@ async function loadAll(): Promise<void> {
     if (e instanceof ApiError && e.status === 403) denied.value = true
     else error.value = e instanceof Error ? e.message : '加载渠道配置失败'
   }
+  try {
+    const r = await fetch('/littly/api/connections')
+    const d = (await r.json()) as { connections?: Array<Record<string, unknown>> }
+    const c = (d.connections ?? []).find((x) => x['type'] === props.channel)
+    statusText.value = c
+      ? (c['connected'] === true ? '已连接' : (c['enabled'] === true ? '等待连接' : '未启用'))
+      : '未启用'
+    statusError.value = c && typeof c['last_error'] === 'string' ? String(c['last_error']) : ''
+  } catch { statusText.value = '状态未知' }
   loading.value = false
 }
 
@@ -134,6 +146,9 @@ const bindChannelKey = computed(() => props.bindChannel ?? (props.channel === 't
         <SettingsSection title="连接配置">
           <SettingsRow label="启用该渠道" description="关闭后她不会在该渠道收发消息">
             <Switch v-model="enabled" :disabled="!isAdmin" />
+          </SettingsRow>
+          <SettingsRow label="连接状态" :description="statusError || '保存后自动重连'">
+            <Badge :variant="statusText === '已连接' ? 'default' : 'outline'" size="sm">{{ statusText }}</Badge>
           </SettingsRow>
           <SettingsRow
             v-for="field in fields"

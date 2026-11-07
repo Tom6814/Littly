@@ -87,6 +87,8 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.POST("/heartbeat", h.heartbeatControl)
 	api.POST("/dream", h.dream)
 	api.GET("/world", h.world)
+	api.GET("/connections", h.connections)
+	api.PUT("/connections/:type", h.connectionUpdate)
 }
 
 func (h *Handler) health(c echo.Context) error {
@@ -229,6 +231,7 @@ func (h *Handler) putConfig(c echo.Context) error {
 	if h.svc.Config().Channels.SnowLuma.Enabled {
 		h.svc.startSnowLuma()
 	}
+	h.svc.startChannels()
 	return c.JSON(200, map[string]any{"ok": true, "config": h.svc.Config().Redacted()})
 }
 
@@ -659,6 +662,35 @@ func (h *Handler) dream(c echo.Context) error {
 		return jsonErr(c, 500, "dream failed", err)
 	}
 	return c.JSON(200, map[string]any{"dream": d})
+}
+
+func (h *Handler) connections(c echo.Context) error {
+	cfg := h.svc.Config().Redacted()
+	statuses := h.svc.channelStatuses()
+	out := make([]map[string]any, 0, len(statuses))
+	for _, st := range statuses {
+		conf := cfg.Channels.Connections[st.Type]
+		out = append(out, map[string]any{
+			"type": st.Type, "enabled": conf.Enabled, "connected": st.Connected,
+			"credentials": conf.Credentials, "last_error": st.LastError, "last_event": st.LastEvent,
+		})
+	}
+	return c.JSON(200, map[string]any{"connections": out})
+}
+
+func (h *Handler) connectionUpdate(c echo.Context) error {
+	typ := c.Param("type")
+	var body struct {
+		Enabled     bool           `json:"enabled"`
+		Credentials map[string]any `json:"credentials"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return jsonErr(c, 400, "bad json", err)
+	}
+	if err := h.svc.updateChannelConfig(typ, body.Enabled, body.Credentials); err != nil {
+		return jsonErr(c, 400, "update channel failed", err)
+	}
+	return c.JSON(200, map[string]any{"ok": true, "statuses": h.svc.channelStatuses()})
 }
 
 func (h *Handler) world(c echo.Context) error {

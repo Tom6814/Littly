@@ -9,6 +9,9 @@ import {
   Bot,
   LayoutDashboard,
   Wrench,
+  MessageCircle,
+  Send,
+  Gamepad2,
 } from 'lucide-vue-next'
 
 export interface NavLeaf { to: string; label: string; icon: Component }
@@ -24,6 +27,11 @@ export const NAV_GROUPS: NavGroup[] = [
   { label: '记忆', items: [{ to: '/memory', label: '记忆', icon: Brain }] },
   { label: '世界', items: [
     { to: '/contacts', label: '联系人', icon: Users },
+    { to: '/channels/wechat', label: '微信', icon: MessageCircle },
+    { to: '/channels/feishu', label: '飞书', icon: Send },
+    { to: '/channels/telegram', label: 'Telegram', icon: Send },
+    { to: '/channels/discord', label: 'Discord', icon: Gamepad2 },
+    { to: '/channels/slack', label: 'Slack', icon: MessagesSquare },
     { to: '/channels/qq', label: 'QQ', icon: Bot },
   ] },
   { label: '系统', items: [
