@@ -67,7 +67,9 @@ go build ./cmd/agent
 
 ## 渠道（直接复用 Memoh adapters）
 
-- 微信 / 飞书 / Telegram / Discord / Slack：直接复用仓库里 Memoh 的 `internal/channel/adapters/*`，`internal/littly/app/channels.go` 启动长连接；收到消息 → `HandleChannelChat` → adapter.Send 原渠道回复。
+- **微信扫码**：`wechat-bridge/` 直接调用 openilink iLink SDK（与 openilink-hub 同一套扫码流程）：出二维码 → 手机扫码 → 长轮询监听 → 入站转发 /littly/api/channel/inbound → 她的聊天 → SDK push 原微信回复。
+- 飞书 / Telegram / Discord / Slack：直接复用仓库里 Memoh 的 `internal/channel/adapters/*`，`internal/littly/app/channels.go` 启动长连接；收到消息 → `HandleChannelChat` → adapter.Send 原渠道回复。
+- 微信 bridge 容器：`littly-wechat`（`memohai/wechat-bridge`），数据卷持久化登录态。
 - 配置页（世界 → 微信/飞书/Telegram/Discord/Slack）保存后立即重连，页面显示连接状态/最后错误。
 - UI 的「世界」下有对应配置页（App ID/Secret、Bridge Token、Bot Token 等），保存后立即重连；凭证只存本地 config，API 回显打码。
 - QQ 仍走 SnowLuma；QQ 页面保留。

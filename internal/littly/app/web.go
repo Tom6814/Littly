@@ -89,6 +89,7 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.GET("/world", h.world)
 	api.GET("/connections", h.connections)
 	api.PUT("/connections/:type", h.connectionUpdate)
+	api.POST("/channel/inbound", h.channelInbound)
 }
 
 func (h *Handler) health(c echo.Context) error {
@@ -662,6 +663,33 @@ func (h *Handler) dream(c echo.Context) error {
 		return jsonErr(c, 500, "dream failed", err)
 	}
 	return c.JSON(200, map[string]any{"dream": d})
+}
+
+func (h *Handler) channelInbound(c echo.Context) error {
+	var body struct {
+		Channel    string `json:"channel"`
+		ExternalID string `json:"external_id"`
+		Name       string `json:"name"`
+		Text       string `json:"text"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return jsonErr(c, 400, "bad json", err)
+	}
+	if strings.TrimSpace(body.Text) == "" || strings.TrimSpace(body.ExternalID) == "" {
+		return c.JSON(400, map[string]string{"error": "external_id and text required"})
+	}
+	if body.Channel == "" {
+		body.Channel = "wechat"
+	}
+	p, err := h.svc.EnsureContact(body.Channel, body.ExternalID, body.Name)
+	if err != nil {
+		return jsonErr(c, 400, "contact failed", err)
+	}
+	res, err := h.svc.HandleChannelChat(c.Request().Context(), p, body.Channel+":"+body.ExternalID, body.Channel, body.Text)
+	if err != nil {
+		return jsonErr(c, 500, "chat failed", err)
+	}
+	return c.JSON(200, map[string]any{"replied": res.Replied, "reply": res.Reply, "action": res.Action, "reason": res.Reason})
 }
 
 func (h *Handler) connections(c echo.Context) error {

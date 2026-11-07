@@ -227,6 +227,21 @@ services:
     networks:
       - memoh-network
 
+  wechat-bridge:
+    image: memohai/wechat-bridge:latest
+    container_name: littly-wechat
+    environment:
+      LITTLY_CORE_URL: "http://memoh-server:8080"
+      BRIDGE_DATA: "/data/state.json"
+      TZ: Asia/Shanghai
+    volumes:
+      - wechat_bridge_data:/data
+    expose:
+      - "3200"
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
   browser:
     image: chromedp/headless-shell:latest
     container_name: littly-browser
@@ -260,6 +275,7 @@ services:
       - memoh-network
 
 volumes:
+  wechat_bridge_data:
   postgres_data:
     driver: local
   pgvector_data:

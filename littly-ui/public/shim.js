@@ -187,6 +187,23 @@
       if (path.startsWith('/api/contacts/')) { const all = await contacts(); const id = decodeURIComponent(path.split('/').pop()); return json({ contact: all.find((c) => c.id === id) || null }) }
       if (path === '/api/relations') return json({ relations: [] })
       if (path.startsWith('/api/relations/')) return json({ ok: true })
+      if (path === '/api/wechat/status') {
+        const d = await (await origFetch('/littly/wechat/status')).json()
+        return json({ bound: !!d.bound, botId: 'owner', ilinkBotId: d.ilinkBotId || '', ilinkUserId: d.ilinkUserId || '', nickname: d.nickname || '微信', status: d.status || (d.bound ? 'connected' : 'stopped'), windowFresh: true, note: d.bound ? '已绑定微信' : '请扫码绑定微信' })
+      }
+      if (path === '/api/wechat/qr' && method === 'POST') {
+        const r = await origFetch('/littly/wechat/qr/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        const d = await r.json()
+        return json({ sessionId: d.sessionId || (d.session && d.session.id) || '', qrDataUrl: d.qrDataUrl || (d.session && d.session.qrImg) || '', expiresAt: d.expiresAt || '' })
+      }
+      if (path.startsWith('/api/wechat/qr/') && method === 'GET') {
+        const sid = decodeURIComponent(path.split('/').pop())
+        const r = await origFetch('/littly/wechat/qr/status?session=' + enc(sid))
+        const d = await r.json()
+        return json({ status: d.status || 'wait', qrDataUrl: d.qrImg || d.qrDataUrl || '', error: d.error || '', ilinkBotId: (d.result && d.result.botId) || '', ilinkUserId: (d.result && d.result.userId) || '' })
+      }
+      if (path === '/api/wechat/logout' && method === 'POST') { await origFetch('/littly/wechat/logout', { method: 'POST' }); return json({ ok: true }) }
+      if (path === '/api/wechat/friend-qr') return json({ qrDataUrl: '', note: '扫码后在微信里直接给她发消息即可' })
       if (path === '/api/qq/status') { const s = (await world()).channels.snowluma || {}; return json({ available: true, snowluma: { enabled: !!s.enabled, connected: !!s.connected, selfId: s.account || '', lastError: s.last_error || '', lastEventAt: '' }, qqbot: { enabled: false, connected: false } }) }
       if (path === '/api/qq/logs') return json({ logs: [] })
       if (path === '/api/qq/probe') { const s = (await world()).channels.snowluma || {}; return json({ ok: !!s.connected, waiting: !s.connected && !!s.enabled, selfId: s.account || '', nickname: '', error: s.last_error || '' }) }

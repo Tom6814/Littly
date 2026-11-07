@@ -221,6 +221,17 @@ GET /littly/ → 200
 - 当前状态：OneBot WS 在 QQ 登录前不监听，`/api/health` 显示 `connected:false, last_error: connection refused`；扫码入口已可用，登录后自动重连。
 - 用户操作：打开 `http://127.0.0.1:6081/vnc.html` 扫码，再把 QQ 号填入设置页。
 
+## 微信扫码（openilink iLink）
+
+- `wechat-bridge/`：Node bridge，依赖 `@openilink/openilink-sdk-node` + `qrcode`。
+  - `POST /qr/start`/`GET /qr/status`：真实微信二维码（SDK 返回 URL → qrcode 转 data URL）、扫码/确认状态。
+  - 登录成功持久化 `bot_token/bot_id/base_url` 与 context tokens 到 `/data/state.json`。
+  - `monitor` 收到消息 → `POST http://memoh-server:8080/littly/api/channel/inbound` → `reply` → `client.push` 原微信回复。
+- 新 Go 端点 `/littly/api/channel/inbound`：EnsureContact → HandleChannelChat。
+- compose `littly-wechat` + volume；nginx `/littly/wechat/` 代理 bridge。
+- UI 恢复老版微信页（二维码/状态/登出），shim 映射 `/api/wechat/*`。
+- 实测：`/littly/wechat/qr/start` 返回真实 `data:image/png;base64...` 二维码；`/littly/api/channel/inbound` 实测她把微信测试消息回进聊天（生成 wechat 联系人）。
+
 ## UI：复用老版控制台（v2.1.0）
 
 - 单前端：`docker/Dockerfile.web.local` 只复制 `docker/littly-console`，不再构建/部署 apps/web；`/login` 等旧前端路径 404。
