@@ -221,6 +221,13 @@ GET /littly/ → 200
 - 当前状态：OneBot WS 在 QQ 登录前不监听，`/api/health` 显示 `connected:false, last_error: connection refused`；扫码入口已可用，登录后自动重连。
 - 用户操作：打开 `http://127.0.0.1:6081/vnc.html` 扫码，再把 QQ 号填入设置页。
 
+## 语音通话（浏览器原生适配）
+
+- 复用老版 `CallOverlay` 的 UI/交互；把原版 Deepgram STT + Fish TTS 的 `/call` 管线替换成浏览器原生 `SpeechRecognition` / `SpeechSynthesis`，避免依赖额外语音 key。
+- 流程：麦克风 → 中文实时字幕 → `/littly/api/chat` → 回复 → 语音合成朗读；对话仍进她的消息/记忆。
+- 建议 Chrome / Edge；headless 环境无法验证麦克风与语音识别，需要真实浏览器人工测试。
+- 原版管线（Deepgram + Fish，需要 key）在老项目 `harness/packages/littly/voice-call`，后续可按 key 切换。
+
 ## 微信扫码（openilink iLink）
 
 - `wechat-bridge/`：Node bridge，依赖 `@openilink/openilink-sdk-node` + `qrcode`。

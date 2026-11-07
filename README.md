@@ -65,6 +65,13 @@ go build ./cmd/agent
 - `docker/nginx-app.conf`：`/` → `/littly/`；`/settings`、`/bots` 重定向。
 - `docs/v2/`：完整设计文档（产品/架构/数据模型/生活引擎/记忆/人格回复/心跳/UI/测试/构建）。
 
+## 语音通话（浏览器原生版）
+
+- 对话页右上角「通话」打开原版通话浮层。
+- 链路：麦克风 → 浏览器 SpeechRecognition（中文实时字幕）→ 她的 `/littly/api/chat` → 回复 → 浏览器 SpeechSynthesis 读出来。
+- 不需要 Deepgram/Fish key；建议 Chrome / Edge，需要麦克风权限。
+- 老版原实现是 Deepgram STT + Fish 流式 TTS（需要两个 key）。如果提供 key，可以换回原版 `/call` WebSocket 管线。
+
 ## 渠道（直接复用 Memoh adapters）
 
 - **微信扫码**：`wechat-bridge/` 直接调用 openilink iLink SDK（与 openilink-hub 同一套扫码流程）：出二维码 → 手机扫码 → 长轮询监听 → 入站转发 /littly/api/channel/inbound → 她的聊天 → SDK push 原微信回复。
