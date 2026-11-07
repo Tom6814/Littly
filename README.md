@@ -65,6 +65,14 @@ go build ./cmd/agent
 - `docker/nginx-app.conf`：`/` → `/littly/`；`/settings`、`/bots` 重定向。
 - `docs/v2/`：完整设计文档（产品/架构/数据模型/生活引擎/记忆/人格回复/心跳/UI/测试/构建）。
 
+## 她自己的账号（B 站 / X）
+
+- 「世界 → 账号」粘贴 B 站 / X 的 Cookie，写进她自己的持久浏览器 profile；登录一次即可。
+- 工具：`bili_hot` `bili_search` `bili_video` `bili_comments` `bili_account` `bili_post` `bili_comment` `bili_like` `bili_profile` `x_view` `x_post` `browser_do`。
+- 写操作（发动态/评论/点赞/改昵称签名/发推）全部在她自己的浏览器会话里执行，不需要用户确认；账号是她自己的，她按自己的判断行动。
+- 浏览器 profile 落 `browser_data` 卷；`/littly/api/browser/eval`、`/littly/api/browser/cookies` 供工具和账号页使用。
+- 提示词已加入“自己的兴趣/自己的账号/自己决定”，心跳里明确可以自己刷 B 站/推特，不必问主人。
+
 ## 语音通话（原版管线）
 
 - 对话页右上角「通话」→ 原版 CallOverlay。

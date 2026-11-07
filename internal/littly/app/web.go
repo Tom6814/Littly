@@ -82,6 +82,8 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.POST("/approvals/:id/deny", h.deny)
 	api.POST("/browser", h.browser)
 	api.GET("/browser/status", h.browserStatus)
+	api.POST("/browser/eval", h.browserEval)
+	api.POST("/browser/cookies", h.browserCookies)
 	api.GET("/events", h.events)
 	api.GET("/heartbeat", h.heartbeatInfo)
 	api.POST("/heartbeat", h.heartbeatControl)
@@ -595,6 +597,45 @@ func (h *Handler) browser(c echo.Context) error {
 	out, err := h.svc.Browse(c.Request().Context(), body.URL, body.Screenshot)
 	if err != nil {
 		return jsonErr(c, 502, "browser failed", err)
+	}
+	return c.JSON(200, out)
+}
+
+func (h *Handler) browserCookies(c echo.Context) error {
+	var body struct {
+		Cookies []BrowserCookie `json:"cookies"`
+		Header   string          `json:"header"`
+		Domain   string          `json:"domain"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return jsonErr(c, 400, "bad json", err)
+	}
+	cookies := body.Cookies
+	if body.Header != "" {
+		domain := body.Domain
+		if domain == "" {
+			domain = ".bilibili.com"
+		}
+		cookies = append(cookies, ParseCookieHeader(domain, body.Header)...)
+	}
+	n, err := h.svc.SetBrowserCookies(c.Request().Context(), cookies)
+	if err != nil {
+		return jsonErr(c, 502, "set cookies failed", err)
+	}
+	return c.JSON(200, map[string]any{"ok": true, "set": n})
+}
+
+func (h *Handler) browserEval(c echo.Context) error {
+	var body struct {
+		URL    string `json:"url"`
+		Script string `json:"script"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return jsonErr(c, 400, "bad json", err)
+	}
+	out, err := h.svc.BrowserEval(c.Request().Context(), body.URL, body.Script, false)
+	if err != nil {
+		return jsonErr(c, 502, "browser eval failed", err)
 	}
 	return c.JSON(200, out)
 }

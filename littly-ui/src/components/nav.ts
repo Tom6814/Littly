@@ -12,6 +12,7 @@ import {
   MessageCircle,
   Send,
   Gamepad2,
+  KeyRound,
 } from 'lucide-vue-next'
 
 export interface NavLeaf { to: string; label: string; icon: Component }
@@ -27,6 +28,7 @@ export const NAV_GROUPS: NavGroup[] = [
   { label: '记忆', items: [{ to: '/memory', label: '记忆', icon: Brain }] },
   { label: '世界', items: [
     { to: '/contacts', label: '联系人', icon: Users },
+    { to: '/accounts', label: '账号', icon: KeyRound },
     { to: '/channels/wechat', label: '微信', icon: MessageCircle },
     { to: '/channels/feishu', label: '飞书', icon: Send },
     { to: '/channels/telegram', label: 'Telegram', icon: Send },

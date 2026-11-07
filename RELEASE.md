@@ -8,6 +8,7 @@ Memoh 硬分叉 + Littly v2 核心：
 
 - **老版控制台 UI（唯一前端）**：`/littly/` 复用老版 Littly 控制台；Memoh 原前端已移除。
 - **微信扫码**：世界 → 微信 → 生成绑定二维码 → 手机扫码即可；bridge 基于 openilink iLink SDK，登录态持久化。
+- **B 站 / X 她自己的账号**：浏览器持久登录、发帖/评论/点赞/改资料，AI 自主决定；工具 + 账号页。
 - **语音通话（原版管线）**：PCM16 → Deepgram 流式 STT → 她的回复 → Fish 流式 TTS；需要 DEEPGRAM_API_KEY / FISH_AUDIO_API_KEY。
 - **单实例一个人**：核心 server 拦截第二次 bot 创建；数据按 `owner` 单例。
 - **人格**：traits / SELF / 说话方式 / 边界；`system.littly_persona` 注入 Memoh 原生 agent。

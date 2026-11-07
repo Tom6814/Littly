@@ -221,6 +221,17 @@ GET /littly/ → 200
 - 当前状态：OneBot WS 在 QQ 登录前不监听，`/api/health` 显示 `connected:false, last_error: connection refused`；扫码入口已可用，登录后自动重连。
 - 用户操作：打开 `http://127.0.0.1:6081/vnc.html` 扫码，再把 QQ 号填入设置页。
 
+## B 站 / X 自主账号
+
+- 工具（Go，`internal/littly/app/{bili,social_write,browser_eval,browser_cookies}.go`）：
+  - 读：`bili_hot`/`bili_search`/`bili_video`/`bili_comments`/`bili_account`/`x_view`/`browser_open`。
+  - 写：`bili_post`（动态）、`bili_comment`、`bili_like`、`bili_profile`（昵称/签名）、`x_post`。
+  - 底层：浏览器 eval（页面内同源 fetch，带她已登录的 Cookie）+ `/littly/api/browser/cookies` 导入登录态。
+- 持久浏览器 profile：compose `browser_data:/data` + `--user-data-dir=/data/profile`。
+- 账号页（世界 → 账号）：粘贴 B 站/X Cookie；检查登录。
+- 提示词：`<interests>`/`<agency>` + heartbeat 规则，明确“自己的账号自己决定，不要用户确认”。
+- 实测：bili_hot 真实返回热门；浏览器 eval 可达 B 站 nav（未登录返回 -101）；账号页已截图。写操作需先导入登录 Cookie 才能实机验证。
+
 ## 语音通话（原版管线）
 
 - `voice-bridge/`：把老项目 `voice-call/deepgram.ts` + `call-server.ts` 的音频链路搬成独立 Node 服务（`ws`）。

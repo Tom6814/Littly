@@ -59,6 +59,18 @@ func (s *Service) toolSpecs() []llm.Tool {
 		t("activity_start", "开始做一件自己的事", schema(map[string]any{"kind": pString("learn|research|organize|write|create|maintain|social|rest"), "title": pString("做什么"), "detail": pString("可选的计划")}, "kind", "title")),
 		t("activity_finish", "结束当前活动", schema(map[string]any{"id": pString("活动 id（可空=当前）"), "summary": pString("结果"), "progress": pInt("0-100")})),
 		t("terminal_exec", "在她的电脑（工作台目录）执行 shell 命令；用于真正的动手做事", schema(map[string]any{"command": pString("shell 命令"), "timeout_seconds": pInt("超时秒数，默认 10，最大 30")}, "command")),
+		t("bili_hot", "刷 B 站热门（她自己看）", schema(map[string]any{"limit": pInt("条数 1-30")})),
+		t("bili_search", "搜索 B 站视频", schema(map[string]any{"keyword": pString("关键词"), "limit": pInt("1-20")}, "keyword")),
+		t("bili_video", "看一个 B 站视频的标题/UP/简介/数据", schema(map[string]any{"bvid": pString("BV 号或视频 URL")}, "bvid")),
+		t("bili_comments", "读一个 B 站视频的热门评论", schema(map[string]any{"bvid": pString("BV 号"), "limit": pInt("1-20")}, "bvid")),
+		t("x_view", "用她的浏览器看推特（搜索词或 URL）", schema(map[string]any{"target": pString("搜索词或 x.com URL")}, "target")),
+		t("browser_do", "在她的浏览器里执行 JS（可以用她已登录的账号点击/输入/调用同源 API；她自己的账号，自己决定）", schema(map[string]any{"url": pString("页面 URL"), "script": pString("async 函数体 JS")}, "url", "script")),
+		t("x_post", "用她已登录的 X 账号发一条推文", schema(map[string]any{"text": pString("推文内容")}, "text")),
+		t("bili_account", "查看她 B 站账号资料（需要浏览器已登录 B 站）", schema(map[string]any{})),
+		t("bili_comment", "用她自己的 B 站账号给视频发评论", schema(map[string]any{"bvid": pString("BV 号"), "text": pString("评论内容")}, "bvid", "text")),
+		t("bili_like", "用她自己的 B 站账号给视频点赞/取消赞", schema(map[string]any{"bvid": pString("BV 号"), "like": map[string]any{"type": "boolean"}}, "bvid")),
+		t("bili_profile", "修改她自己的 B 站昵称/签名", schema(map[string]any{"uname": pString("昵称，可空"), "sign": pString("个性签名，可空")})),
+		t("bili_post", "用她自己的 B 站账号发一条动态", schema(map[string]any{"text": pString("动态内容")}, "text")),
 		t("browser_open", "用她的浏览器打开网页，读正文；可选截图存证", schema(map[string]any{"url": pString("http(s) URL"), "screenshot": map[string]any{"type": "boolean", "description": "是否截图"}}, "url")),
 		t("web_fetch", "抓取一个网页（只读文本）", schema(map[string]any{"url": pString("https URL")}, "url")),
 	}
@@ -156,6 +168,37 @@ func (s *Service) execTool(ctx context.Context, name, args, actorID, convID stri
 		return s.toolActivityFinish(str("id"), str("summary"), integer("progress"))
 	case "terminal_exec":
 		return s.runTerminal(ctx, str("command"), integer("timeout_seconds"))
+	case "bili_hot":
+		return s.biliHot(ctx, integer("limit"))
+	case "bili_search":
+		return s.biliSearch(ctx, str("keyword"), integer("limit"))
+	case "bili_video":
+		return s.biliVideo(ctx, str("bvid"))
+	case "bili_comments":
+		return s.biliComments(ctx, str("bvid"), integer("limit"))
+	case "x_view":
+		return s.xView(ctx, str("target"))
+	case "browser_do":
+		out, err := s.BrowserEval(ctx, str("url"), str("script"), false)
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(out["result"])
+		return string(b), nil
+	case "x_post":
+		return s.xPost(ctx, str("text"))
+	case "bili_account":
+		return s.biliAccount(ctx)
+	case "bili_comment":
+		return s.biliComment(ctx, str("bvid"), str("text"))
+	case "bili_like":
+		like := true
+		if v, ok := in["like"].(bool); ok { like = v }
+		return s.biliLike(ctx, str("bvid"), like)
+	case "bili_profile":
+		return s.biliProfile(ctx, str("uname"), str("sign"))
+	case "bili_post":
+		return s.biliPost(ctx, str("text"))
 	case "browser_open":
 		out, err := s.Browse(ctx, str("url"), in["screenshot"] == true)
 		if err != nil {

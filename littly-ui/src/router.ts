@@ -60,6 +60,8 @@ const routes: RouteRecordRaw[] = [
 
   { path: '/channels/feishu', name: 'channel-feishu', component: () => import('@/pages/channels/FeishuPage.vue'), meta: { title: '飞书' } },
   { path: '/channels/slack', name: 'channel-slack', component: () => import('@/pages/channels/SlackPage.vue'), meta: { title: 'Slack' } },
+  { path: '/accounts', name: 'accounts', component: () => import('@/pages/accounts/AccountsPage.vue'), meta: { title: '账号' } },
+
   // 系统
   { path: '/system/overview', name: 'system-overview', component: () => import('@/pages/system/OverviewPage.vue'), meta: { title: '概览' } },
   { path: '/system/settings', name: 'system-settings', component: () => import('@/pages/system/SettingsPage.vue'), meta: { title: '设置' } },
