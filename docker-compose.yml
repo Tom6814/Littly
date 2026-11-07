@@ -81,6 +81,7 @@ services:
       MEMOH_INTERNAL_RPC_SHARED_SECRET: "${MEMOH_INTERNAL_RPC_SHARED_SECRET:?MEMOH_INTERNAL_RPC_SHARED_SECRET is required}"
       LITTLY_API_KEY: "${LITTLY_API_KEY:-}"
       LITTLY_DATA_DIR: "/opt/memoh/data/littly"
+      VOICE_TOKEN_SECRET: "${VOICE_TOKEN_SECRET:-littly-local-voice-secret}"
       MEMOH_AGENT_CREDENTIALS_ENCRYPTION_KEY: "${MEMOH_AGENT_CREDENTIALS_ENCRYPTION_KEY:-}"
       MEMOH_INTERNAL_RPC_SERVER_TARGET: "server:9090"
       MEMOH_INTERNAL_RPC_CHANNEL_TARGET: "channel:9091"
@@ -134,6 +135,7 @@ services:
       MEMOH_INTERNAL_RPC_SHARED_SECRET: "${MEMOH_INTERNAL_RPC_SHARED_SECRET:?MEMOH_INTERNAL_RPC_SHARED_SECRET is required}"
       LITTLY_API_KEY: "${LITTLY_API_KEY:-}"
       LITTLY_DATA_DIR: "/opt/memoh/data/littly"
+      VOICE_TOKEN_SECRET: "${VOICE_TOKEN_SECRET:-littly-local-voice-secret}"
       MEMOH_INTERNAL_RPC_SERVER_TARGET: "server:9090"
       MEMOH_INTERNAL_RPC_CHANNEL_TARGET: "channel:9091"
       MEMOH_WEBHOOK_TUNNEL_MODE: "${MEMOH_WEBHOOK_TUNNEL_MODE:-}"
@@ -223,6 +225,22 @@ services:
     shm_size: "512m"
     ports:
       - "127.0.0.1:6082:6081"
+    restart: unless-stopped
+    networks:
+      - memoh-network
+
+  voice-bridge:
+    image: memohai/voice-bridge:latest
+    container_name: littly-voice
+    environment:
+      LITTLY_CORE_URL: "http://memoh-server:8080"
+      VOICE_TOKEN_SECRET: "${VOICE_TOKEN_SECRET:-littly-local-voice-secret}"
+      DEEPGRAM_API_KEY: "${DEEPGRAM_API_KEY:-}"
+      FISH_AUDIO_API_KEY: "${FISH_AUDIO_API_KEY:-}"
+      FISH_AUDIO_MODEL: "${FISH_AUDIO_MODEL:-s2.1-pro-free}"
+      FISH_AUDIO_REFERENCE_ID: "${FISH_AUDIO_REFERENCE_ID:-}"
+    expose:
+      - "3300"
     restart: unless-stopped
     networks:
       - memoh-network

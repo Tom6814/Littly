@@ -215,7 +215,11 @@
       if (path === '/api/settings/ai' && (method === 'PUT' || method === 'PATCH')) { const p = {}; if (body && body.chatModel) p.model = body.chatModel; await core('/config', { method: 'PUT', body: JSON.stringify(p) }); return json({ ok: true }) }
       if (path === '/api/settings/platform') return json({ registrationEnabled: false })
       if (path === '/api/stats/activity') return json(await stats())
-      if (path === '/api/call/requests') return json({ requests: [] })
+      if (path === '/api/call/token' && method === 'POST') {
+        const r = await origFetch('/littly/api/call/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        return json(await r.json())
+      }
+      if (path === '/api/call/requests') return json({ calls: [] })
       if (path.startsWith('/api/call/')) return json({ ok: true })
       if (path === '/api/persona-rules') return json({ content: '', enabled: true })
       if (path === '/api/bind/status') return json({ items: [] })

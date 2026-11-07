@@ -65,12 +65,22 @@ go build ./cmd/agent
 - `docker/nginx-app.conf`：`/` → `/littly/`；`/settings`、`/bots` 重定向。
 - `docs/v2/`：完整设计文档（产品/架构/数据模型/生活引擎/记忆/人格回复/心跳/UI/测试/构建）。
 
-## 语音通话（浏览器原生版）
+## 语音通话（原版管线）
 
-- 对话页右上角「通话」打开原版通话浮层。
-- 链路：麦克风 → 浏览器 SpeechRecognition（中文实时字幕）→ 她的 `/littly/api/chat` → 回复 → 浏览器 SpeechSynthesis 读出来。
-- 不需要 Deepgram/Fish key；建议 Chrome / Edge，需要麦克风权限。
-- 老版原实现是 Deepgram STT + Fish 流式 TTS（需要两个 key）。如果提供 key，可以换回原版 `/call` WebSocket 管线。
+- 对话页右上角「通话」→ 原版 CallOverlay。
+- 链路：麦克风 PCM16/16k → `/call` WebSocket → **Deepgram 流式 STT** → 她的聊天 → **Fish 流式 TTS** → 边合成边播放。
+- 需要两个 key，写进 `.env` 后重启 voice 服务：
+
+```bash
+DEEPGRAM_API_KEY=...
+FISH_AUDIO_API_KEY=...
+FISH_AUDIO_MODEL=s2.1-pro-free
+VOICE_TOKEN_SECRET=change-me
+docker compose up -d voice-bridge
+```
+
+- 会话结束会写入「语音通话」消息卡片和一次通话记忆。
+- `/call` 由 nginx 代理到 `littly-voice`；令牌由 `POST /littly/api/call/token` 签发（HMAC，120s）。
 
 ## 渠道（直接复用 Memoh adapters）
 

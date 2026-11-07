@@ -90,6 +90,8 @@ func (h *Handler) Register(e *echo.Echo) {
 	api.GET("/connections", h.connections)
 	api.PUT("/connections/:type", h.connectionUpdate)
 	api.POST("/channel/inbound", h.channelInbound)
+	api.POST("/call/token", h.callToken)
+	api.POST("/call/ended", h.callEnded)
 }
 
 func (h *Handler) health(c echo.Context) error {
@@ -663,6 +665,25 @@ func (h *Handler) dream(c echo.Context) error {
 		return jsonErr(c, 500, "dream failed", err)
 	}
 	return c.JSON(200, map[string]any{"dream": d})
+}
+
+func (h *Handler) callToken(c echo.Context) error {
+	token, ttl := h.svc.SignCallToken()
+	return c.JSON(200, map[string]any{"token": token, "expiresInMs": ttl})
+}
+
+func (h *Handler) callEnded(c echo.Context) error {
+	var body struct {
+		DurationSec int      `json:"duration_sec"`
+		Transcript  []string `json:"transcript"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return jsonErr(c, 400, "bad json", err)
+	}
+	if err := h.svc.OnCallEnded(c.Request().Context(), body.DurationSec, body.Transcript); err != nil {
+		return jsonErr(c, 500, "call end failed", err)
+	}
+	return c.JSON(200, map[string]any{"ok": true})
 }
 
 func (h *Handler) channelInbound(c echo.Context) error {

@@ -221,12 +221,16 @@ GET /littly/ → 200
 - 当前状态：OneBot WS 在 QQ 登录前不监听，`/api/health` 显示 `connected:false, last_error: connection refused`；扫码入口已可用，登录后自动重连。
 - 用户操作：打开 `http://127.0.0.1:6081/vnc.html` 扫码，再把 QQ 号填入设置页。
 
-## 语音通话（浏览器原生适配）
+## 语音通话（原版管线）
 
-- 复用老版 `CallOverlay` 的 UI/交互；把原版 Deepgram STT + Fish TTS 的 `/call` 管线替换成浏览器原生 `SpeechRecognition` / `SpeechSynthesis`，避免依赖额外语音 key。
-- 流程：麦克风 → 中文实时字幕 → `/littly/api/chat` → 回复 → 语音合成朗读；对话仍进她的消息/记忆。
-- 建议 Chrome / Edge；headless 环境无法验证麦克风与语音识别，需要真实浏览器人工测试。
-- 原版管线（Deepgram + Fish，需要 key）在老项目 `harness/packages/littly/voice-call`，后续可按 key 切换。
+- `voice-bridge/`：把老项目 `voice-call/deepgram.ts` + `call-server.ts` 的音频链路搬成独立 Node 服务（`ws`）。
+  - 浏览器 PCM16/16k → `/call` WS → Deepgram `nova-2` streaming（interim/final/UtteranceEnd + 800ms 兜底）。
+  - 一句话 → `POST /littly/api/chat` → `ai_text` → Fish `/v1/tts` 流式 MP3 分片 → `tts_chunk`（base64）。
+  - `interrupt`/`stop`、断线重连、KeepAlive；Deepgram 无 key 时给明确错误。
+- Go：`POST /littly/api/call/token` HMAC 120s 令牌；`POST /littly/api/call/ended` 落通话卡片消息 + 记忆。
+- nginx：`/call` 代理 `littly-voice:3300/call`；原版 CallOverlay 已恢复。
+- 依赖 key：`DEEPGRAM_API_KEY`、`FISH_AUDIO_API_KEY`（可选 `FISH_AUDIO_MODEL/REFERENCE_ID`、`VOICE_TOKEN_SECRET`）。
+- 已验证：令牌签发；nginx `/call` WS 到达 voice-bridge 并返回“Deepgram key 未配置”。真实语音链路需要 key 后测试。
 
 ## 微信扫码（openilink iLink）
 
